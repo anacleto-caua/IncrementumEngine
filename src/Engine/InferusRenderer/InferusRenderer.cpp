@@ -11,8 +11,6 @@
 #include "Engine/InferusRenderer/Image/ImageSystem.hpp"
 #include "Engine/InferusRenderer/Buffer/BufferSystem.hpp"
 
-using namespace VulkanContext; // Yes, I know
-
 InferusResult InferusRenderer::Create() {
     VulkanContext::Create();
     // Memory resources management systems
@@ -34,19 +32,19 @@ InferusResult InferusRenderer::Create() {
 
     SwapchainCreateInfo = {};
     SwapchainCreateInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    SwapchainCreateInfo.surface = Surface;
+    SwapchainCreateInfo.surface = VulkanContext::Surface;
     SwapchainCreateInfo.minImageCount = SwapchainImageCount;
-    SwapchainCreateInfo.imageFormat = SurfaceFormat.format;
-    SwapchainCreateInfo.imageColorSpace = SurfaceFormat.colorSpace;
+    SwapchainCreateInfo.imageFormat = VulkanContext::SurfaceFormat.format;
+    SwapchainCreateInfo.imageColorSpace = VulkanContext::SurfaceFormat.colorSpace;
     SwapchainCreateInfo.imageArrayLayers = 1;
     SwapchainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     SwapchainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    SwapchainCreateInfo.presentMode = PresentMode;
+    SwapchainCreateInfo.presentMode = VulkanContext::PresentMode;
     SwapchainCreateInfo.clipped = VK_TRUE;
     SwapchainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
 
-    uint32_t QueueFamilyIndices[] = { Graphics.Index, Present.Index };
-    if (Graphics.Index != Present.Index) {
+    uint32_t QueueFamilyIndices[] = { VulkanContext::Graphics.Index, VulkanContext::Present.Index };
+    if (VulkanContext::Graphics.Index != VulkanContext::Present.Index) {
         SwapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
         SwapchainCreateInfo.queueFamilyIndexCount = 2;
         SwapchainCreateInfo.pQueueFamilyIndices = QueueFamilyIndices;
@@ -79,7 +77,7 @@ InferusResult InferusRenderer::Create() {
         VkCommandPoolCreateInfo CommandPoolCreateInfo {};
         CommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         CommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        CommandPoolCreateInfo.queueFamilyIndex = Graphics.Index;
+        CommandPoolCreateInfo.queueFamilyIndex = VulkanContext::Graphics.Index;
 
         VkCommandBufferAllocateInfo AllocInfo {};
         AllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -88,12 +86,12 @@ InferusResult InferusRenderer::Create() {
         AllocInfo.commandBufferCount = 1;
 
         for (FrameData &Frame : Frames) {
-            vkCreateSemaphore(Device, &SemaphoreCreateInfo, nullptr, &Frame.ImageAvailable);
-            vkCreateFence(Device, &FenceCreateInfo, nullptr, &Frame.InFlight);
+            vkCreateSemaphore(VulkanContext::Device, &SemaphoreCreateInfo, nullptr, &Frame.ImageAvailable);
+            vkCreateFence(VulkanContext::Device, &FenceCreateInfo, nullptr, &Frame.InFlight);
 
-            vkCreateCommandPool(Device, &CommandPoolCreateInfo, nullptr, &Frame.CmdPool);
+            vkCreateCommandPool(VulkanContext::Device, &CommandPoolCreateInfo, nullptr, &Frame.CmdPool);
             AllocInfo.commandPool = Frame.CmdPool;
-            vkAllocateCommandBuffers(Device, &AllocInfo, &Frame.CmdBuffer);
+            vkAllocateCommandBuffers(VulkanContext::Device, &AllocInfo, &Frame.CmdBuffer);
         }
     }
 
@@ -153,7 +151,7 @@ InferusResult InferusRenderer::Create() {
 }
 
 void InferusRenderer::Destroy() {
-    vkDeviceWaitIdle(Device);
+    vkDeviceWaitIdle(VulkanContext::Device);
 
     TerrainRenderer.Destroy();
     ImGuiRenderer::Destroy();
@@ -162,9 +160,9 @@ void InferusRenderer::Destroy() {
     ImageSystem::Destroy();
 
     for (FrameData &Frame : Frames) {
-        if (Frame.ImageAvailable) { vkDestroySemaphore(Device, Frame.ImageAvailable, nullptr); }
-        if (Frame.InFlight) { vkDestroyFence(Device, Frame.InFlight, nullptr); }
-        if (Frame.CmdPool) { vkDestroyCommandPool(Device, Frame.CmdPool, nullptr); }
+        if (Frame.ImageAvailable) { vkDestroySemaphore(VulkanContext::Device, Frame.ImageAvailable, nullptr); }
+        if (Frame.InFlight) { vkDestroyFence(VulkanContext::Device, Frame.InFlight, nullptr); }
+        if (Frame.CmdPool) { vkDestroyCommandPool(VulkanContext::Device, Frame.CmdPool, nullptr); }
     }
 
     CleanupSwapchainImages();
@@ -175,18 +173,18 @@ void InferusRenderer::Destroy() {
 
 // TODO: Make this async
 void InferusRenderer::RecreateSwapchain(VkSwapchainKHR OldSwapchain) {
-    vkDeviceWaitIdle(Device);
+    vkDeviceWaitIdle(VulkanContext::Device);
     SwapchainCreateInfo.imageExtent = Extent;
     SwapchainCreateInfo.oldSwapchain = OldSwapchain;
     SwapchainCreateInfo.preTransform = SurfaceCapabilities.currentTransform;
 
-    if (vkCreateSwapchainKHR(Device, &SwapchainCreateInfo, nullptr, &Swapchain) != VK_SUCCESS) {
+    if (vkCreateSwapchainKHR(VulkanContext::Device, &SwapchainCreateInfo, nullptr, &Swapchain) != VK_SUCCESS) {
         throw std::runtime_error("Swapchain creation failed");
     }
 
-    vkGetSwapchainImagesKHR(Device, Swapchain, &SwapchainImageCount, nullptr);
+    vkGetSwapchainImagesKHR(VulkanContext::Device, Swapchain, &SwapchainImageCount, nullptr);
     std::vector<VkImage> ImagesTemp(SwapchainImageCount);
-    vkGetSwapchainImagesKHR(Device, Swapchain, &SwapchainImageCount, ImagesTemp.data());
+    vkGetSwapchainImagesKHR(VulkanContext::Device, Swapchain, &SwapchainImageCount, ImagesTemp.data());
     SwapchainImages.resize(SwapchainImageCount);
 
     CleanupSwapchainImages();
@@ -195,10 +193,10 @@ void InferusRenderer::RecreateSwapchain(VkSwapchainKHR OldSwapchain) {
     for (uint32_t i = 0; i < SwapchainImageCount; i++) {
         SwapchainImages[i].Image = ImagesTemp[i];
         VkImageViewCreateInfo ImageViewCreateInfo =
-            Recipes::ImageViewCreateInfo::Swapchain(SwapchainImages[i].Image, SurfaceFormat.format);
+            Recipes::ImageViewCreateInfo::Swapchain(SwapchainImages[i].Image, VulkanContext::SurfaceFormat.format);
         if (
-            vkCreateImageView(Device, &ImageViewCreateInfo, nullptr, &SwapchainImages[i].ImageView) != VK_SUCCESS ||
-            vkCreateSemaphore(Device, &SemaphoreCreateInfo, nullptr, &SwapchainImages[i].RenderFinished) != VK_SUCCESS
+            vkCreateImageView(VulkanContext::Device, &ImageViewCreateInfo, nullptr, &SwapchainImages[i].ImageView) != VK_SUCCESS ||
+            vkCreateSemaphore(VulkanContext::Device, &SemaphoreCreateInfo, nullptr, &SwapchainImages[i].RenderFinished) != VK_SUCCESS
         ) {
             throw std::runtime_error("Swapchain's Image, ImageView or Semaphore creation failed");
         }
@@ -207,23 +205,23 @@ void InferusRenderer::RecreateSwapchain(VkSwapchainKHR OldSwapchain) {
 }
 
 void InferusRenderer::DestroySwapchain(VkSwapchainKHR OldSwapchain) {
-    if (Swapchain) { vkDestroySwapchainKHR(Device, OldSwapchain, nullptr); }
+    if (Swapchain) { vkDestroySwapchainKHR(VulkanContext::Device, OldSwapchain, nullptr); }
 }
 
 void InferusRenderer::CleanupSwapchainImages() {
     for (SwapchainImage& SwpchImage : SwapchainImages) {
-        if (SwpchImage.ImageView) { vkDestroyImageView(Device, SwpchImage.ImageView, nullptr); }
-        if (SwpchImage.RenderFinished) { vkDestroySemaphore(Device, SwpchImage.RenderFinished, nullptr); }
+        if (SwpchImage.ImageView) { vkDestroyImageView(VulkanContext::Device, SwpchImage.ImageView, nullptr); }
+        if (SwpchImage.RenderFinished) { vkDestroySemaphore(VulkanContext::Device, SwpchImage.RenderFinished, nullptr); }
     }
 }
 
 void InferusRenderer::QuerySurfaceCapabilities() {
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(PhysicalDevice, Surface, &SurfaceCapabilities);
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(VulkanContext::PhysicalDevice, VulkanContext::Surface, &SurfaceCapabilities);
 }
 
 void InferusRenderer::Resize(uint32_t Width, uint32_t Height) {
     if (Width == 0 || Height == 0) return;
-    vkDeviceWaitIdle(Device);
+    vkDeviceWaitIdle(VulkanContext::Device);
     QuerySurfaceCapabilities();
     VkExtent2D MinExtent = SurfaceCapabilities.minImageExtent;
     VkExtent2D MaxExtent = SurfaceCapabilities.maxImageExtent;
@@ -247,10 +245,10 @@ void InferusRenderer::LateRender() {
     FrameData& TargetFrame = Frames[TargetFrameIndex];
     VkCommandBuffer& cmd = TargetFrame.CmdBuffer;
 
-    vkWaitForFences(Device, 1, &TargetFrame.InFlight, VK_TRUE, UINT64_MAX);
+    vkWaitForFences(VulkanContext::Device, 1, &TargetFrame.InFlight, VK_TRUE, UINT64_MAX);
 
     VkResult result = vkAcquireNextImageKHR(
-        Device,
+        VulkanContext::Device,
         Swapchain,
         UINT64_MAX,
         TargetFrame.ImageAvailable,
@@ -264,7 +262,7 @@ void InferusRenderer::LateRender() {
     vkResetCommandBuffer(cmd, 0);
     vkBeginCommandBuffer(cmd, &PipelineCmdBeginInfo);
 
-    vkResetFences(Device, 1, &TargetFrame.InFlight);
+    vkResetFences(VulkanContext::Device, 1, &TargetFrame.InFlight);
 
     VkImageMemoryBarrier RenderingBarrier =
         Recipes::ImageMemoryBarrier::Rendering::EnableRendering(SwapchainImages[TargetImageViewIndex].Image);
@@ -322,8 +320,8 @@ void InferusRenderer::LateRender() {
 
     PresentInfo.pWaitSemaphores = RenderSignalSemaphores;
 
-    vkQueueSubmit(Graphics.Queue, 1, &PipelineCmdSubmitInfo, TargetFrame.InFlight);
-    vkQueuePresentKHR(Present.Queue, &PresentInfo);
+    vkQueueSubmit(VulkanContext::Graphics.Queue, 1, &PipelineCmdSubmitInfo, TargetFrame.InFlight);
+    vkQueuePresentKHR(VulkanContext::Present.Queue, &PresentInfo);
 
     TargetFrameIndex = (TargetFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
 }
