@@ -48,17 +48,15 @@ namespace InferusEngine {
             float DeltaTime = DeltaTimeRaw.count();
             LastFrameTime = FrameBegin;
 
-            InferusRenderer.EarlyRender();
             Camera.Update(DeltaTime);
             Window::Update();
             TerrainSystem::Update();
-            OutFps(DeltaTime);
+            InferusRenderer.Render();
             Input::PollInput();
-
-            InferusRenderer.LateRender();
 
             auto FrameEnd = std::chrono::high_resolution_clock::now();
             auto ElapsedTime = FrameBegin - FrameEnd;
+            OutFps(DeltaTime);
 
             if ( ElapsedTime < FRAME_TARGET_TIME ) {
                 std::this_thread::sleep_for(FRAME_TARGET_TIME - ElapsedTime);

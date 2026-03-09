@@ -237,11 +237,7 @@ void InferusRenderer::Resize(uint32_t Width, uint32_t Height) {
     RecreateSwapchain(Swapchain);
 }
 
-void InferusRenderer::EarlyRender() {
-    ImGuiRenderer::EarlyRender();
-}
-
-void InferusRenderer::LateRender() {
+void InferusRenderer::Render() {
     FrameData& TargetFrame = Frames[TargetFrameIndex];
     VkCommandBuffer& cmd = TargetFrame.CmdBuffer;
 
@@ -288,7 +284,7 @@ void InferusRenderer::LateRender() {
 
     TerrainRenderer.Render(cmd);
 
-    ImGuiRenderer::LateRender(cmd);
+    ImGuiRenderer::Render(cmd);
 
     // Actual frame ends
 

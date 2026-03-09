@@ -12,6 +12,5 @@ namespace ImGuiRenderer {
     InferusResult Create(InferusRenderer& InferusRenderer);
     void Destroy();
 
-    void EarlyRender();
-    void LateRender(VkCommandBuffer cmd);
+    void Render(VkCommandBuffer cmd);
 };

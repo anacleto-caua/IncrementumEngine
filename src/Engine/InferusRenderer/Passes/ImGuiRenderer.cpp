@@ -11,6 +11,12 @@
 #include "Engine/InferusRenderer/InferusRenderer.hpp"
 
 namespace ImGuiRenderer {
+    void OpenUIContext() {
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+    }
+
     InferusResult Create(InferusRenderer& InferusRenderer) {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
@@ -52,6 +58,7 @@ namespace ImGuiRenderer {
         InitInfo.MinAllocationSize = 1024 * 1024; // To satisfaz zealous best practices validation layer and waste a little memory.
 
         ImGui_ImplVulkan_Init(&InitInfo);
+        OpenUIContext();
 
         return InferusResult::SUCCESS;
     }
@@ -62,14 +69,9 @@ namespace ImGuiRenderer {
         ImGui::DestroyContext();
     }
 
-    void EarlyRender() {
-        ImGui_ImplVulkan_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-    }
-
-    void LateRender(VkCommandBuffer cmd) {
+    void Render(VkCommandBuffer cmd) {
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+        OpenUIContext();
     }
 }

@@ -69,8 +69,7 @@ public:
     InferusResult Create();
     void Destroy();
 
-    void EarlyRender();
-    void LateRender();
+    void Render();
 
     void Resize(uint32_t Width, uint32_t Height);
 
