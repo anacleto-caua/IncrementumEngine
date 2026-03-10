@@ -77,14 +77,14 @@ void Camera3D::Update(float DeltaTime) {
             (Vector3::UP * FrameMovement.y);
         AllignedMovement = glm::normalize(AllignedMovement);
 
-        Position += AllignedMovement * SPEED * DeltaTime;
+        Position -= AllignedMovement * SPEED * DeltaTime;
         FrameMovement = Vector3::ZERO;
         ShallMove = true;
     }
 
     if (Input::Mouse::XDelta != 0 || Input::Mouse::YDelta != 0) {
-        Pitch += Input::Mouse::YDelta * PITCH_SENSIBILITY * DeltaTime;
-        Yaw += Input::Mouse::XDelta * YAW_SENSIBILITY * DeltaTime;
+        Pitch -= Input::Mouse::YDelta * PITCH_SENSIBILITY * DeltaTime;
+        Yaw -= Input::Mouse::XDelta * YAW_SENSIBILITY * DeltaTime;
 
         if (Pitch < PITCH_CLAMP_MIN) {
             Pitch = PITCH_CLAMP_MIN;
