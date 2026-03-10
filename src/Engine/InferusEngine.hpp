@@ -24,6 +24,5 @@ namespace InferusEngine {
     void Destroy();
 
     void Run();
-    void OutFps(float DeltaTime);
     void Resize(uint32_t Width, uint32_t Height);
 };
