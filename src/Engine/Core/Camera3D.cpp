@@ -39,6 +39,11 @@ void Camera3D::Init(float CurrAspect, glm::mat4* pModelViewProjection) {
 
     Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Up, [this](void){ this->FrameMovement+=Vector3::UP; });
     Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Down, [this](void){ this->FrameMovement-=Vector3::UP; });
+
+    Input::Keyboard::RegisterCallback(Input::ActionType::Press, Input::Keyboard::Key::Shift,
+        [this](void){ this->IsRunning = true; });
+    Input::Keyboard::RegisterCallback(Input::ActionType::Release, Input::Keyboard::Key::Shift,
+        [this](void){ this->IsRunning = false; });
 }
 
 Camera3D::~Camera3D(){
@@ -77,7 +82,7 @@ void Camera3D::Update(float DeltaTime) {
             (Vector3::UP * FrameMovement.y);
         AllignedMovement = glm::normalize(AllignedMovement);
 
-        Position -= AllignedMovement * SPEED * DeltaTime;
+        Position -= AllignedMovement * SPEED * DeltaTime * ( IsRunning ? RUNNING_MULT : 1 );
         FrameMovement = Vector3::ZERO;
         ShallMove = true;
     }

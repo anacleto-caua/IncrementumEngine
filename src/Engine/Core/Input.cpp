@@ -134,7 +134,8 @@ namespace Input {
             GLFW_KEY_E,
             GLFW_KEY_F,
             GLFW_KEY_ESCAPE,
-            GLFW_KEY_LEFT_CONTROL
+            GLFW_KEY_LEFT_CONTROL,
+            GLFW_KEY_LEFT_SHIFT
         };
 
         struct KeyState {

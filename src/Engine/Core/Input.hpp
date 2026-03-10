@@ -54,6 +54,7 @@ namespace Input {
             Interact,
             Escape,
             Ctrl,
+            Shift,
 
             _KEY_COUNT_
         };

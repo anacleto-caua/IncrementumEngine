@@ -8,6 +8,8 @@
 class Camera3D {
 public:
     static constexpr float SPEED = 20;
+    static constexpr float RUNNING_MULT = 3;
+    bool IsRunning = false;
 
     static constexpr float PITCH_SENSIBILITY = 10;
     static constexpr float YAW_SENSIBILITY = 15;
