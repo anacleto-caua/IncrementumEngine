@@ -28,7 +28,7 @@ namespace InferusEngine {
     Camera::Camera3D Camera;
 
     InferusResult Init(){
-        auto WindowResult = Window::Create(WIDTH, HEIGHT, ENGINE_NAME.data(), [](uint32_t w, uint32_t h){Resize(w, h);});
+        auto WindowResult = Window::Create(WIDTH, HEIGHT, ENGINE_NAME.data(), Resize);
 
         if (WindowResult != InferusResult::SUCCESS) {
             spdlog::error("Window creation failed.");
