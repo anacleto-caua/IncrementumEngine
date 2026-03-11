@@ -1,16 +1,32 @@
 #include "InferusEngine.hpp"
 
 #include <thread>
-#include <cstdint>
+#include <chrono>
+#include <string_view>
 
 #include <spdlog/spdlog.h>
 
 #include "Engine/Core/Input.hpp"
 #include "Engine/Core/Window.hpp"
+#include "Engine/Core/Camera.hpp"
 #include "Engine/ImGuiPacks/MainPack.hpp"
 #include "Engine/Systems/Terrain/TerrainSystem.hpp"
+#include "Engine/InferusRenderer/InferusRenderer.hpp"
 
 namespace InferusEngine {
+    static constexpr std::string_view ENGINE_NAME = "Inferus Engine";
+    static constexpr uint32_t WIDTH = 1280;
+    static constexpr uint32_t HEIGHT = 720;
+    static constexpr int TARGET_FPS = 165;
+    static constexpr int FOV = 110;
+
+    static constexpr std::chrono::duration<double> FRAME_TARGET_TIME{1.0 / TARGET_FPS};
+
+    InferusRenderer InferusRenderer;
+
+    bool ShouldClose = false;
+    Camera::Camera3D Camera;
+
     InferusResult Init(){
         auto WindowResult = Window::Create(WIDTH, HEIGHT, ENGINE_NAME.data(), [](uint32_t w, uint32_t h){Resize(w, h);});
 
@@ -29,7 +45,15 @@ namespace InferusEngine {
 
         TerrainSystem::Create(&Camera.Position);
         InferusRenderer.TerrainRenderer.FeedTerrainSystemPointers();
-        Camera.Init(float(WIDTH)/float(HEIGHT), &InferusRenderer.TerrainRenderer.TerrainPushConstants.CameraMVP);
+        Camera = Camera::CreateCamera3D(
+                    float(WIDTH)/float(HEIGHT),
+                    FOV,
+                    &InferusRenderer.TerrainRenderer.TerrainPushConstants.CameraMVP
+                );
+
+        Camera::FlyBy::Create(Camera);
+        Camera.Position.y = 10;
+        Camera::FlyBy::Update(0);
 
         return InferusResult::SUCCESS;
     }
@@ -51,7 +75,7 @@ namespace InferusEngine {
 
             AnaImGui::OutFps(DeltaTime);
 
-            Camera.Update(DeltaTime);
+            Camera::FlyBy::Update(DeltaTime);
             Window::Update();
             TerrainSystem::Update();
             InferusRenderer.Render();
@@ -67,9 +91,8 @@ namespace InferusEngine {
         Window::WaitEvents();
     }
 
-
     void Resize(uint32_t Width, uint32_t Height) {
         InferusRenderer.Resize(Width, Height);
-        Camera.Resize(float(Width)/float(Height));
+        Camera::Resize(Camera, float(Width)/float(Height));
     }
 };
