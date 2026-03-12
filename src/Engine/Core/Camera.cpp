@@ -96,8 +96,8 @@ namespace Camera {
             }
 
             if (Input::Mouse::XDelta != 0 || Input::Mouse::YDelta != 0) {
-                Pitch -= Input::Mouse::YDelta * PITCH_SENSIBILITY * DeltaTime;
-                Yaw += Input::Mouse::XDelta * YAW_SENSIBILITY * DeltaTime;
+                Pitch += Input::Mouse::YDelta * PITCH_SENSIBILITY * DeltaTime;
+                Yaw -= Input::Mouse::XDelta * YAW_SENSIBILITY * DeltaTime;
 
                 if (Pitch < PITCH_CLAMP_MIN) {
                     Pitch = PITCH_CLAMP_MIN;
