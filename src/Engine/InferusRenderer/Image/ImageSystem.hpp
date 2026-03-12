@@ -10,7 +10,7 @@ namespace ImageSystem {
 
         uint16_t depth = 1;
         uint8_t mipLevels = 1;
-        uint8_t arrayLayers = 1;
+        uint32_t arrayLayers = 1;
         VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
         VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     };
@@ -24,7 +24,7 @@ namespace ImageSystem {
         uint32_t height;
         uint16_t depth;
         uint8_t mipLevels;
-        uint8_t arrayLayers;
+        uint32_t arrayLayers;
         VkFormat format;
         VkImageLayout layout;
     };

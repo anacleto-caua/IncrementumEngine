@@ -125,7 +125,7 @@ namespace TerrainSystem {
 
         // TODO:
         // Kinda ugly they're on different loops and it's all in the main thread
-        for (uint16_t i = 0; i < TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT; i++) {
+        for (uint32_t i = 0; i < TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT; i++) {
             ChunkHeightmapLink cl = ChunkLinksBuffer_MappedMem[i];
             WriteChunk(cl.WorldPos, &HeightmapsBuffer_MappedMem[cl.InstanceId * TerrainConfig::Heightmap::HEIGHTMAP_IMAGE_PIXEL_COUNT]);
         }
