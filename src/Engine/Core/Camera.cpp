@@ -32,7 +32,7 @@ namespace Camera {
     }
 
     void Move(Camera3D &Camera) {
-        Camera.View = glm::lookAt(Camera.Position, Camera.Position-Camera.LookDir, Vector3::UP);
+        Camera.View = glm::lookAt(Camera.Position, Camera.Position+Camera.LookDir, Vector3::UP);
         RefreshMVP(Camera);
     }
 
@@ -90,14 +90,14 @@ namespace Camera {
                     (Vector3::UP * FrameMovement.y);
                 AllignedMovement = glm::normalize(AllignedMovement);
 
-                Camera->Position -= AllignedMovement * SPEED * DeltaTime * ( IsRunning ? RUNNING_MULT : 1 );
+                Camera->Position += AllignedMovement * SPEED * DeltaTime * ( IsRunning ? RUNNING_MULT : 1 );
                 FrameMovement = Vector3::ZERO;
                 ShallMove = true;
             }
 
             if (Input::Mouse::XDelta != 0 || Input::Mouse::YDelta != 0) {
                 Pitch -= Input::Mouse::YDelta * PITCH_SENSIBILITY * DeltaTime;
-                Yaw -= Input::Mouse::XDelta * YAW_SENSIBILITY * DeltaTime;
+                Yaw += Input::Mouse::XDelta * YAW_SENSIBILITY * DeltaTime;
 
                 if (Pitch < PITCH_CLAMP_MIN) {
                     Pitch = PITCH_CLAMP_MIN;
