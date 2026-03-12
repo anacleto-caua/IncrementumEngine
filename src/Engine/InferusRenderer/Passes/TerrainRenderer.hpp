@@ -4,11 +4,8 @@
 #include <glm/ext.hpp>
 #include <vulkan/vulkan.h>
 
-class InferusRenderer; // Circular dependency
-
 #include "Engine/Types.hpp"
-#include "Engine/Systems/Terrain/TerrainConfig.hpp"
-#include "Engine/InferusRenderer/Image/ImageSystem.hpp"
+#include "Engine/Core/Camera.hpp"
 #include "Engine/InferusRenderer/Buffer/BufferSystem.hpp"
 
 struct TerrainDescriptorSet {
@@ -22,45 +19,11 @@ struct TerrainPushConstants {
     glm::vec4 PlayerPosition;
 };
 
-class TerrainRenderer {
-public:
-    // Terrain plane mesh
-    BufferSystem::Id PlaneMeshIndexBufferId;
-    VkBuffer PlaneMeshIndexVkBuffer;
-
-    // Terrain pipeline
-    VkPipeline TerrainPipeline {};
-    VkPipelineLayout TerrainPipelineLayout {};
-
-    // Heightmap
-    ImageSystem::Id HeightmapImageId;
-    VkSampler HeightmapTextureSampler;
-    BufferSystem::Id Heightmap_CPU;
-
-    // Chunk to Heightmap linking
-    ChunkHeightmapLink ChunkHeightmapLinks[TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT];
-    BufferSystem::Id ChunkHeightmapLinks_CPU;
-    BufferSystem::Id ChunkHeightmapLinks_GPU;
-
-    // Terrain descriptor sets
-    TerrainDescriptorSet TerrainDescriptorSet {};
-
-    // Push constants
-    TerrainPushConstants TerrainPushConstants {};
-
-public:
-    TerrainRenderer() = default;
-    ~TerrainRenderer() = default;
-    TerrainRenderer(const TerrainRenderer&) = delete;
-    TerrainRenderer& operator=(const TerrainRenderer&) = delete;
-
-    InferusResult Init(BufferSystem::Id &CreationWiseStagingBufer);
+namespace TerrainRenderer {
+    InferusResult Create(BufferSystem::Id &CreationWiseStagingBufer);
     void FeedTerrainSystemPointers();
-
+    void BindCamera(Camera::Camera3D &Camera);
     void Destroy();
-
     void Render(VkCommandBuffer cmd);
 
-private:
-
-};
+}

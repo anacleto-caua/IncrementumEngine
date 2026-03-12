@@ -12,6 +12,7 @@
 #include "Engine/ImGuiPacks/MainPack.hpp"
 #include "Engine/Systems/Terrain/TerrainSystem.hpp"
 #include "Engine/InferusRenderer/InferusRenderer.hpp"
+#include "Engine/InferusRenderer/Passes/TerrainRenderer.hpp"
 
 namespace InferusEngine {
     static constexpr std::string_view ENGINE_NAME = "Inferus Engine";
@@ -44,12 +45,9 @@ namespace InferusEngine {
         }
 
         TerrainSystem::Create(&Camera.Position);
-        InferusRenderer.TerrainRenderer.FeedTerrainSystemPointers();
-        Camera = Camera::CreateCamera3D(
-                    float(WIDTH)/float(HEIGHT),
-                    FOV,
-                    &InferusRenderer.TerrainRenderer.TerrainPushConstants.CameraMVP
-                );
+        TerrainRenderer::FeedTerrainSystemPointers();
+        Camera = Camera::CreateCamera3D(float(WIDTH)/float(HEIGHT), FOV, nullptr);
+        TerrainRenderer::BindCamera(Camera);
 
         Camera::FlyBy::Create(Camera);
         Camera.Position.y = 10;

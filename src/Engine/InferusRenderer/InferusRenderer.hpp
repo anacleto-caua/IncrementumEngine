@@ -10,7 +10,6 @@
 
 #include "Engine/Types.hpp"
 #include "Engine/InferusRenderer/Passes/ImGuiRenderer.hpp"
-#include "Engine/InferusRenderer/Passes/TerrainRenderer.hpp"
 
 struct FrameData {
     float DeltaTime = 0;
@@ -56,9 +55,6 @@ public:
 
     VkCommandBufferBeginInfo PipelineCmdBeginInfo {};
     VkSubmitInfo PipelineCmdSubmitInfo {};
-
-    // "Passes"
-    TerrainRenderer TerrainRenderer;
 
 public:
     InferusRenderer() = default;

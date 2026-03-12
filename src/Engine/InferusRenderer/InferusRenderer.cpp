@@ -10,6 +10,7 @@
 #include "Engine/InferusRenderer/VulkanContext.hpp"
 #include "Engine/InferusRenderer/Image/ImageSystem.hpp"
 #include "Engine/InferusRenderer/Buffer/BufferSystem.hpp"
+#include "Engine/InferusRenderer/Passes/TerrainRenderer.hpp"
 
 InferusResult InferusRenderer::Create() {
     VulkanContext::Create();
@@ -142,7 +143,7 @@ InferusResult InferusRenderer::Create() {
     }
 
     if (
-        TerrainRenderer.Init(CreationWiseStagingBuffer) !=  InferusResult::SUCCESS
+        TerrainRenderer::Create(CreationWiseStagingBuffer) !=  InferusResult::SUCCESS
     ) {
         spdlog::error("Terrain Renderer creation failed");
         return InferusResult::FAIL;
@@ -153,7 +154,7 @@ InferusResult InferusRenderer::Create() {
 void InferusRenderer::Destroy() {
     vkDeviceWaitIdle(VulkanContext::Device);
 
-    TerrainRenderer.Destroy();
+    TerrainRenderer::Destroy();
     ImGuiRenderer::Destroy();
 
     BufferSystem::Destroy();
@@ -282,7 +283,7 @@ void InferusRenderer::Render() {
 
     // Actual frame begins
 
-    TerrainRenderer.Render(cmd);
+    TerrainRenderer::Render(cmd);
 
     ImGuiRenderer::Render(cmd);
 
