@@ -123,10 +123,5 @@ namespace Camera {
                 Move(*Camera);
             }
         }
-
-        glm::vec3* GetPositionPointer() {
-            return &Camera->Position;
-        }
-
     }
 }

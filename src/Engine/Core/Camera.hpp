@@ -21,6 +21,5 @@ namespace Camera {
     namespace FlyBy {
         void Create(Camera3D &Camera);
         void Update(float DeltaTime);
-        glm::vec3* GetPositionPointer();
     }
 }
