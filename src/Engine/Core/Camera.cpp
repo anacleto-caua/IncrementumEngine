@@ -32,7 +32,7 @@ namespace Camera {
     }
 
     void Move(Camera3D &Camera) {
-        Camera.View = glm::lookAtLH(Camera.Position, Camera.Position+Camera.LookDir, Vector3::UP);
+        Camera.View = glm::lookAt(Camera.Position, Camera.Position+Camera.LookDir, Vector3::UP);
         RefreshMVP(Camera);
     }
 
