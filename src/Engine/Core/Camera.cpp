@@ -32,7 +32,7 @@ namespace Camera {
     }
 
     void Move(Camera3D &Camera) {
-        Camera.View = glm::lookAt(Camera.Position, Camera.Position+Camera.LookDir, Vector3::UP);
+        Camera.View = glm::lookAtLH(Camera.Position, Camera.Position+Camera.LookDir, Vector3::UP);
         RefreshMVP(Camera);
     }
 
@@ -51,12 +51,19 @@ namespace Camera {
 
         glm::vec3 FrameMovement = Vector3::ZERO;
 
-        float Yaw = 90;
-        float Pitch = 0;
+        float Yaw = 0;
+        float Pitch = 45;
 
         bool IsRunning = false;
 
         Camera3D* Camera;
+
+        void ApplyRotation() {
+            Camera->LookDir.x = glm::cos(glm::radians(Yaw)) * glm::cos(glm::radians(Pitch));
+            Camera->LookDir.y = glm::sin(glm::radians(Pitch));
+            Camera->LookDir.z = glm::sin(glm::radians(Yaw)) * glm::cos(glm::radians(Pitch));
+            Camera->LookDir = glm::normalize(Camera->LookDir);
+        }
 
         void Create(Camera3D &bCamera) {
             Camera = &bCamera;
@@ -71,10 +78,12 @@ namespace Camera {
 
             Input::Keyboard::RegisterCallback(Input::ActionType::Press, Input::Keyboard::Key::Shift, [](void){ IsRunning = true; });
             Input::Keyboard::RegisterCallback(Input::ActionType::Release, Input::Keyboard::Key::Shift, [](void){ IsRunning = false; });
+            Update(0);
+            ApplyRotation();
         }
 
         void Update(float DeltaTime) {
-            bool ShallMove = false;
+            bool IsDirty = false;
 
             if (FrameMovement != Vector3::ZERO) {
                 FrameMovement = glm::normalize(FrameMovement);
@@ -92,7 +101,7 @@ namespace Camera {
 
                 Camera->Position += AllignedMovement * SPEED * DeltaTime * ( IsRunning ? RUNNING_MULT : 1 );
                 FrameMovement = Vector3::ZERO;
-                ShallMove = true;
+                IsDirty = true;
             }
 
             if (Input::Mouse::XDelta != 0 || Input::Mouse::YDelta != 0) {
@@ -112,14 +121,11 @@ namespace Camera {
                     Yaw = YAW_CLAMP_MIN;
                 }
 
-                Camera->LookDir.x = glm::cos(glm::radians(Yaw)) * glm::cos(glm::radians(Pitch));
-                Camera->LookDir.y = glm::sin(glm::radians(Pitch));
-                Camera->LookDir.z = glm::sin(glm::radians(Yaw)) * glm::cos(glm::radians(Pitch));
-                Camera->LookDir = glm::normalize(Camera->LookDir);
-                ShallMove = true;
+                ApplyRotation();
+                IsDirty = true;
             }
 
-            if (ShallMove) {
+            if (IsDirty) {
                 Move(*Camera);
             }
         }
