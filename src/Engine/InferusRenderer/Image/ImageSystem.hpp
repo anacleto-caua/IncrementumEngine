@@ -17,7 +17,6 @@ namespace ImageSystem {
 
     struct Image {
         VkImage image;
-        VkImageView imageView;
         VmaAllocation allocation;
 
         uint32_t width;
@@ -41,4 +40,19 @@ namespace ImageSystem {
     void del(Id id);
     void upload(Id id, void *data, size_t size);
 
+    VkImageViewCreateInfo fillDefaultImageViewCreateInfo(Image& image);
+
+    namespace View {
+        struct ImageView {
+            VkImageView imageView;
+        };
+
+        struct Id {
+            uint32_t index;
+        };
+
+        Id add(VkImageViewCreateInfo& createInfo);
+        ImageView& get(Id id);
+        void del(Id id);
+    };
 };

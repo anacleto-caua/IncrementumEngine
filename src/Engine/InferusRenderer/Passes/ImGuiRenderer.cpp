@@ -8,6 +8,7 @@
 
 #include "Engine/Core/Window.hpp"
 #include "Engine/InferusRenderer/VulkanContext.hpp"
+#include "Engine/InferusRenderer/RendererConfig.hpp"
 #include "Engine/InferusRenderer/InferusRenderer.hpp"
 
 namespace ImGuiRenderer {
@@ -35,8 +36,8 @@ namespace ImGuiRenderer {
             .viewMask = {},
             .colorAttachmentCount = ColorAttachmentFormats.size(),
             .pColorAttachmentFormats = ColorAttachmentFormats.data(),
-            .depthAttachmentFormat = VK_FORMAT_UNDEFINED,
-            .stencilAttachmentFormat = VK_FORMAT_UNDEFINED
+            .depthAttachmentFormat = RendererConfig::DepthBuffer::Format,
+            .stencilAttachmentFormat = RendererConfig::DepthBuffer::Format
         };
 
         ImGui_ImplVulkan_PipelineInfo PipelineInfo = {};

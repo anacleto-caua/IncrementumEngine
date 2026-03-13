@@ -7,6 +7,7 @@
 #include "Engine/Systems/Terrain/TerrainConfig.hpp"
 #include "Engine/InferusRenderer/VulkanContext.hpp"
 #include "Engine/Systems/Terrain/TerrainSystem.hpp"
+#include "Engine/InferusRenderer/RendererConfig.hpp"
 #include "Engine/InferusRenderer/Image/ImageSystem.hpp"
 #include "Engine/InferusRenderer/ShaderStageBuilder.hpp"
 #include "Engine/Systems/Terrain/PlaneMeshIndicesGenerator.hpp"
@@ -22,6 +23,7 @@ namespace TerrainRenderer {
 
     // Heightmap
     ImageSystem::Id HeightmapImageId;
+    ImageSystem::View::Id HeightmapImageView;
     VkSampler HeightmapTextureSampler;
     BufferSystem::Id Heightmap_CPU;
 
@@ -37,9 +39,7 @@ namespace TerrainRenderer {
     TerrainPushConstants TerrainPushConstants {};
 
     InferusResult Create(BufferSystem::Id &CreationWiseStagingBuffer) {
-
         VkDevice& Device = VulkanContext::Device;
-
         {
             VkShaderStageFlags AllStages = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
 
@@ -53,6 +53,9 @@ namespace TerrainRenderer {
                 HeightmapImageCreateDesc.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
                 HeightmapImageId = ImageSystem::add(HeightmapImageCreateDesc);
+                ImageSystem::Image HeightmapImage = ImageSystem::get(HeightmapImageId);
+                auto HeightmapImageViewCreateInfo = ImageSystem::fillDefaultImageViewCreateInfo(HeightmapImage);
+                HeightmapImageView = ImageSystem::View::add(HeightmapImageViewCreateInfo);
 
                 auto HeightmapSamplerInfo = Recipes::SamplerCreateInfo::HeightmapSampler();
                 vkCreateSampler(Device, &HeightmapSamplerInfo, nullptr, &HeightmapTextureSampler);
@@ -85,10 +88,10 @@ namespace TerrainRenderer {
             // Terrain System Descriptors
             {
                 // Heightmap Texture Sampler descriptor
-                auto HeightmapImage = ImageSystem::get(HeightmapImageId);
+                auto HeightmapImageViewValue = ImageSystem::View::get(HeightmapImageView);
                 VkDescriptorImageInfo HeightmapTextureDescriptorImageInfo {};
                 HeightmapTextureDescriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                HeightmapTextureDescriptorImageInfo.imageView = HeightmapImage.imageView;
+                HeightmapTextureDescriptorImageInfo.imageView = HeightmapImageViewValue.imageView;
                 HeightmapTextureDescriptorImageInfo.sampler = HeightmapTextureSampler;
 
                 VkDescriptorSetLayoutBinding HeightmapSetLayoutBinding {};
@@ -227,19 +230,17 @@ namespace TerrainRenderer {
             DynamicState.dynamicStateCount = static_cast<uint32_t>(DynamicStates.size());
             DynamicState.pDynamicStates = DynamicStates.data();
 
-            // TODO: Do I need a depth attachment?
-            // Can I use this instead of picking chunks in order? Compare performance
-            VkFormat DepthAttachmentFormat = VK_FORMAT_UNDEFINED;
-
-            std::array<VkFormat, 1> ColorAttachmentFormats = { VulkanContext::SurfaceFormat.format };
+            std::array<VkFormat, 1> ColorAttachmentFormats = {
+                VulkanContext::SurfaceFormat.format,
+            };
             auto TerrainColorBlendState = Recipes::Pipeline::Parts::ColorBlendAttachmentState::Default();
             std::vector<VkPipelineColorBlendAttachmentState> TerrainBlendAttachments(ColorAttachmentFormats.size(), TerrainColorBlendState);
-            VkPipelineRenderingCreateInfo RenderingCreateInfo{};
+            VkPipelineRenderingCreateInfo RenderingCreateInfo {};
             RenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
             RenderingCreateInfo.colorAttachmentCount = static_cast<uint32_t>(ColorAttachmentFormats.size());
             RenderingCreateInfo.pColorAttachmentFormats = ColorAttachmentFormats.data();
-            RenderingCreateInfo.depthAttachmentFormat = DepthAttachmentFormat;
-            RenderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+            RenderingCreateInfo.depthAttachmentFormat = RendererConfig::DepthBuffer::Format;
+            RenderingCreateInfo.stencilAttachmentFormat = RendererConfig::DepthBuffer::Format;
 
             auto VertexInput = Recipes::Pipeline::Parts::VertexInput::Default();
             auto InputAssembly = Recipes::Pipeline::Parts::InputAssembly::Default();
@@ -454,8 +455,6 @@ namespace TerrainRenderer {
     }
 
     void Render(VkCommandBuffer cmd) {
-        // TODO: I'm quite unsure on what would be the best way of handling this
-        //vkCmdBindIndexBuffer(cmd, BufferSystem.get(Terrain_PlaneMeshIndexBufferId).buffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdBindIndexBuffer(cmd, PlaneMeshIndexVkBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         vkCmdPushConstants(

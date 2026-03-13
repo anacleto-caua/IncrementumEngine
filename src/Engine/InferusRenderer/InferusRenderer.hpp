@@ -51,6 +51,7 @@ public:
     VkRect2D Scissor {};
     VkViewport Viewport {};
     VkRenderingAttachmentInfo ColorAttachment {};
+    VkRenderingAttachmentInfo DepthAttachment {};
     VkRenderingInfo RenderingInfo {};
 
     VkCommandBufferBeginInfo PipelineCmdBeginInfo {};

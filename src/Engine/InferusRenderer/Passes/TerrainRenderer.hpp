@@ -23,7 +23,9 @@ namespace TerrainRenderer {
     InferusResult Create(BufferSystem::Id &CreationWiseStagingBufer);
     void FeedTerrainSystemPointers();
     void BindCamera(Camera::Camera3D &Camera);
+
     void Destroy();
+
     void Render(VkCommandBuffer cmd);
 
 }

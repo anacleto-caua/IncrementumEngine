@@ -8,9 +8,71 @@
 #include "Engine/Core/Window.hpp"
 #include "Engine/InferusRenderer/Recipes.hpp"
 #include "Engine/InferusRenderer/VulkanContext.hpp"
+#include "Engine/InferusRenderer/RendererConfig.hpp"
 #include "Engine/InferusRenderer/Image/ImageSystem.hpp"
 #include "Engine/InferusRenderer/Buffer/BufferSystem.hpp"
 #include "Engine/InferusRenderer/Passes/TerrainRenderer.hpp"
+
+namespace DepthBuffer {
+    ImageSystem::Id Image;
+    ImageSystem::View::Id ImageView;
+
+    VkClearDepthStencilValue ClearStencilValue = {
+        .depth = 0.0,
+        .stencil = 1
+    };
+
+    VkImageSubresourceRange Range = {
+        .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1
+    };
+
+    void Create(uint32_t Width, uint32_t Height) {
+        VkCommandBuffer cmd = VulkanContext::SingleTimeCmdBegin(VulkanContext::Graphics);
+
+        ImageSystem::ImageCreateInfo DepthBufferDesc {};
+        DepthBufferDesc.width = Width;
+        DepthBufferDesc.height = Height;
+        DepthBufferDesc.format = RendererConfig::DepthBuffer::Format;
+        DepthBufferDesc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+        Image = ImageSystem::add(DepthBufferDesc);
+        ImageSystem::Image DepthImage = ImageSystem::get(DepthBuffer::Image);
+        DepthImage.format = RendererConfig::DepthBuffer::Format;
+
+        // Despite having a creation format the image still starts as a _UNDEFINED, so transit it a first time
+        VkImageMemoryBarrier barrier;
+        barrier = Recipes::ImageMemoryBarrier::DepthBuffer::MakeValid(DepthImage, DepthBuffer::Range);
+        VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+
+        vkCmdPipelineBarrier(
+            cmd,
+            srcStage,
+            dstStage,
+            0,
+            0, nullptr,
+            0, nullptr,
+            1, &barrier
+        );
+
+        VulkanContext::SingleTimeCmdSubmit(VulkanContext::Graphics, cmd);
+
+        VkImageViewCreateInfo ImageViewCreateInfo = ImageSystem::fillDefaultImageViewCreateInfo(DepthImage);
+        ImageViewCreateInfo.subresourceRange = DepthBuffer::Range;
+
+        ImageView = ImageSystem::View::add(ImageViewCreateInfo);
+    }
+
+    void Recreate(uint32_t Width, uint32_t Height) {
+        ImageSystem::del(Image);
+        ImageSystem::View::del(ImageView);
+        Create(Width, Height);
+    }
+}
 
 InferusResult InferusRenderer::Create() {
     VulkanContext::Create();
@@ -110,6 +172,11 @@ InferusResult InferusRenderer::Create() {
     };
 
     ColorAttachment = Recipes::ColorAttachment::Terrain();
+    // ...
+    DepthAttachment = Recipes::DepthAttachment::Default();
+    DepthBuffer::Create(Extent.width, Extent.height);
+    VkImageView DepthBufferImageView = ImageSystem::View::get(DepthBuffer::ImageView).imageView;
+    DepthAttachment.imageView = DepthBufferImageView;
 
     RenderingInfo = {};
     RenderingInfo.renderArea = {
@@ -120,6 +187,7 @@ InferusResult InferusRenderer::Create() {
     RenderingInfo.layerCount = 1;
     RenderingInfo.colorAttachmentCount = 1;
     RenderingInfo.pColorAttachments = &ColorAttachment;
+    RenderingInfo.pDepthAttachment = &DepthAttachment;
 
     PipelineCmdBeginInfo = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -148,6 +216,7 @@ InferusResult InferusRenderer::Create() {
         spdlog::error("Terrain Renderer creation failed");
         return InferusResult::FAIL;
     }
+
     return InferusResult::SUCCESS;
 }
 
@@ -235,6 +304,10 @@ void InferusRenderer::Resize(uint32_t Width, uint32_t Height) {
         .offset = { 0, 0 },
         .extent = Extent
     };
+    DepthBuffer::Recreate(Width, Height);
+    VkImageView DepthBufferImageView = ImageSystem::View::get(DepthBuffer::ImageView).imageView;
+    DepthAttachment.imageView = DepthBufferImageView;
+
     RecreateSwapchain(Swapchain);
 }
 

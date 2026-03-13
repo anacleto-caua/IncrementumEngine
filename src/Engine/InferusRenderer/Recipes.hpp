@@ -65,8 +65,8 @@ namespace Recipes {
                 RECIPE VkPipelineDepthStencilStateCreateInfo Default() {
                     VkPipelineDepthStencilStateCreateInfo DepthStencil {};
                     DepthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-                    DepthStencil.depthTestEnable = VK_FALSE;
-                    DepthStencil.depthWriteEnable = VK_FALSE;
+                    DepthStencil.depthTestEnable = VK_TRUE;
+                    DepthStencil.depthWriteEnable = VK_TRUE;
                     DepthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
                     DepthStencil.depthBoundsTestEnable = VK_FALSE;
                     DepthStencil.minDepthBounds = 0.0f;
@@ -141,6 +141,19 @@ namespace Recipes {
 
         RECIPE VkRenderingAttachmentInfo Terrain() {
             return Default();
+        }
+    };
+    namespace DepthAttachment {
+        RECIPE VkRenderingAttachmentInfo Default() {
+            VkRenderingAttachmentInfo depthAttachmentInfo{};
+            depthAttachmentInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+            depthAttachmentInfo.imageView = VK_NULL_HANDLE; // MUST BE SET BY YOU
+            depthAttachmentInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            depthAttachmentInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            depthAttachmentInfo.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            depthAttachmentInfo.clearValue.depthStencil = { 1.0f, 0 };
+
+            return depthAttachmentInfo;
         }
     };
     namespace ImageViewCreateInfo {
@@ -275,6 +288,20 @@ namespace Recipes {
 
             return barrier;
         }
+
+        namespace DepthBuffer {
+            RECIPE VkImageMemoryBarrier MakeValid(const ImageSystem::Image& image, const VkImageSubresourceRange& subRsr) {
+                VkImageMemoryBarrier barrier = Default(image);
+                barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                barrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                barrier.subresourceRange = subRsr;
+                barrier.srcAccessMask = 0;
+                barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+                return barrier;
+            }
+        };
+
         namespace Rendering {
             RECIPE VkImageMemoryBarrier EnableRendering(VkImage Image) {
                 VkImageMemoryBarrier Barrier = RawDefault(Image);

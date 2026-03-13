@@ -6,6 +6,7 @@
 #include <spdlog/spdlog.h>
 
 #include "Engine/Core/Window.hpp"
+#include "Engine/InferusRenderer/RendererConfig.hpp"
 
 namespace VulkanContext {
     static constexpr std::array<const char*, 5> DEVICE_EXTENSIONS = {
@@ -184,6 +185,14 @@ namespace VulkanContext {
             // Are needed features available
             VkPhysicalDeviceFeatures DeviceFeatures;
             vkGetPhysicalDeviceFeatures(CurrentPhysicalDevice, &DeviceFeatures);
+
+            // Format needed for depth buffer
+            VkFormatProperties Properties;
+            vkGetPhysicalDeviceFormatProperties(CurrentPhysicalDevice, RendererConfig::DepthBuffer::Format, &Properties);
+            bool DepthFormatSupport = (Properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+            if (!DepthFormatSupport) {
+                break;
+            }
 
             // Apply preference for GPUs and higher resolution
             VkPhysicalDeviceProperties DeviceProperties;
