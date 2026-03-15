@@ -7,9 +7,9 @@
 #include <imgui_impl_vulkan.h>
 
 #include "Engine/Core/Window.hpp"
+#include "Engine/InferusRenderer/Renderer.hpp"
 #include "Engine/InferusRenderer/VulkanContext.hpp"
 #include "Engine/InferusRenderer/RendererConfig.hpp"
-#include "Engine/InferusRenderer/InferusRenderer.hpp"
 
 namespace ImGuiRenderer {
     void OpenUIContext() {
@@ -18,7 +18,7 @@ namespace ImGuiRenderer {
         ImGui::NewFrame();
     }
 
-    InferusResult Create(InferusRenderer& InferusRenderer) {
+    InferusResult Create() {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO& io = ImGui::GetIO();
@@ -53,8 +53,8 @@ namespace ImGuiRenderer {
         InitInfo.PipelineInfoMain = PipelineInfo;
         // InitInfo.DescriptorPool; -- Leave it alone so the backend creates one with .DescriptorPoolSize
         InitInfo.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE;
-        InitInfo.MinImageCount = InferusRenderer.SurfaceCapabilities.minImageCount;
-        InitInfo.ImageCount = InferusRenderer.SwapchainImageCount;
+        InitInfo.MinImageCount = Renderer::SurfaceCapabilities.minImageCount;
+        InitInfo.ImageCount = Renderer::SwapchainImageCount;
         InitInfo.UseDynamicRendering = true;
         InitInfo.MinAllocationSize = 1024 * 1024; // To satisfaz zealous best practices validation layer and waste a little memory.
 

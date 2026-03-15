@@ -10,8 +10,8 @@
 #include "Engine/Core/Window.hpp"
 #include "Engine/Core/Camera.hpp"
 #include "Engine/ImGuiPacks/MainPack.hpp"
+#include "Engine/InferusRenderer/Renderer.hpp"
 #include "Engine/Systems/Terrain/TerrainSystem.hpp"
-#include "Engine/InferusRenderer/InferusRenderer.hpp"
 #include "Engine/InferusRenderer/Passes/TerrainRenderer.hpp"
 
 namespace InferusEngine {
@@ -22,8 +22,6 @@ namespace InferusEngine {
     static constexpr int FOV = 110;
 
     static constexpr std::chrono::duration<double> FRAME_TARGET_TIME{1.0 / TARGET_FPS};
-
-    InferusRenderer InferusRenderer;
 
     bool ShouldClose = false;
     Camera::Camera3D Camera;
@@ -38,7 +36,7 @@ namespace InferusEngine {
 
         Input::Create();
 
-        auto RendererResult = InferusRenderer.Create();
+        auto RendererResult = Renderer::Create();
         if (RendererResult != InferusResult::SUCCESS) {
             spdlog::error("Inferus Renderer creation failed.");
             return InferusResult::FAIL;
@@ -60,7 +58,7 @@ namespace InferusEngine {
         Window::Destroy();
         Input::Destroy();
         TerrainSystem::Destroy();
-        InferusRenderer.Destroy();
+        Renderer::Destroy();
     }
 
     void Run() {
@@ -76,7 +74,7 @@ namespace InferusEngine {
             Camera::FlyBy::Update(DeltaTime);
             Window::Update();
             TerrainSystem::Update();
-            InferusRenderer.Render();
+            Renderer::Render();
             Input::PollInput();
 
             auto FrameEnd = std::chrono::high_resolution_clock::now();
@@ -90,7 +88,7 @@ namespace InferusEngine {
     }
 
     void Resize(uint32_t Width, uint32_t Height) {
-        InferusRenderer.Resize(Width, Height);
+        Renderer::Resize(Width, Height);
         Camera::Resize(Camera, float(Width)/float(Height));
     }
 };

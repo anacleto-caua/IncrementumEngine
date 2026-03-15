@@ -1,15 +1,11 @@
 #pragma once
 
-#include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_vulkan.h>
-
-class InferusRenderer;
+#include <vulkan/vulkan.h>
 
 #include "Engine/Types.hpp"
 
 namespace ImGuiRenderer {
-    InferusResult Create(InferusRenderer& InferusRenderer);
+    InferusResult Create();
     void Destroy();
 
     void Render(VkCommandBuffer cmd);
