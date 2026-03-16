@@ -4,13 +4,12 @@
 
 #include "Engine/InferusRenderer/Recipes.hpp"
 #include "Engine/Systems/Terrain/TerrainConfig.hpp"
-#include "Engine/Systems/Terrain/TerrainConfig.hpp"
 #include "Engine/InferusRenderer/VulkanContext.hpp"
 #include "Engine/Systems/Terrain/TerrainSystem.hpp"
 #include "Engine/InferusRenderer/RendererConfig.hpp"
 #include "Engine/InferusRenderer/Image/ImageSystem.hpp"
 #include "Engine/InferusRenderer/ShaderStageBuilder.hpp"
-#include "Engine/Systems/Terrain/PlaneMeshIndicesGenerator.hpp"
+#include "Engine/InferusRenderer/Buffer/BufferSystem.hpp"
 
 namespace TerrainRenderer {
 
@@ -30,7 +29,65 @@ namespace TerrainRenderer {
 
     namespace PlaneMesh {
         BufferSystem::Id Indices;
+
+        // Easier access for vkBindIndexBuffer()
         VkBuffer VkBuffer;
+
+        void GenerateIndices(uint32_t* IndicesBegin) {
+            int32_t TerrainRes = TerrainConfig::Chunk::RESOLUTION;
+            for (int z = 0; z < TerrainRes - 1; z++) {
+                for (int x = 0; x < TerrainRes - 1; x++) {
+                    // Calculate the index of the current vertex and neighbors
+                    uint32_t topLeft = (z * TerrainConfig::Chunk::RESOLUTION) + x;
+                    uint32_t topRight = topLeft + 1;
+                    uint32_t bottomLeft = ((z + 1) * TerrainConfig::Chunk::RESOLUTION) + x;
+                    uint32_t bottomRight = bottomLeft + 1;
+
+                    // Triangle 1 (Top-Left -> Bottom-Left -> Top-Right)
+                    *IndicesBegin++ = topLeft;
+                    *IndicesBegin++ = bottomLeft;
+                    *IndicesBegin++ = topRight;
+
+                    // Triangle 2 (Top-Right -> Bottom-Left -> Bottom-Right)
+                    *IndicesBegin++ = topRight;
+                    *IndicesBegin++ = bottomLeft;
+                    *IndicesBegin++ = bottomRight;
+                }
+            }
+        }
+
+        void Upload() {
+            VkCommandBuffer TransferCmd = VulkanContext::SingleTimeCmdBegin(VulkanContext::Transfer);
+
+            // Create the actual Plane Mesh index buffer
+            BufferSystem::CreateInfo IndiceCreateInfo = {
+                .size = TerrainConfig::Chunk::INDICES_BUFFER_SIZE,
+                .memType = BufferSystem::CreateInfoMemoryType::GPU_STATIC,
+                .usage = BufferSystem::CreateInfoUsage::INDEX,
+            };
+            Indices = BufferSystem::add(IndiceCreateInfo);
+            VkBuffer = BufferSystem::get(PlaneMesh::Indices).buffer;
+
+            // TODO:
+            // It's kinda of dumb I keep creating single usage staging buffers
+            // Create the staging buffer and copy the data
+            BufferSystem::CreateInfo IndicesStagingBufferCreateInfo = {
+                .size = TerrainConfig::Chunk::INDICES_BUFFER_SIZE,
+                .memType = BufferSystem::CreateInfoMemoryType::STAGING_UPLOAD,
+                .usage = BufferSystem::CreateInfoUsage::STAGING,
+            };
+            BufferSystem::Id StagingIndices = BufferSystem::add(IndicesStagingBufferCreateInfo);
+            uint32_t* StagingPlaneMeshIndices = (uint32_t*)BufferSystem::map(StagingIndices);
+            GenerateIndices(StagingPlaneMeshIndices);
+
+            BufferSystem::copy(TransferCmd, StagingIndices, Indices, TerrainConfig::Chunk::INDICES_BUFFER_SIZE);
+
+            VulkanContext::SingleTimeCmdSubmit(VulkanContext::Transfer, TransferCmd);
+
+            // Cleanup
+            BufferSystem::unmap(StagingIndices);
+            BufferSystem::del(StagingIndices);
+        }
     }
 
     namespace Heightmap {
@@ -49,7 +106,7 @@ namespace TerrainRenderer {
     VkPipeline TerrainPipeline {};
     VkPipelineLayout TerrainPipelineLayout {};
 
-    InferusResult Create(BufferSystem::Id &CreationWiseStagingBuffer) {
+    InferusResult Create() {
         VkDevice& Device = VulkanContext::Device;
         {
             VkShaderStageFlags AllStages = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
@@ -313,31 +370,7 @@ namespace TerrainRenderer {
             }
         }
 
-        // --- Creation wise command buffer begins
-        VkCommandBuffer TransferCmd = VulkanContext::SingleTimeCmdBegin(VulkanContext::Transfer);
-
-        // Terrain plane mesh indices buffer
-        std::array<uint32_t, TerrainConfig::Chunk::INDICES_COUNT> TerrainPlaneMeshIndices;
-        PlaneMeshIndicesGenerator::GetIndices(TerrainPlaneMeshIndices.data());
-
-        BufferSystem::CreateInfo PlaneMeshIndexBufferCreateDescription = {
-            .size = TerrainConfig::Chunk::INDICES_BUFFER_SIZE,
-            .memType = BufferSystem::CreateInfoMemoryType::GPU_STATIC,
-            .usage = BufferSystem::CreateInfoUsage::INDEX,
-        };
-        PlaneMesh::Indices = BufferSystem::add(PlaneMeshIndexBufferCreateDescription);
-        PlaneMesh::VkBuffer = BufferSystem::get(PlaneMesh::Indices).buffer;
-
-        BufferSystem::upload(
-            TransferCmd,
-            CreationWiseStagingBuffer,
-            PlaneMesh::Indices,
-            TerrainPlaneMeshIndices.data(),
-            TerrainConfig::Chunk::INDICES_BUFFER_SIZE
-            );
-
-        // --- Creation wise command buffer ends
-        VulkanContext::SingleTimeCmdSubmit(VulkanContext::Transfer, TransferCmd);
+        PlaneMesh::Upload();
 
         // Zeroing terrain push constants
         TerrainPushConstants = {

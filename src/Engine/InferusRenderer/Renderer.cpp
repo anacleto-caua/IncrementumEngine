@@ -30,7 +30,6 @@ namespace Renderer {
         VkSemaphore RenderFinished = VK_NULL_HANDLE;
     };
 
-    static constexpr size_t CREATION_WISE_STAGING_BUFFER_SIZE = 1 * 1024 * 1024;
     // Swapchain
     VkSwapchainCreateInfoKHR SwapchainCreateInfo {};
 
@@ -129,15 +128,6 @@ namespace Renderer {
         VulkanContext::Create();
         // Memory resources management systems
         BufferSystem::Create();
-        BufferSystem::Id CreationWiseStagingBuffer;
-        {
-            BufferSystem::CreateInfo CreationWiseStagingBufferCreateDesc = {
-                .size = CREATION_WISE_STAGING_BUFFER_SIZE,
-                .memType = BufferSystem::CreateInfoMemoryType::STAGING_UPLOAD,
-                .usage = BufferSystem::CreateInfoUsage::STAGING
-            };
-            CreationWiseStagingBuffer = BufferSystem::add(CreationWiseStagingBufferCreateDesc);
-        }
         ImageSystem::Create();
 
         QuerySurfaceCapabilities();
@@ -262,13 +252,11 @@ namespace Renderer {
         }
 
         if (
-            TerrainRenderer::Create(CreationWiseStagingBuffer) !=  InferusResult::SUCCESS
+            TerrainRenderer::Create() !=  InferusResult::SUCCESS
         ) {
             spdlog::error("Terrain Renderer creation failed");
             return InferusResult::FAIL;
         }
-
-        BufferSystem::del(CreationWiseStagingBuffer);
 
         return InferusResult::SUCCESS;
     }
