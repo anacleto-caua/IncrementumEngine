@@ -2,10 +2,7 @@
 
 #include <cstdint>
 
-#include <glm/fwd.hpp>
-#include <glm/ext.hpp>
 #include <vulkan/vulkan.h>
-#include <vma/vk_mem_alloc.h>
 
 #include "Engine/Types.hpp"
 
