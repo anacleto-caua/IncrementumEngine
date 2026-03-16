@@ -268,6 +268,8 @@ namespace Renderer {
             return InferusResult::FAIL;
         }
 
+        BufferSystem::del(CreationWiseStagingBuffer);
+
         return InferusResult::SUCCESS;
     }
 

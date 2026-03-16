@@ -345,8 +345,6 @@ namespace TerrainRenderer {
             .PlayerPosition = glm::vec4(0)
         };
 
-        BufferSystem::del(CreationWiseStagingBuffer);
-
         return InferusResult::SUCCESS;
     }
 
