@@ -222,7 +222,6 @@ namespace TerrainRenderer {
             }
 
             // Finally creating the terrain VkPipeline itself
-            // TODO: Check if it's needed since we're already using dynamic rendering
             std::vector<VkDynamicState> DynamicStates {};
             DynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
             VkPipelineDynamicStateCreateInfo DynamicState {};
