@@ -13,6 +13,18 @@
 #include "Engine/Systems/Terrain/PlaneMeshIndicesGenerator.hpp"
 
 namespace TerrainRenderer {
+
+    namespace Descriptor {
+        VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        VkDescriptorPool pool = VK_NULL_HANDLE;
+    };
+
+    struct TerrainPushConstants {
+        glm::mat4 CameraMVP;
+        glm::vec4 PlayerPosition;
+    };
+
     // Terrain plane mesh
     BufferSystem::Id PlaneMeshIndexBufferId;
     VkBuffer PlaneMeshIndexVkBuffer;
@@ -31,9 +43,6 @@ namespace TerrainRenderer {
     ChunkHeightmapLink ChunkHeightmapLinks[TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT];
     BufferSystem::Id ChunkHeightmapLinks_CPU;
     BufferSystem::Id ChunkHeightmapLinks_GPU;
-
-    // Terrain descriptor sets
-    TerrainDescriptorSet TerrainDescriptorSet {};
 
     // Push constants
     TerrainPushConstants TerrainPushConstants {};
@@ -137,7 +146,7 @@ namespace TerrainRenderer {
                     HeightmapSetLayoutBinding,
                     ChunkLinkBinding
                 };
-                VkDescriptorSetLayoutCreateInfo TerrainDescriptorSetLayoutCreateInfo {
+                VkDescriptorSetLayoutCreateInfo LayoutCreateInfo {
                     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                     .pNext = nullptr,
                     .flags = 0,
@@ -147,9 +156,9 @@ namespace TerrainRenderer {
                 if (
                     vkCreateDescriptorSetLayout(
                         Device,
-                        &TerrainDescriptorSetLayoutCreateInfo,
+                        &LayoutCreateInfo,
                         nullptr,
-                        &TerrainDescriptorSet.layout
+                        &Descriptor::layout
                     ) != VK_SUCCESS
                     )
                 {
@@ -177,18 +186,18 @@ namespace TerrainRenderer {
                 PoolInfo.pPoolSizes = PoolSize.data();
                 PoolInfo.maxSets = 1;
 
-                if (vkCreateDescriptorPool(Device, &PoolInfo, nullptr, &TerrainDescriptorSet.pool) != VK_SUCCESS) {
+                if (vkCreateDescriptorPool(Device, &PoolInfo, nullptr, &Descriptor::pool) != VK_SUCCESS) {
                     spdlog::error("Descriptor pool creation failed");
                     return InferusResult::FAIL;
                 }
 
                 VkDescriptorSetAllocateInfo allocInfo{};
                 allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-                allocInfo.descriptorPool = TerrainDescriptorSet.pool;
+                allocInfo.descriptorPool = Descriptor::pool;
                 allocInfo.descriptorSetCount = 1;
-                allocInfo.pSetLayouts = &TerrainDescriptorSet.layout;
+                allocInfo.pSetLayouts = &Descriptor::layout;
 
-                if (vkAllocateDescriptorSets(Device, &allocInfo, &TerrainDescriptorSet.set) != VK_SUCCESS) {
+                if (vkAllocateDescriptorSets(Device, &allocInfo, &Descriptor::set) != VK_SUCCESS) {
                     spdlog::error("Descriptor set allocation failed");
                     return InferusResult::FAIL;
                 }
@@ -197,7 +206,7 @@ namespace TerrainRenderer {
                     HeightmapSamplerWrite, ChunkLinkSSBOWrite
                 };
                 for (VkWriteDescriptorSet& write : TerrainWrites) {
-                    write.dstSet = TerrainDescriptorSet.set;
+                    write.dstSet = Descriptor::set;
                 }
 
                 vkUpdateDescriptorSets(Device, static_cast<uint32_t>(TerrainWrites.size()), TerrainWrites.data(), 0, nullptr);
@@ -213,7 +222,7 @@ namespace TerrainRenderer {
             VkPipelineLayoutCreateInfo TerrainPipelineLayoutCreateInfo {};
             TerrainPipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
             TerrainPipelineLayoutCreateInfo.setLayoutCount = 1;
-            TerrainPipelineLayoutCreateInfo.pSetLayouts = &TerrainDescriptorSet.layout;
+            TerrainPipelineLayoutCreateInfo.pSetLayouts = &Descriptor::layout;
             TerrainPipelineLayoutCreateInfo.pPushConstantRanges = &TerrainPushConstantRange;
             TerrainPipelineLayoutCreateInfo.pushConstantRangeCount = 1;
             if (vkCreatePipelineLayout(Device, &TerrainPipelineLayoutCreateInfo, nullptr, &TerrainPipelineLayout) != VK_SUCCESS) {
@@ -352,8 +361,8 @@ namespace TerrainRenderer {
         if (HeightmapTextureSampler) { vkDestroySampler(Device, HeightmapTextureSampler, nullptr); }
         ImageSystem::del(HeightmapImageId);
 
-        if (TerrainDescriptorSet.pool) { vkDestroyDescriptorPool(Device, TerrainDescriptorSet.pool, nullptr); }
-        if (TerrainDescriptorSet.layout) { vkDestroyDescriptorSetLayout(Device, TerrainDescriptorSet.layout, nullptr); }
+        if (Descriptor::pool) { vkDestroyDescriptorPool(Device, Descriptor::pool, nullptr); }
+        if (Descriptor::layout) { vkDestroyDescriptorSetLayout(Device, Descriptor::layout, nullptr); }
 
         if (TerrainPipeline) { vkDestroyPipeline(Device, TerrainPipeline, nullptr); }
         if (TerrainPipelineLayout) { vkDestroyPipelineLayout(Device, TerrainPipelineLayout, nullptr); }
@@ -472,7 +481,7 @@ namespace TerrainRenderer {
             TerrainPipelineLayout,
             0, // Probably a bad idea the way I carry this binding value lol TEXTURE_SAMPLER_BINDING,
             1,
-            &TerrainDescriptorSet.set,
+            &Descriptor::set,
             0,
             nullptr
         );
