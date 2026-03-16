@@ -14,38 +14,40 @@
 
 namespace TerrainRenderer {
 
+    struct TerrainPushConstants {
+        glm::mat4 CameraMVP;
+        glm::vec4 PlayerPosition;
+    };
+
+    // Push constants
+    TerrainPushConstants TerrainPushConstants {};
+
     namespace Descriptor {
         VkDescriptorSetLayout layout = VK_NULL_HANDLE;
         VkDescriptorSet set = VK_NULL_HANDLE;
         VkDescriptorPool pool = VK_NULL_HANDLE;
     };
 
-    struct TerrainPushConstants {
-        glm::mat4 CameraMVP;
-        glm::vec4 PlayerPosition;
-    };
+    namespace PlaneMesh {
+        BufferSystem::Id Indices;
+        VkBuffer VkBuffer;
+    }
 
-    // Terrain plane mesh
-    BufferSystem::Id PlaneMeshIndexBufferId;
-    VkBuffer PlaneMeshIndexVkBuffer;
+    namespace Heightmap {
+        ImageSystem::Id Image;
+        ImageSystem::View::Id ImageView;
+        VkSampler Sampler;
+        BufferSystem::Id StagingBuffer;
+    }
+
+    namespace ChunkLinks {
+        BufferSystem::Id Staging;
+        BufferSystem::Id Data;
+    }
 
     // Terrain pipeline
     VkPipeline TerrainPipeline {};
     VkPipelineLayout TerrainPipelineLayout {};
-
-    // Heightmap
-    ImageSystem::Id HeightmapImageId;
-    ImageSystem::View::Id HeightmapImageView;
-    VkSampler HeightmapTextureSampler;
-    BufferSystem::Id Heightmap_CPU;
-
-    // Chunk to Heightmap linking
-    ChunkHeightmapLink ChunkHeightmapLinks[TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT];
-    BufferSystem::Id ChunkHeightmapLinks_CPU;
-    BufferSystem::Id ChunkHeightmapLinks_GPU;
-
-    // Push constants
-    TerrainPushConstants TerrainPushConstants {};
 
     InferusResult Create(BufferSystem::Id &CreationWiseStagingBuffer) {
         VkDevice& Device = VulkanContext::Device;
@@ -61,20 +63,20 @@ namespace TerrainRenderer {
                 HeightmapImageCreateDesc.format = TerrainConfig::Heightmap::HEIGHTMAP_IMAGE_FORMAT;
                 HeightmapImageCreateDesc.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
-                HeightmapImageId = ImageSystem::add(HeightmapImageCreateDesc);
-                ImageSystem::Image HeightmapImage = ImageSystem::get(HeightmapImageId);
+                Heightmap::Image = ImageSystem::add(HeightmapImageCreateDesc);
+                ImageSystem::Image HeightmapImage = ImageSystem::get(Heightmap::Image);
                 auto HeightmapImageViewCreateInfo = ImageSystem::fillDefaultImageViewCreateInfo(HeightmapImage);
-                HeightmapImageView = ImageSystem::View::add(HeightmapImageViewCreateInfo);
+                Heightmap::ImageView = ImageSystem::View::add(HeightmapImageViewCreateInfo);
 
                 auto HeightmapSamplerInfo = Recipes::SamplerCreateInfo::HeightmapSampler();
-                vkCreateSampler(Device, &HeightmapSamplerInfo, nullptr, &HeightmapTextureSampler);
+                vkCreateSampler(Device, &HeightmapSamplerInfo, nullptr, &Heightmap::Sampler);
 
                 BufferSystem::CreateInfo HeightmapStagingBufferId_CreateInfo = {
                     .size = TerrainConfig::Heightmap::HEIGHTMAP_ALL_IMAGES_SIZE,
                     .memType = BufferSystem::CreateInfoMemoryType::STAGING_UPLOAD,
                     .usage = BufferSystem::CreateInfoUsage::STAGING
                 };
-                Heightmap_CPU = BufferSystem::add(HeightmapStagingBufferId_CreateInfo);
+                Heightmap::StagingBuffer = BufferSystem::add(HeightmapStagingBufferId_CreateInfo);
             }
 
             // Chunk to Heightmap linking
@@ -90,18 +92,18 @@ namespace TerrainRenderer {
                     .usage = BufferSystem::CreateInfoUsage::SSBO
                 };
 
-                ChunkHeightmapLinks_CPU = BufferSystem::add(ChunkHeightmapLinksCPU_CreateDesc);
-                ChunkHeightmapLinks_GPU = BufferSystem::add(ChunkHeightmapLinksGPU_CreateDesc);
+                ChunkLinks::Staging = BufferSystem::add(ChunkHeightmapLinksCPU_CreateDesc);
+                ChunkLinks::Data = BufferSystem::add(ChunkHeightmapLinksGPU_CreateDesc);
             }
 
             // Terrain System Descriptors
             {
                 // Heightmap Texture Sampler descriptor
-                auto HeightmapImageViewValue = ImageSystem::View::get(HeightmapImageView);
+                auto HeightmapImageViewValue = ImageSystem::View::get(Heightmap::ImageView);
                 VkDescriptorImageInfo HeightmapTextureDescriptorImageInfo {};
                 HeightmapTextureDescriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 HeightmapTextureDescriptorImageInfo.imageView = HeightmapImageViewValue.imageView;
-                HeightmapTextureDescriptorImageInfo.sampler = HeightmapTextureSampler;
+                HeightmapTextureDescriptorImageInfo.sampler = Heightmap::Sampler;
 
                 VkDescriptorSetLayoutBinding HeightmapSetLayoutBinding {};
                 HeightmapSetLayoutBinding.binding = 0;
@@ -120,7 +122,7 @@ namespace TerrainRenderer {
 
                 // Chunk to Heightmap descriptor
                 // TODO: The fact I'm not carrying offsets arround is most definitvelly a bad signal
-                auto ChunkLinkBuffer = BufferSystem::get(ChunkHeightmapLinks_GPU);
+                auto ChunkLinkBuffer = BufferSystem::get(ChunkLinks::Data);
                 VkDescriptorBufferInfo ChunkToHeightmapDescriptorBufferInfo {};
                 ChunkToHeightmapDescriptorBufferInfo.buffer = ChunkLinkBuffer.buffer;
                 ChunkToHeightmapDescriptorBufferInfo.offset = 0;
@@ -323,13 +325,13 @@ namespace TerrainRenderer {
             .memType = BufferSystem::CreateInfoMemoryType::GPU_STATIC,
             .usage = BufferSystem::CreateInfoUsage::INDEX,
         };
-        PlaneMeshIndexBufferId = BufferSystem::add(PlaneMeshIndexBufferCreateDescription);
-        PlaneMeshIndexVkBuffer = BufferSystem::get(PlaneMeshIndexBufferId).buffer;
+        PlaneMesh::Indices = BufferSystem::add(PlaneMeshIndexBufferCreateDescription);
+        PlaneMesh::VkBuffer = BufferSystem::get(PlaneMesh::Indices).buffer;
 
         BufferSystem::upload(
             TransferCmd,
             CreationWiseStagingBuffer,
-            PlaneMeshIndexBufferId,
+            PlaneMesh::Indices,
             TerrainPlaneMeshIndices.data(),
             TerrainConfig::Chunk::INDICES_BUFFER_SIZE
             );
@@ -351,15 +353,15 @@ namespace TerrainRenderer {
     void Destroy() {
         VkDevice& Device = VulkanContext::Device;
 
-        BufferSystem::del(ChunkHeightmapLinks_CPU);
-        BufferSystem::del(ChunkHeightmapLinks_GPU);
+        BufferSystem::del(ChunkLinks::Staging);
+        BufferSystem::del(ChunkLinks::Data);
 
-        BufferSystem::del(Heightmap_CPU);
+        BufferSystem::del(Heightmap::StagingBuffer);
 
-        BufferSystem::del(PlaneMeshIndexBufferId);
+        BufferSystem::del(PlaneMesh::Indices);
 
-        if (HeightmapTextureSampler) { vkDestroySampler(Device, HeightmapTextureSampler, nullptr); }
-        ImageSystem::del(HeightmapImageId);
+        if (Heightmap::Sampler) { vkDestroySampler(Device, Heightmap::Sampler, nullptr); }
+        ImageSystem::del(Heightmap::Image);
 
         if (Descriptor::pool) { vkDestroyDescriptorPool(Device, Descriptor::pool, nullptr); }
         if (Descriptor::layout) { vkDestroyDescriptorSetLayout(Device, Descriptor::layout, nullptr); }
@@ -377,8 +379,8 @@ namespace TerrainRenderer {
         QueueContext& Graphics = VulkanContext::Graphics;
 
         TerrainSystem::FeedTerrainRenderer(
-            (ChunkHeightmapLink*)BufferSystem::map(ChunkHeightmapLinks_CPU),
-            (uint16_t*)BufferSystem::map(Heightmap_CPU)
+            (ChunkHeightmapLink*)BufferSystem::map(ChunkLinks::Staging),
+            (uint16_t*)BufferSystem::map(Heightmap::StagingBuffer)
         );
 
         VkCommandBuffer cmd = VulkanContext::SingleTimeCmdBegin(Transfer);
@@ -386,16 +388,16 @@ namespace TerrainRenderer {
         // Copy chunk link buffer
         BufferSystem::copy(
             cmd,
-            ChunkHeightmapLinks_CPU,
-            ChunkHeightmapLinks_GPU,
+            ChunkLinks::Staging,
+            ChunkLinks::Data,
             TerrainConfig::ChunkToHeightmapLinking::LINKING_BUFFER_SIZE
         );
-        BufferSystem::unmap(ChunkHeightmapLinks_CPU);
-        BufferSystem::unmap(Heightmap_CPU);
+        BufferSystem::unmap(ChunkLinks::Staging);
+        BufferSystem::unmap(Heightmap::StagingBuffer);
 
         // Upload heightmap to staging buffer
-        BufferSystem::Buffer HeightmapStagingBuffer = BufferSystem::get(Heightmap_CPU);
-        ImageSystem::Image HeightmapImage = ImageSystem::get(HeightmapImageId);
+        BufferSystem::Buffer HeightmapStagingBuffer = BufferSystem::get(Heightmap::StagingBuffer);
+        ImageSystem::Image HeightmapImage = ImageSystem::get(Heightmap::Image);
 
         // Transfer data to heightmap image
         VkImageMemoryBarrier barrier1 = Recipes::ImageMemoryBarrier::TransferDest(HeightmapImage);
@@ -463,7 +465,7 @@ namespace TerrainRenderer {
     }
 
     void Render(VkCommandBuffer cmd) {
-        vkCmdBindIndexBuffer(cmd, PlaneMeshIndexVkBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(cmd, PlaneMesh::VkBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         vkCmdPushConstants(
             cmd,
