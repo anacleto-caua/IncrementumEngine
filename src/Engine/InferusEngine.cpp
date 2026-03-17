@@ -80,8 +80,17 @@ namespace InferusEngine {
             auto FrameEnd = std::chrono::high_resolution_clock::now();
             auto ElapsedTime = FrameEnd - FrameBegin;
 
-            if ( ElapsedTime < FRAME_TARGET_TIME ) {
-                std::this_thread::sleep_for(FRAME_TARGET_TIME - ElapsedTime);
+            if (ElapsedTime < FRAME_TARGET_TIME) {
+                auto TimeToSleep = FRAME_TARGET_TIME - ElapsedTime;
+
+                if (TimeToSleep > std::chrono::milliseconds(2)) {
+                    std::this_thread::sleep_for(TimeToSleep - std::chrono::milliseconds(1));
+                }
+
+                // Spin-lock busy wait
+                while (std::chrono::high_resolution_clock::now() - FrameBegin < FRAME_TARGET_TIME) {
+                    std::this_thread::yield();
+                }
             }
         }
         Window::WaitEvents();
