@@ -73,53 +73,30 @@ namespace TerrainSystem {
     void WriteChunk(glm::ivec2 ChunkPos, uint16_t* ChunkBegin);
 
     void FullWriteChunkData() {
-        // Diamond scan the area around the player
         glm::ivec2 player_coord;
         player_coord.x = PlayerPos->x/TerrainConfig::Chunk::RESOLUTION;
         player_coord.y = PlayerPos->z/TerrainConfig::Chunk::RESOLUTION;
 
-        uint32_t coords_counter = TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT - 1;    // The last array position
-        // Add the player position as it's the last chunk that should be drawn
-        ChunkLinksBuffer_MappedMem[coords_counter] = {
-            .WorldPos = player_coord,
-            .InstanceId = (uint32_t)coords_counter,
-            .IsVisible = 1
-        };
-        coords_counter--;
+        uint32_t coords_counter = 0;
+        int32_t radius = TerrainConfig::ChunkToHeightmapLinking::EXPLORATION_RADIUS;
+        int32_t r_squared = radius*radius;
 
-        for (uint32_t i = 0; i < TerrainConfig::ChunkToHeightmapLinking::DIAMOND_EXPLORATION_RADIUS; i++) {
-            int32_t x_pos = player_coord.x + i + 1;
-            int32_t x_neg = player_coord.x - i + 1;
-            for (uint32_t j = 0; j < (TerrainConfig::ChunkToHeightmapLinking::DIAMOND_EXPLORATION_RADIUS - i); j++) {
-                int32_t y_pos = player_coord.y + j;
-                int32_t y_neg = player_coord.y - j;
+        // Circle around the player
+        for (int32_t x = player_coord.x - radius; x <= player_coord.x + radius; x++) {
+            for (int32_t y = player_coord.y - radius; y <= player_coord.y + radius; y++) {
 
-                // Memory Layout: [Link3][Link2][Link1][Link0]
-                ChunkHeightmapLink* block = &ChunkLinksBuffer_MappedMem[coords_counter - 3];
+                int32_t dx = x - player_coord.x;
+                int32_t dy = y - player_coord.y;
 
-                // We write sequentially to the memory block (0, 1, 2, 3).
-                block[0] = {
-                    .WorldPos = { x_neg, y_pos },
-                    .InstanceId = (coords_counter - 3),
-                    .IsVisible = 1
-                };
-                block[1] = {
-                    .WorldPos = { x_pos, y_neg },
-                    .InstanceId = (coords_counter - 2),
-                    .IsVisible = 1
-                };
-                block[2] = {
-                    .WorldPos = { x_neg, y_neg },
-                    .InstanceId = (coords_counter - 1),
-                    .IsVisible = 1
-                };
-                block[3] = {
-                    .WorldPos = { x_pos, y_pos },
-                    .InstanceId = (coords_counter),
-                    .IsVisible = 1
-                };
-
-                coords_counter -= 4;
+                // Valid point
+                if ((dx * dx) + (dy * dy) <= r_squared) {
+                    ChunkLinksBuffer_MappedMem[coords_counter] = {
+                        .WorldPos = { x, y },
+                        .InstanceId = (coords_counter),
+                        .IsVisible = 1
+                    };
+                    coords_counter++;
+                }
             }
         }
 

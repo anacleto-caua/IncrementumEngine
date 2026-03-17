@@ -16,11 +16,20 @@ namespace TerrainConfig {
     };
 
     namespace ChunkToHeightmapLinking {
-        constexpr uint32_t DIAMOND_EXPLORATION_RADIUS = 4;
+        constexpr uint32_t EXPLORATION_RADIUS = 8;
 
-        constexpr uint32_t INSTANCE_COUNT = []{
-            constexpr uint32_t X = DIAMOND_EXPLORATION_RADIUS;
-            return (X * X) + ((X + 1) * (X + 1));
+        constexpr uint32_t INSTANCE_COUNT = []() {
+            uint32_t quadrant_points = 0;
+            uint32_t radius = EXPLORATION_RADIUS;
+            uint32_t y = radius;
+
+            for (uint32_t x = 1; x <= radius; x++) {
+                while (x * x + y * y > radius * radius) {
+                    y--;
+                }
+                quadrant_points += y;
+            }
+            return 1 + 4 * radius + 4 * quadrant_points;
         }();
 
         constexpr uint32_t LINKING_BUFFER_SIZE = INSTANCE_COUNT * sizeof(ChunkHeightmapLink);
