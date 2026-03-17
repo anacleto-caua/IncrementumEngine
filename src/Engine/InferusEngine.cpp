@@ -78,7 +78,7 @@ namespace InferusEngine {
             Input::PollInput();
 
             auto FrameEnd = std::chrono::high_resolution_clock::now();
-            auto ElapsedTime = FrameBegin - FrameEnd;
+            auto ElapsedTime = FrameEnd - FrameBegin;
 
             if ( ElapsedTime < FRAME_TARGET_TIME ) {
                 std::this_thread::sleep_for(FRAME_TARGET_TIME - ElapsedTime);
