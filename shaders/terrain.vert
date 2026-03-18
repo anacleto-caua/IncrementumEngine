@@ -23,7 +23,7 @@ layout(push_constant) uniform PushConstants {
 
 const int RESOLUTION = 64;
 const float GRID_SIZE = 20.0;
-const float HEIGHT_SCALE = 5.0;
+const float HEIGHT_SCALE = 50.0;
 
 void main() {
     ChunkHeightmapLink currentChunk = chunkLinkDataBuffer.chunks[gl_InstanceIndex];

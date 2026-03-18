@@ -1,7 +1,9 @@
 #include "TerrainSystem.hpp"
 
 #include <cstdint>
+
 #include <imgui.h>
+#include <FastNoiseLite.hpp>
 
 #include "Engine/Systems/Terrain/TerrainConfig.hpp"
 
@@ -12,15 +14,30 @@ namespace TerrainSystem {
 
     glm::vec3* PlayerPos;
 
-    FastNoiseLite BaseNoise;
+    FastNoiseLite ContinentalNoise;
+    FastNoiseLite MountainNoise;
+    FastNoiseLite DetailNoise;
 
     void Create(glm::vec3* pPlayerPos) {
         PlayerPos = pPlayerPos;
 
-        BaseNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
-        BaseNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
-        BaseNoise.SetFractalOctaves(8);
-        BaseNoise.SetFrequency(.02);
+        // 1. Continentalness: Very low frequency, determines overall landmasses and lowlands
+        ContinentalNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+        ContinentalNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
+        ContinentalNoise.SetFractalOctaves(5);
+        ContinentalNoise.SetFrequency(0.002f); 
+
+        // 2. Mountains: Ridged multifractal is great for sharp peaks and valleys
+        MountainNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+        MountainNoise.SetFractalType(FastNoiseLite::FractalType_Ridged);
+        MountainNoise.SetFractalOctaves(6);
+        MountainNoise.SetFrequency(0.015f);
+
+        // 3. Details: High frequency for small bumps so flatlands aren't perfectly smooth
+        DetailNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+        DetailNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
+        DetailNoise.SetFractalOctaves(4);
+        DetailNoise.SetFrequency(0.08f);
     }
 
     void Destroy() {
@@ -117,9 +134,32 @@ namespace TerrainSystem {
             for (int32_t z = 0; z < TerrainRes; z++) {
                 globalZ = z + ((TerrainRes-1) * ChunkPos.y);
 
-                float n = BaseNoise.GetNoise(globalX, globalZ);
-                float remapped = (n + 1.0f) * 0.5f * 65535.0f;
+                float cont = (ContinentalNoise.GetNoise(globalX, globalZ) + 1.0f) * 0.5f;
+                float mount = (MountainNoise.GetNoise(globalX, globalZ) + 1.0f) * 0.5f;
+                float detail = (DetailNoise.GetNoise(globalX, globalZ) + 1.0f) * 0.5f;
 
+                cont = std::pow(cont, 1.5f);
+
+                float mountainMask = 0.0f;
+                if (cont > 0.45f) {
+                    mountainMask = (cont - 0.45f) / 0.55f;
+                    mountainMask = mountainMask * mountainMask * (3.0f - 2.0f * mountainMask);
+                }
+
+                float detailMask = .05f;
+                if (mountainMask <= 0.5f) {
+                    detailMask = 3.0f * ((.05f - mountainMask)*.05f);
+                }
+
+                float elevation = (cont * 0.30f) + (mount * mountainMask * 0.65f) + (detail * detailMask);
+
+                if (elevation <= 0.0) {
+                    elevation = 0.0;
+                } else if (elevation >= 1.0) {
+                    elevation = 1.0;
+                }
+
+                float remapped = elevation * 65535.0f;
                 *ChunkBegin++ = static_cast<uint16_t>(remapped);
             }
         }
