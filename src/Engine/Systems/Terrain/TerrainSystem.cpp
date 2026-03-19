@@ -21,19 +21,16 @@ namespace TerrainSystem {
     void Create(glm::vec3* pPlayerPos) {
         PlayerPos = pPlayerPos;
 
-        // 1. Continentalness: Very low frequency, determines overall landmasses and lowlands
         ContinentalNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
         ContinentalNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
         ContinentalNoise.SetFractalOctaves(5);
-        ContinentalNoise.SetFrequency(0.002f); 
+        ContinentalNoise.SetFrequency(0.002f);
 
-        // 2. Mountains: Ridged multifractal is great for sharp peaks and valleys
         MountainNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
         MountainNoise.SetFractalType(FastNoiseLite::FractalType_Ridged);
         MountainNoise.SetFractalOctaves(6);
         MountainNoise.SetFrequency(0.015f);
 
-        // 3. Details: High frequency for small bumps so flatlands aren't perfectly smooth
         DetailNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
         DetailNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
         DetailNoise.SetFractalOctaves(4);
