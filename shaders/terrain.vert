@@ -22,8 +22,8 @@ layout(push_constant) uniform PushConstants {
 } terrain_push;
 
 const int RESOLUTION = 64;
-const float GRID_SIZE = 20.0;
-const float HEIGHT_SCALE = 50.0;
+const float GRID_SCALE = 50.0;
+const float HEIGHT_SCALE = 30.0 * sqrt(GRID_SCALE); // Still doesn't feel like it
 
 void main() {
     ChunkHeightmapLink currentChunk = chunkLinkDataBuffer.chunks[gl_InstanceIndex];
@@ -33,8 +33,8 @@ void main() {
         return;
     }
 
-    float chunkOffsetX = float(currentChunk.worldPos.x) * GRID_SIZE;
-    float chunkOffsetZ = float(currentChunk.worldPos.y) * GRID_SIZE;
+    float chunkOffsetX = float(currentChunk.worldPos.x) * GRID_SCALE;
+    float chunkOffsetZ = float(currentChunk.worldPos.y) * GRID_SCALE;
 
     int xIndex = gl_VertexIndex % RESOLUTION;
     int zIndex = gl_VertexIndex / RESOLUTION;
@@ -43,8 +43,8 @@ void main() {
     float v = float(zIndex) / float(RESOLUTION - 1);
     texCoord = vec2(u, v);
 
-    float localX = u * GRID_SIZE;
-    float localZ = v * GRID_SIZE;
+    float localX = u * GRID_SCALE;
+    float localZ = v * GRID_SCALE;
 
     float height = texture(heightmapSampler, vec3(u, v, float(gl_InstanceIndex))).r;
     vec3 finalWorldPos = vec3(localZ + chunkOffsetX, height * HEIGHT_SCALE, localX + chunkOffsetZ);

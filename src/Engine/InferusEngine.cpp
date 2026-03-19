@@ -48,7 +48,7 @@ namespace InferusEngine {
         TerrainRenderer::BindCamera(Camera);
 
         Camera::FlyBy::Create(Camera);
-        Camera.Position.y = 10;
+        Camera.Position.y = 50;
         Camera::FlyBy::Update(0);
 
         return InferusResult::SUCCESS;

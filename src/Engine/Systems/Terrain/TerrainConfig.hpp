@@ -6,9 +6,31 @@
 
 #include "Engine/Systems/Terrain/TerrainTypes.hpp"
 
+/**
+ * Most variables here should match something at the terrain shaders so keep and eye out for it.
+ */
+
 namespace TerrainConfig {
     namespace Chunk {
         constexpr uint32_t RESOLUTION = 64;
+
+        constexpr double CHUNK_SCALE = 50.0;
+
+        constexpr double HEIGHT_SCALE = []() {
+
+            double pseudo_height_scale = 30.0;
+            double x = CHUNK_SCALE;
+
+            double prev = 0.0;
+
+            // Newton-Raphson method for approximating sqrt(CHUNK_SCALE)
+            while (x != prev) {
+                prev = x;
+                x = 0.5 * (x + CHUNK_SCALE / x);
+            }
+
+            return pseudo_height_scale * x;
+        }();
 
         constexpr uint32_t INDICES_COUNT = (RESOLUTION - 1) * (RESOLUTION - 1) * 6;
 

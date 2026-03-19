@@ -1,5 +1,6 @@
 #include "TerrainSystem.hpp"
 
+#include <cmath>
 #include <cstdint>
 
 #include <imgui.h>
@@ -57,8 +58,17 @@ namespace TerrainSystem {
         ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_FirstUseEver);
         ImGui::Begin("Terrain System");
 
-        uint32_t x = static_cast<uint32_t>(PlayerPos->x/TerrainConfig::Chunk::RESOLUTION);
-        uint32_t z = static_cast<uint32_t>(PlayerPos->z/TerrainConfig::Chunk::RESOLUTION);
+        uint32_t x = static_cast<uint32_t>(std::floor(PlayerPos->x/TerrainConfig::Chunk::CHUNK_SCALE));
+        uint32_t z = static_cast<uint32_t>(std::floor(PlayerPos->z/TerrainConfig::Chunk::CHUNK_SCALE));
+
+        ImGui::TextDisabled("Player pos:");
+        ImGui::Indent();
+        ImGui::Text("x: %05f y: %05f z: %05f", PlayerPos->x, PlayerPos->y, PlayerPos->z);
+        ImGui::Unindent();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
 
         ImGui::TextDisabled("Current player chunk:");
         ImGui::Indent();
@@ -88,8 +98,8 @@ namespace TerrainSystem {
 
     void FullWriteChunkData() {
         glm::ivec2 player_coord;
-        player_coord.x = PlayerPos->x/TerrainConfig::Chunk::RESOLUTION;
-        player_coord.y = PlayerPos->z/TerrainConfig::Chunk::RESOLUTION;
+        player_coord.x = static_cast<int32_t>(std::floor(PlayerPos->x/TerrainConfig::Chunk::CHUNK_SCALE));
+        player_coord.y = static_cast<int32_t>(std::floor(PlayerPos->z/TerrainConfig::Chunk::CHUNK_SCALE));
 
         uint32_t coords_counter = 0;
         int32_t radius = TerrainConfig::ChunkToHeightmapLinking::EXPLORATION_RADIUS;
