@@ -90,8 +90,8 @@ namespace Renderer {
             DepthBufferDesc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
             Image = ImageSystem::add(DepthBufferDesc);
-            ImageSystem::Image DepthImage = ImageSystem::get(DepthBuffer::Image);
-            DepthImage.format = RendererConfig::DepthBuffer::Format;
+            ImageSystem::Image* DepthImage = ImageSystem::get(DepthBuffer::Image);
+            DepthImage->format = RendererConfig::DepthBuffer::Format;
 
             // Despite having a creation format the image still starts as a _UNDEFINED, so transit it a first time
             VkImageMemoryBarrier barrier;
@@ -216,7 +216,7 @@ namespace Renderer {
         // ...
         DepthAttachment = Recipes::DepthAttachment::Default();
         DepthBuffer::Create(Extent.width, Extent.height);
-        VkImageView DepthBufferImageView = ImageSystem::View::get(DepthBuffer::ImageView).imageView;
+        VkImageView DepthBufferImageView = ImageSystem::View::get(DepthBuffer::ImageView)->imageView;
         DepthAttachment.imageView = DepthBufferImageView;
 
         RenderingInfo = {};
@@ -346,7 +346,7 @@ namespace Renderer {
             .extent = Extent
         };
         DepthBuffer::Recreate(Width, Height);
-        VkImageView DepthBufferImageView = ImageSystem::View::get(DepthBuffer::ImageView).imageView;
+        VkImageView DepthBufferImageView = ImageSystem::View::get(DepthBuffer::ImageView)->imageView;
         DepthAttachment.imageView = DepthBufferImageView;
 
         RecreateSwapchain(Swapchain);

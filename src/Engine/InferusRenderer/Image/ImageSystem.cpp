@@ -1,8 +1,6 @@
 #include "ImageSystem.hpp"
 
-#include <vector>
-#include <cstdint>
-
+#include "Utils/ResourcePool.hpp"
 #include "Engine/InferusRenderer/VulkanContext.hpp"
 #include "Engine/InferusRenderer/RendererConfig.hpp"
 
@@ -12,40 +10,28 @@ namespace ImageSystem {
         void Destroy();
     }
 
-    std::vector<Image> Data;
-    std::vector<Id> FreeIndices;
+    ResourcePool<Image> ImagePool;
 
-    void clear(Image& image) {
-        if (image.image) { vmaDestroyImage(VulkanContext::VmaAllocator, image.image, image.allocation); }
-        image.image = VK_NULL_HANDLE;
+    void clear(Image* image) {
+        if (image->image) { vmaDestroyImage(VulkanContext::VmaAllocator, image->image, image->allocation); }
+        image->image = VK_NULL_HANDLE;
     }
 
     void Create() {
-        Data.clear();
-        Data.reserve(RendererConfig::ImageSystem::DATA_RESERVE_CAPACITY);
-        FreeIndices.clear();
-        FreeIndices.reserve(RendererConfig::ImageSystem::FREE_INDICES_RESERVE_CAPACITY);
+        ImagePool.Reserve(RendererConfig::ImageSystem::RESERVE_CAPACITY);
         View::Create();
     }
 
     void Destroy() {
-        for (auto image: Data) {
-            clear(image);
+        for (Image& image: ImagePool) {
+            clear(&image);
         }
+        ImagePool.Clear();
         View::Destroy();
     }
 
     Id add(ImageCreateInfo imageDesc) {
-        Id id;
         Image image{};
-
-        if(FreeIndices.empty()) {
-            id = { .index = (uint32_t)Data.size() };
-            Data.resize(Data.size() + 1);
-        } else {
-            id = { FreeIndices.back() };
-            FreeIndices.pop_back();
-        }
 
         VkImageCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -76,17 +62,17 @@ namespace ImageSystem {
         image.format = imageDesc.format;
         image.layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-        Data[id.index] = image;
-        return id;
+        return ImagePool.Add(image);
     }
 
-    Image& get(Id id) {
-        return Data[id.index];
+    Image* get(Id id) {
+        return ImagePool.Get(id);
     }
 
     void del(Id id) {
-        clear(Data[id.index]);
-        FreeIndices.push_back(id);
+        Image* image = ImagePool.Get(id);
+        clear(image);
+        ImagePool.Remove(id);
     }
 
     void upload(Id id, void *upload_data, size_t size) {
@@ -96,17 +82,17 @@ namespace ImageSystem {
         (void)size;
     }
 
-    VkImageViewCreateInfo fillDefaultImageViewCreateInfo(Image& image) {
+    VkImageViewCreateInfo fillDefaultImageViewCreateInfo(Image* image) {
         VkImageViewCreateInfo imageViewCreateInfo {};
         imageViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        imageViewCreateInfo.image = image.image;
+        imageViewCreateInfo.image = image->image;
         imageViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-        imageViewCreateInfo.format = image.format;
+        imageViewCreateInfo.format = image->format;
         imageViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         imageViewCreateInfo.subresourceRange.baseMipLevel = 0;
-        imageViewCreateInfo.subresourceRange.levelCount = image.mipLevels;
+        imageViewCreateInfo.subresourceRange.levelCount = image->mipLevels;
         imageViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-        imageViewCreateInfo.subresourceRange.layerCount = image.arrayLayers;
+        imageViewCreateInfo.subresourceRange.layerCount = image->arrayLayers;
         imageViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
         imageViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
         imageViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -115,53 +101,41 @@ namespace ImageSystem {
     }
 
     namespace View {
-        std::vector<ImageView> Data;
-        std::vector<Id> FreeIndices;
+        ResourcePool<ImageView> ViewPool;
 
-        void clear(ImageView imageView) {
-            if (imageView.imageView) {
-                vkDestroyImageView(VulkanContext::Device, imageView.imageView, nullptr);
+        void clear(ImageView* imageView) {
+            if (imageView->imageView) {
+                vkDestroyImageView(VulkanContext::Device, imageView->imageView, nullptr);
             }
         }
 
         void Create() {
-            Data.clear();
-            Data.reserve(RendererConfig::ImageSystem::DATA_RESERVE_CAPACITY);
-            FreeIndices.clear();
-            FreeIndices.reserve(RendererConfig::ImageSystem::FREE_INDICES_RESERVE_CAPACITY);
+            ViewPool.Reserve(RendererConfig::ImageSystem::View::RESERVE_CAPACITY);
         }
 
         void Destroy() {
-            for (auto image: Data) {
-                clear(image);
+            for (ImageView& view: ViewPool) {
+                clear(&view);
             }
+            ViewPool.Clear();
         }
 
         Id add(VkImageViewCreateInfo& createInfo) {
             ImageView imageView{};
-            Id id;
-
-            if(FreeIndices.empty()) {
-                id = { .index = (uint32_t)Data.size() };
-                Data.resize(Data.size() + 1);
-            } else {
-                id = { FreeIndices.back() };
-                FreeIndices.pop_back();
-            }
 
             vkCreateImageView(VulkanContext::Device, &createInfo, nullptr, &imageView.imageView);
 
-            Data[id.index] = imageView;
-            return id;
+            return ViewPool.Add(imageView);
         }
 
-        ImageView& get(Id id) {
-            return Data[id.index];
+        ImageView* get(Id id) {
+            return ViewPool.Get(id);
         }
 
         void del(Id id) {
-            clear(Data[id.index]);
-            FreeIndices.push_back(id);
+            ImageView* view = ViewPool.Get(id);
+            clear(view);
+            ViewPool.Remove(id);
         }
     };
 }

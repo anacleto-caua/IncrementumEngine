@@ -66,7 +66,7 @@ namespace TerrainRenderer {
                 .usage = BufferSystem::CreateInfoUsage::INDEX,
             };
             Indices = BufferSystem::add(IndiceCreateInfo);
-            VkBuffer = BufferSystem::get(PlaneMesh::Indices).buffer;
+            VkBuffer = BufferSystem::get(PlaneMesh::Indices)->buffer;
 
             // TODO:
             // It's kinda of dumb I keep creating single usage staging buffers
@@ -121,7 +121,7 @@ namespace TerrainRenderer {
                 HeightmapImageCreateDesc.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
                 Heightmap::Image = ImageSystem::add(HeightmapImageCreateDesc);
-                ImageSystem::Image HeightmapImage = ImageSystem::get(Heightmap::Image);
+                ImageSystem::Image* HeightmapImage = ImageSystem::get(Heightmap::Image);
                 auto HeightmapImageViewCreateInfo = ImageSystem::fillDefaultImageViewCreateInfo(HeightmapImage);
                 Heightmap::ImageView = ImageSystem::View::add(HeightmapImageViewCreateInfo);
 
@@ -159,7 +159,7 @@ namespace TerrainRenderer {
                 auto HeightmapImageViewValue = ImageSystem::View::get(Heightmap::ImageView);
                 VkDescriptorImageInfo HeightmapTextureDescriptorImageInfo {};
                 HeightmapTextureDescriptorImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                HeightmapTextureDescriptorImageInfo.imageView = HeightmapImageViewValue.imageView;
+                HeightmapTextureDescriptorImageInfo.imageView = HeightmapImageViewValue->imageView;
                 HeightmapTextureDescriptorImageInfo.sampler = Heightmap::Sampler;
 
                 VkDescriptorSetLayoutBinding HeightmapSetLayoutBinding {};
@@ -181,9 +181,9 @@ namespace TerrainRenderer {
                 // TODO: The fact I'm not carrying offsets arround is most definitvelly a bad signal
                 auto ChunkLinkBuffer = BufferSystem::get(ChunkLinks::Data);
                 VkDescriptorBufferInfo ChunkToHeightmapDescriptorBufferInfo {};
-                ChunkToHeightmapDescriptorBufferInfo.buffer = ChunkLinkBuffer.buffer;
+                ChunkToHeightmapDescriptorBufferInfo.buffer = ChunkLinkBuffer->buffer;
                 ChunkToHeightmapDescriptorBufferInfo.offset = 0;
-                ChunkToHeightmapDescriptorBufferInfo.range = ChunkLinkBuffer.size;
+                ChunkToHeightmapDescriptorBufferInfo.range = ChunkLinkBuffer->size;
 
                 VkDescriptorSetLayoutBinding ChunkLinkBinding {};
                 ChunkLinkBinding.binding = 1;
@@ -427,8 +427,8 @@ namespace TerrainRenderer {
         BufferSystem::unmap(Heightmap::StagingBuffer);
 
         // Upload heightmap to staging buffer
-        BufferSystem::Buffer HeightmapStagingBuffer = BufferSystem::get(Heightmap::StagingBuffer);
-        ImageSystem::Image HeightmapImage = ImageSystem::get(Heightmap::Image);
+        BufferSystem::Buffer* HeightmapStagingBuffer = BufferSystem::get(Heightmap::StagingBuffer);
+        ImageSystem::Image* HeightmapImage = ImageSystem::get(Heightmap::Image);
 
         // Transfer data to heightmap image
         VkImageMemoryBarrier barrier1 = Recipes::ImageMemoryBarrier::TransferDest(HeightmapImage);
@@ -447,8 +447,8 @@ namespace TerrainRenderer {
         VkBufferImageCopy HeightmapCopy = Recipes::BufferImageCopy::Default(HeightmapImage);
         vkCmdCopyBufferToImage(
             cmd,
-            HeightmapStagingBuffer.buffer,
-            HeightmapImage.image,
+            HeightmapStagingBuffer->buffer,
+            HeightmapImage->image,
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1,
             &HeightmapCopy

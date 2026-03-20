@@ -3,6 +3,8 @@
 #include <vulkan/vulkan.h>
 #include <vma/vk_mem_alloc.h>
 
+#include "Utils/Handle.hpp"
+
 namespace ImageSystem {
     struct ImageCreateInfo {
         uint32_t width;
@@ -28,31 +30,27 @@ namespace ImageSystem {
         VkImageLayout layout;
     };
 
-    struct Id {
-        uint32_t index;
-    };
+    using Id = Handle<Image>;
 
     void Create();
     void Destroy();
 
     Id add(ImageCreateInfo imageCreateDesc);
-    Image& get(Id id);
+    Image* get(Id id);
     void del(Id id);
     void upload(Id id, void *data, size_t size);
 
-    VkImageViewCreateInfo fillDefaultImageViewCreateInfo(Image& image);
+    VkImageViewCreateInfo fillDefaultImageViewCreateInfo(Image* image);
 
     namespace View {
         struct ImageView {
             VkImageView imageView;
         };
 
-        struct Id {
-            uint32_t index;
-        };
+        using Id = Handle<ImageView>;
 
         Id add(VkImageViewCreateInfo& createInfo);
-        ImageView& get(Id id);
+        ImageView* get(Id id);
         void del(Id id);
     };
 };

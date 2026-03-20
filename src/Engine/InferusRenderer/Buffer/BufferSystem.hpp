@@ -3,6 +3,8 @@
 #include <vulkan/vulkan.h>
 #include <vma/vk_mem_alloc.h>
 
+#include "Utils/Handle.hpp"
+
 namespace BufferSystem {
     enum class CreateInfoMemoryType {
         // STRICT GPU-ONLY.
@@ -27,10 +29,6 @@ namespace BufferSystem {
         _BUFFER_USAGE_COUNT_
     };
 
-    struct Id {
-        uint32_t index;
-    };
-
     struct Buffer {
         VkBuffer buffer;
         VmaAllocation allocation;
@@ -45,13 +43,15 @@ namespace BufferSystem {
         CreateInfoUsage usage;
     };
 
+    using Id = Handle<Buffer>;
+
     void Create();
     void Destroy();
 
     Id add(CreateInfo createDesc);
     void del(Id id);
 
-    Buffer& get(Id id);
+    Buffer* get(Id id);
 
     void copy(Id srcId, Id dstId, const size_t size);
     void copy(VkCommandBuffer &cmd, Id srcId, Id dstId, const size_t size);

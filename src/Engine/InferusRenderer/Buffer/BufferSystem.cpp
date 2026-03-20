@@ -1,48 +1,35 @@
 #include "BufferSystem.hpp"
 
-#include <vector>
 #include <cassert>
 
 #include <spdlog/spdlog.h>
 
+#include "Utils/ResourcePool.hpp"
 #include "Engine/InferusRenderer/VulkanContext.hpp"
 #include "Engine/InferusRenderer/RendererConfig.hpp"
 #include "Engine/InferusRenderer/Buffer/BufferCreateOptions.hpp"
 
 namespace BufferSystem {
 
-    std::vector<Buffer> Data;
-    std::vector<Id> FreeIndices;
+    ResourcePool<Buffer> BufferPool;
 
-    void clear(Buffer& buffer);
+    void clear(Buffer* buffer);
     void* map(VmaAllocation alloc);
     void unmap(VmaAllocation alloc);
 
     void Create() {
-
-        Data.clear();
-        Data.reserve(RendererConfig::BufferSystem::DATA_RESERVE_CAPACITY);
-        FreeIndices.clear();
-        FreeIndices.reserve(RendererConfig::BufferSystem::FREE_INDICES_RESERVE_CAPACITY);
+        BufferPool.Reserve(RendererConfig::BufferSystem::RESERVE_CAPACITY);
     }
 
     void Destroy() {
-        for (Buffer& buffer : Data) {
-            clear(buffer);
+        for (Buffer& buffer : BufferPool) {
+            clear(&buffer);
         }
+        BufferPool.Clear();
     }
 
     Id add(CreateInfo createDesc) {
-        Id id{};
         Buffer buffer{};
-
-        if (FreeIndices.size() > 0) {
-            id = FreeIndices.back();
-            FreeIndices.pop_back();
-        } else {
-            id.index = Data.size();
-            Data.push_back(buffer);
-        }
 
         BufferCreateOptions::BufferOptions options = BufferCreateOptions::GetBufferOptions(createDesc.memType, createDesc.usage);
 
@@ -61,25 +48,22 @@ namespace BufferSystem {
         }
 
         buffer.size = createDesc.size;
-        Data[id.index] = buffer;
 
-        return id;
+        return BufferPool.Add(buffer);
     }
 
-    Buffer& get(Id id) {
-        assert(id.index < Data.size() && "Trying to access out of bounds buffer index");
-
-        Buffer& buffer = Data[id.index];
-
-        assert(buffer.buffer != VK_NULL_HANDLE && "Attempting to access a deleted or uninitialized buffer");
-
+    Buffer* get(Id id) {
+        Buffer* buffer = BufferPool.Get(id);
+        assert(buffer != nullptr && "Attempted to access stale or invalid Buffer handle!");
         return buffer;
     }
 
     void del(Id id) {
-        Buffer& buffer = get(id);
-        clear(buffer);
-        FreeIndices.push_back(id);
+        Buffer* buffer = get(id);
+        if (buffer) {
+            clear(buffer);
+            BufferPool.Remove(id);
+        }
     }
 
     void copy(VkCommandBuffer &cmd, Id srcId, Id dstId, const size_t size) {
@@ -87,15 +71,15 @@ namespace BufferSystem {
         copyRegion.srcOffset = 0;
         copyRegion.dstOffset = 0;
         copyRegion.size = size;
-        vkCmdCopyBuffer(cmd, get(srcId).buffer, get(dstId).buffer, 1, &copyRegion);
+        vkCmdCopyBuffer(cmd, get(srcId)->buffer, get(dstId)->buffer, 1, &copyRegion);
     }
 
     void copy(Id srcId, Id dstId, const size_t size) {
-        vmaCopyMemoryToAllocation(VulkanContext::VmaAllocator, map(get(srcId).allocation), get(dstId).allocation, 0, size);
+        vmaCopyMemoryToAllocation(VulkanContext::VmaAllocator, map(get(srcId)->allocation), get(dstId)->allocation, 0, size);
     }
 
     void upload(Id dstId, void* upload_Data) {
-        upload(dstId, upload_Data, get(dstId).size);
+        upload(dstId, upload_Data, get(dstId)->size);
     }
 
     void upload(VkCommandBuffer &cmd, Id stagingId, Id dstId, const void* upload_Data, const size_t size) {
@@ -105,17 +89,17 @@ namespace BufferSystem {
     }
 
     void upload(Id dstId, const void* upload_Data, const size_t size) {
-        VmaAllocation alloc = get(dstId).allocation;
+        VmaAllocation alloc = get(dstId)->allocation;
         memcpy(map(alloc), upload_Data, size);
         unmap(alloc);
     }
 
     void* map(Id id) {
-        return map(get(id).allocation);
+        return map(get(id)->allocation);
     }
 
     void unmap(Id id) {
-        unmap(get(id).allocation);
+        unmap(get(id)->allocation);
     }
 
     void* map(const VmaAllocation alloc) {
@@ -129,9 +113,9 @@ namespace BufferSystem {
         vmaUnmapMemory(VulkanContext::VmaAllocator, alloc);
     }
 
-    void clear(Buffer& buffer) {
-        if (buffer.buffer) { vmaDestroyBuffer(VulkanContext::VmaAllocator, buffer.buffer, buffer.allocation); }
-        buffer.buffer = VK_NULL_HANDLE;
-        buffer.allocation = VK_NULL_HANDLE;
+    void clear(Buffer* buffer) {
+        if (buffer->buffer) { vmaDestroyBuffer(VulkanContext::VmaAllocator, buffer->buffer, buffer->allocation); }
+        buffer->buffer = VK_NULL_HANDLE;
+        buffer->allocation = VK_NULL_HANDLE;
     }
 }
