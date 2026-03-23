@@ -18,4 +18,7 @@ namespace RendererConfig {
     namespace DepthBuffer {
         CONFIG VkFormat Format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     };
+    namespace TransferSystem {
+        CONFIG size_t STAGING_BUFFER_SIZE = 1024 * 1024;
+    };
 };

@@ -9,6 +9,7 @@
 #include "Engine/Core/Window.hpp"
 #include "Engine/InferusRenderer/Recipes.hpp"
 #include "Engine/InferusRenderer/VulkanContext.hpp"
+#include "Engine/InferusRenderer/TransferSystem.hpp"
 #include "Engine/InferusRenderer/RendererConfig.hpp"
 #include "Engine/InferusRenderer/Image/ImageSystem.hpp"
 #include "Engine/InferusRenderer/Buffer/BufferSystem.hpp"
@@ -16,12 +17,23 @@
 #include "Engine/InferusRenderer/Passes/TerrainRenderer.hpp"
 
 namespace Renderer {
-    struct FrameData {
-        float DeltaTime = 0;
+    // TODO: They became the same... Abstract now!
+    struct RenderFrameData {
         VkFence InFlight = VK_NULL_HANDLE;
         VkSemaphore ImageAvailable = VK_NULL_HANDLE;
         VkCommandPool CmdPool = VK_NULL_HANDLE;
         VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
+    };
+    struct TransferFrameData {
+        VkFence InFlight = VK_NULL_HANDLE;
+        VkSemaphore TransferComplete = VK_NULL_HANDLE;
+        VkCommandPool CmdPool = VK_NULL_HANDLE;
+        VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
+    };
+
+    struct FrameData {
+        RenderFrameData Render;
+        TransferFrameData Transfer;
     };
 
     struct SwapchainImage {
@@ -54,8 +66,11 @@ namespace Renderer {
     VkRenderingAttachmentInfo DepthAttachment {};
     VkRenderingInfo RenderingInfo {};
 
-    VkCommandBufferBeginInfo PipelineCmdBeginInfo {};
-    VkSubmitInfo PipelineCmdSubmitInfo {};
+    VkCommandBufferBeginInfo TransferingCmdBeginInfo {};
+    VkSubmitInfo TransferingCmdSubmitInfo {};
+
+    VkCommandBufferBeginInfo RenderingCmdBeginInfo {};
+    VkSubmitInfo RenderingCmdSubmitInfo {};
 
     void RefreshExtent();
     void DestroySwapchain(VkSwapchainKHR OldSwapchain);
@@ -130,6 +145,8 @@ namespace Renderer {
         BufferSystem::Create();
         ImageSystem::Create();
 
+        TransferSystem::Create();
+
         QuerySurfaceCapabilities();
         Extent = SurfaceCapabilities.currentExtent;
         SwapchainImageCount = SurfaceCapabilities.minImageCount + 1;
@@ -178,10 +195,16 @@ namespace Renderer {
             FenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
             FenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-            VkCommandPoolCreateInfo CommandPoolCreateInfo {};
-            CommandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-            CommandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-            CommandPoolCreateInfo.queueFamilyIndex = VulkanContext::Graphics.Index;
+            VkCommandPoolCreateInfo DefaultPoolCreateInfo {};
+            DefaultPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            DefaultPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+            DefaultPoolCreateInfo.queueFamilyIndex = -1;
+
+            VkCommandPoolCreateInfo RenderCmdPoolCreateInfo = DefaultPoolCreateInfo;
+            RenderCmdPoolCreateInfo.queueFamilyIndex = VulkanContext::Graphics.Index;
+
+            VkCommandPoolCreateInfo TransferCmdPoolCreateInfo = DefaultPoolCreateInfo;
+            TransferCmdPoolCreateInfo.queueFamilyIndex = VulkanContext::Transfer.Index;
 
             VkCommandBufferAllocateInfo AllocInfo {};
             AllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -190,12 +213,27 @@ namespace Renderer {
             AllocInfo.commandBufferCount = 1;
 
             for (FrameData &Frame : Frames) {
-                vkCreateSemaphore(VulkanContext::Device, &SemaphoreCreateInfo, nullptr, &Frame.ImageAvailable);
-                vkCreateFence(VulkanContext::Device, &FenceCreateInfo, nullptr, &Frame.InFlight);
+                // TransferFrame
+                {
+                    TransferFrameData &TransferFD = Frame.Transfer;
+                    vkCreateSemaphore(VulkanContext::Device, &SemaphoreCreateInfo, nullptr, &TransferFD.TransferComplete);
+                    vkCreateFence(VulkanContext::Device, &FenceCreateInfo, nullptr, &TransferFD.InFlight);
 
-                vkCreateCommandPool(VulkanContext::Device, &CommandPoolCreateInfo, nullptr, &Frame.CmdPool);
-                AllocInfo.commandPool = Frame.CmdPool;
-                vkAllocateCommandBuffers(VulkanContext::Device, &AllocInfo, &Frame.CmdBuffer);
+                    vkCreateCommandPool(VulkanContext::Device, &TransferCmdPoolCreateInfo, nullptr, &TransferFD.CmdPool);
+                    AllocInfo.commandPool = TransferFD.CmdPool;
+                    vkAllocateCommandBuffers(VulkanContext::Device, &AllocInfo, &TransferFD.CmdBuffer);
+                }
+
+                // RenderFrame
+                {
+                    RenderFrameData &RenderFD = Frame.Render;
+                    vkCreateSemaphore(VulkanContext::Device, &SemaphoreCreateInfo, nullptr, &RenderFD.ImageAvailable);
+                    vkCreateFence(VulkanContext::Device, &FenceCreateInfo, nullptr, &RenderFD.InFlight);
+
+                    vkCreateCommandPool(VulkanContext::Device, &RenderCmdPoolCreateInfo, nullptr, &RenderFD.CmdPool);
+                    AllocInfo.commandPool = RenderFD.CmdPool;
+                    vkAllocateCommandBuffers(VulkanContext::Device, &AllocInfo, &RenderFD.CmdBuffer);
+                }
             }
         }
 
@@ -230,19 +268,32 @@ namespace Renderer {
         RenderingInfo.pColorAttachments = &ColorAttachment;
         RenderingInfo.pDepthAttachment = &DepthAttachment;
 
-        PipelineCmdBeginInfo = {
+        RenderingCmdBeginInfo = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .pNext = nullptr,
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
             .pInheritanceInfo = nullptr
         };
 
-        PipelineCmdSubmitInfo = {};
-        PipelineCmdSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        PipelineCmdSubmitInfo.waitSemaphoreCount = 1;
-        PipelineCmdSubmitInfo.pWaitDstStageMask = G_PIPELINE_WAIT_STAGES;
-        PipelineCmdSubmitInfo.commandBufferCount = 1;
-        PipelineCmdSubmitInfo.signalSemaphoreCount = 1;
+        RenderingCmdSubmitInfo = {};
+        RenderingCmdSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        RenderingCmdSubmitInfo.waitSemaphoreCount = 2;
+        RenderingCmdSubmitInfo.pWaitDstStageMask = G_PIPELINE_WAIT_STAGES;
+        RenderingCmdSubmitInfo.commandBufferCount = 1;
+        RenderingCmdSubmitInfo.signalSemaphoreCount = 1;
+
+        TransferingCmdBeginInfo = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .pNext = nullptr,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+            .pInheritanceInfo = nullptr
+        };
+
+        TransferingCmdSubmitInfo = {};
+        TransferingCmdSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        TransferingCmdSubmitInfo.waitSemaphoreCount = 0;
+        TransferingCmdSubmitInfo.commandBufferCount = 1;
+        TransferingCmdSubmitInfo.signalSemaphoreCount = 1;
 
         if (
             ImGuiRenderer::Create() !=  InferusResult::SUCCESS
@@ -267,13 +318,21 @@ namespace Renderer {
         TerrainRenderer::Destroy();
         ImGuiRenderer::Destroy();
 
+        TransferSystem::Destroy();
+
         BufferSystem::Destroy();
         ImageSystem::Destroy();
 
         for (FrameData &Frame : Frames) {
-            if (Frame.ImageAvailable) { vkDestroySemaphore(VulkanContext::Device, Frame.ImageAvailable, nullptr); }
-            if (Frame.InFlight) { vkDestroyFence(VulkanContext::Device, Frame.InFlight, nullptr); }
-            if (Frame.CmdPool) { vkDestroyCommandPool(VulkanContext::Device, Frame.CmdPool, nullptr); }
+            // Transfer
+            if (Frame.Transfer.TransferComplete) { vkDestroySemaphore(VulkanContext::Device, Frame.Transfer.TransferComplete, nullptr); }
+            if (Frame.Transfer.InFlight) { vkDestroyFence(VulkanContext::Device, Frame.Transfer.InFlight, nullptr); }
+            if (Frame.Transfer.CmdPool) { vkDestroyCommandPool(VulkanContext::Device, Frame.Transfer.CmdPool, nullptr); }
+
+            // Render
+            if (Frame.Render.ImageAvailable) { vkDestroySemaphore(VulkanContext::Device, Frame.Render.ImageAvailable, nullptr); }
+            if (Frame.Render.InFlight) { vkDestroyFence(VulkanContext::Device, Frame.Render.InFlight, nullptr); }
+            if (Frame.Render.CmdPool) { vkDestroyCommandPool(VulkanContext::Device, Frame.Render.CmdPool, nullptr); }
         }
 
         CleanupSwapchainImages();
@@ -354,26 +413,44 @@ namespace Renderer {
 
     void Render() {
         FrameData& TargetFrame = Frames[TargetFrameIndex];
-        VkCommandBuffer& cmd = TargetFrame.CmdBuffer;
 
-        vkWaitForFences(VulkanContext::Device, 1, &TargetFrame.InFlight, VK_TRUE, UINT64_MAX);
+        // Transfering
+        VkCommandBuffer& TransferCmd = TargetFrame.Transfer.CmdBuffer;
+        // TODO: Looks wrong
+        vkWaitForFences(VulkanContext::Device, 1, &TargetFrame.Transfer.InFlight, VK_TRUE, UINT64_MAX);
+
+        vkResetCommandBuffer(TransferCmd, 0);
+        vkBeginCommandBuffer(TransferCmd, &TransferingCmdBeginInfo);
+        vkResetFences(VulkanContext::Device, 1, &TargetFrame.Transfer.InFlight);
+
+        vkEndCommandBuffer(TransferCmd);
+        VkSemaphore TransferSignalSemaphores[] = { TargetFrame.Transfer.TransferComplete };
+
+        TransferingCmdSubmitInfo.pCommandBuffers = &TransferCmd;
+        TransferingCmdSubmitInfo.pSignalSemaphores = TransferSignalSemaphores;
+        vkQueueSubmit(VulkanContext::Transfer.Queue, 1, &TransferingCmdSubmitInfo, TargetFrame.Transfer.InFlight);
+
+        // Rendering
+        VkCommandBuffer& RenderCmd = TargetFrame.Render.CmdBuffer;
+        vkWaitForFences(VulkanContext::Device, 1, &TargetFrame.Render.InFlight, VK_TRUE, UINT64_MAX);
 
         VkResult result = vkAcquireNextImageKHR(
             VulkanContext::Device,
             Swapchain,
             UINT64_MAX,
-            TargetFrame.ImageAvailable,
+            TargetFrame.Render.ImageAvailable,
             VK_NULL_HANDLE,
             &TargetImageViewIndex
         );
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+            vkDeviceWaitIdle(VulkanContext::Device);
             return;
         }
 
-        vkResetCommandBuffer(cmd, 0);
-        vkBeginCommandBuffer(cmd, &PipelineCmdBeginInfo);
+        vkResetCommandBuffer(RenderCmd, 0);
+        vkBeginCommandBuffer(RenderCmd, &RenderingCmdBeginInfo);
 
-        vkResetFences(VulkanContext::Device, 1, &TargetFrame.InFlight);
+        vkResetFences(VulkanContext::Device, 1, &TargetFrame.Render.InFlight);
 
         VkImageMemoryBarrier RenderingBarrier =
             Recipes::ImageMemoryBarrier::Rendering::EnableRendering(SwapchainImages[TargetImageViewIndex].Image);
@@ -381,7 +458,7 @@ namespace Renderer {
         VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
         vkCmdPipelineBarrier(
-            cmd,
+            RenderCmd,
             srcStage,
             dstStage,
             0,
@@ -391,19 +468,19 @@ namespace Renderer {
         );
 
         ColorAttachment.imageView = SwapchainImages[TargetImageViewIndex].ImageView;
-        vkCmdBeginRendering(cmd, &RenderingInfo);
-        vkCmdSetViewport(cmd, 0, 1, &Viewport);
-        vkCmdSetScissor(cmd, 0, 1, &Scissor);
+        vkCmdBeginRendering(RenderCmd, &RenderingInfo);
+        vkCmdSetViewport(RenderCmd, 0, 1, &Viewport);
+        vkCmdSetScissor(RenderCmd, 0, 1, &Scissor);
 
         // Actual frame begins
 
-        TerrainRenderer::Render(cmd);
+        TerrainRenderer::Render(RenderCmd);
 
-        ImGuiRenderer::Render(cmd);
+        ImGuiRenderer::Render(RenderCmd);
 
         // Actual frame ends
 
-        vkCmdEndRendering(cmd);
+        vkCmdEndRendering(RenderCmd);
 
         VkImageMemoryBarrier PresentingBarrier =
             Recipes::ImageMemoryBarrier::Rendering::EnablePresenting(SwapchainImages[TargetImageViewIndex].Image);
@@ -411,7 +488,7 @@ namespace Renderer {
         VkPipelineStageFlags dstStage2 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 
         vkCmdPipelineBarrier(
-            cmd,
+            RenderCmd,
             srcStage2,
             dstStage2,
             0,
@@ -420,18 +497,18 @@ namespace Renderer {
             1, &PresentingBarrier
         );
 
-        vkEndCommandBuffer(cmd);
+        vkEndCommandBuffer(RenderCmd);
 
-        VkSemaphore RenderWaitSemaphores[] = { TargetFrame.ImageAvailable };
+        VkSemaphore RenderWaitSemaphores[] = { TargetFrame.Transfer.TransferComplete, TargetFrame.Render.ImageAvailable };
         VkSemaphore RenderSignalSemaphores[] = { SwapchainImages[TargetImageViewIndex].RenderFinished };
 
-        PipelineCmdSubmitInfo.pCommandBuffers = &cmd;
-        PipelineCmdSubmitInfo.pWaitSemaphores = RenderWaitSemaphores;
-        PipelineCmdSubmitInfo.pSignalSemaphores = RenderSignalSemaphores;
+        RenderingCmdSubmitInfo.pCommandBuffers = &RenderCmd;
+        RenderingCmdSubmitInfo.pWaitSemaphores = RenderWaitSemaphores;
+        RenderingCmdSubmitInfo.pSignalSemaphores = RenderSignalSemaphores;
 
         PresentInfo.pWaitSemaphores = RenderSignalSemaphores;
 
-        vkQueueSubmit(VulkanContext::Graphics.Queue, 1, &PipelineCmdSubmitInfo, TargetFrame.InFlight);
+        vkQueueSubmit(VulkanContext::Graphics.Queue, 1, &RenderingCmdSubmitInfo, TargetFrame.Render.InFlight);
         vkQueuePresentKHR(VulkanContext::Present.Queue, &PresentInfo);
 
         TargetFrameIndex = (TargetFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
