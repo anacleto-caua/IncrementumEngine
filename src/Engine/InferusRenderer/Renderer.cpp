@@ -421,7 +421,11 @@ namespace Renderer {
 
         vkResetCommandBuffer(TransferCmd, 0);
         vkBeginCommandBuffer(TransferCmd, &TransferingCmdBeginInfo);
+
         vkResetFences(VulkanContext::Device, 1, &TargetFrame.Transfer.InFlight);
+
+        // Actual transfer
+        TransferSystem::FrameTransfer(TransferCmd);
 
         vkEndCommandBuffer(TransferCmd);
         VkSemaphore TransferSignalSemaphores[] = { TargetFrame.Transfer.TransferComplete };
@@ -512,5 +516,8 @@ namespace Renderer {
         vkQueuePresentKHR(VulkanContext::Present.Queue, &PresentInfo);
 
         TargetFrameIndex = (TargetFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+
+        // It does look a bit out of place
+        TransferSystem::FrameReactions();
     }
 }
