@@ -409,10 +409,12 @@ namespace TerrainRenderer {
         QueueContext& Transfer = VulkanContext::Transfer;
         QueueContext& Graphics = VulkanContext::Graphics;
 
+        // to remove btw
         TerrainSystem::FeedTerrainRenderer(
             (ChunkHeightmapLink*)BufferSystem::map(ChunkLinks::Staging),
             (uint16_t*)BufferSystem::map(Heightmap::StagingBuffer)
         );
+        TerrainSystem::FeedTerrainData(ChunkLinks::Data, Heightmap::Image);
 
         VkCommandBuffer cmd = VulkanContext::SingleTimeCmdBegin(Transfer);
 

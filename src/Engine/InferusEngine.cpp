@@ -12,6 +12,7 @@
 #include "Engine/ImGuiPacks/MainPack.hpp"
 #include "Engine/InferusRenderer/Renderer.hpp"
 #include "Engine/Systems/Terrain/TerrainSystem.hpp"
+#include "Engine/InferusRenderer/TransferSystem.hpp"
 #include "Engine/InferusRenderer/Passes/TerrainRenderer.hpp"
 
 namespace InferusEngine {
@@ -76,6 +77,7 @@ namespace InferusEngine {
             TerrainSystem::Update();
             Renderer::Render();
             Input::PollInput();
+            TransferSystem::FrameReactions();
 
             auto FrameEnd = std::chrono::high_resolution_clock::now();
             auto ElapsedTime = FrameEnd - FrameBegin;

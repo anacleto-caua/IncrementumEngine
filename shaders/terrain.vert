@@ -3,7 +3,7 @@
 struct ChunkHeightmapLink {
     ivec2 worldPos;
     uint instanceId;
-    uint isVisible;
+    uint packedFlags;
 };
 
 layout(set = 0, binding = 0) uniform sampler2DArray heightmapSampler;
@@ -28,7 +28,9 @@ const float HEIGHT_SCALE = 30.0 * sqrt(GRID_SCALE); // Still doesn't feel like i
 void main() {
     ChunkHeightmapLink currentChunk = chunkLinkDataBuffer.chunks[gl_InstanceIndex];
 
-    if (currentChunk.isVisible == 0) {
+    bool isActive = bitfieldExtract(currentChunk.packedFlags, 0, 1) == 1;
+    bool isVisible = bitfieldExtract(currentChunk.packedFlags, 1, 1) == 1;
+    if (!isVisible && !isActive) {
         gl_Position = vec4(0.0/0.0);
         return;
     }

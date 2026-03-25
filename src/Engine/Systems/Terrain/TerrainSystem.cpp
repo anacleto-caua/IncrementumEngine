@@ -1,17 +1,24 @@
 #include "TerrainSystem.hpp"
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 
 #include <imgui.h>
+#include <spdlog/spdlog.h>
 #include <FastNoiseLite.hpp>
 
 #include "Engine/Systems/Terrain/TerrainConfig.hpp"
+#include "Engine/InferusRenderer/TransferSystem.hpp"
 
 namespace TerrainSystem {
 
     uint16_t* HeightmapsBuffer_MappedMem;
     ChunkHeightmapLink* ChunkLinksBuffer_MappedMem;
+
+    std::array<ChunkHeightmapLink, TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT> ChunkLinksMirror;
+    BufferSystem::Id ChunkLinkGpu;
+    ImageSystem::Id HeightmapGpu;
 
     glm::vec3* PlayerPos;
 
@@ -88,13 +95,71 @@ namespace TerrainSystem {
         ImGui::End();
     }
 
+    void UpdateChunkLinkN(size_t arr_pos) {
+        TransferSystem::QueueBufferUpdate(
+            ChunkLinkGpu,
+            &ChunkLinksMirror[arr_pos],
+            sizeof(ChunkHeightmapLink),
+            sizeof(ChunkHeightmapLink)*arr_pos,
+            [arr_pos](){
+                spdlog::info("updated {}", arr_pos);
+            }
+        );
+    }
+
+    void WriteChunk(glm::ivec2 ChunkPos, uint16_t* ChunkBegin);
+
+    void FeedTerrainData(BufferSystem::Id ChunkLinkId, ImageSystem::Id HeightmapId) {
+        ChunkLinkGpu = ChunkLinkId;
+        HeightmapGpu = HeightmapId;
+
+        // Fill mirror array
+        glm::ivec2 player_coord;
+        player_coord.x = static_cast<int32_t>(std::floor(PlayerPos->x/TerrainConfig::Chunk::CHUNK_SCALE));
+        player_coord.y = static_cast<int32_t>(std::floor(PlayerPos->z/TerrainConfig::Chunk::CHUNK_SCALE));
+
+        uint32_t coords_counter = 0;
+        int32_t radius = TerrainConfig::ChunkToHeightmapLinking::EXPLORATION_RADIUS;
+        int32_t r_squared = radius*radius;
+
+        // Circle around the player
+        for (int32_t x = player_coord.x - radius; x <= player_coord.x + radius; x++) {
+            for (int32_t y = player_coord.y - radius; y <= player_coord.y + radius; y++) {
+
+                int32_t dx = x - player_coord.x;
+                int32_t dy = y - player_coord.y;
+
+                // Valid point
+                if ((dx * dx) + (dy * dy) <= r_squared) {
+                    ChunkLinksMirror[coords_counter] = {
+                        .WorldPos = { x, y },
+                        .InstanceId = (coords_counter),
+                        .Flags = ChunkFlags::Active | ChunkFlags::Visible
+                    };
+                    coords_counter++;
+                }
+            }
+        }
+
+        /*
+        for (uint32_t i = 0; i < TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT; i++) {
+            ChunkHeightmapLink cl = ChunkLinksBuffer_MappedMem[i];
+            WriteChunk(cl.WorldPos, &HeightmapsBuffer_MappedMem[cl.InstanceId * TerrainConfig::Heightmap::HEIGHTMAP_IMAGE_PIXEL_COUNT]);
+        }
+        */
+
+        for (uint32_t i = 0; i < 50; i++) {
+            ChunkLinksMirror[i].Flags = ChunkFlags::None;
+            UpdateChunkLinkN(i);
+        }
+    }
+
     void FeedTerrainRenderer(ChunkHeightmapLink* ChunkLinkMap, uint16_t* HeightmapMap) {
         ChunkLinksBuffer_MappedMem = ChunkLinkMap;
         HeightmapsBuffer_MappedMem = HeightmapMap;
         FullWriteChunkData(); // TODO: hacky
     }
 
-    void WriteChunk(glm::ivec2 ChunkPos, uint16_t* ChunkBegin);
 
     void FullWriteChunkData() {
         glm::ivec2 player_coord;
@@ -117,7 +182,7 @@ namespace TerrainSystem {
                     ChunkLinksBuffer_MappedMem[coords_counter] = {
                         .WorldPos = { x, y },
                         .InstanceId = (coords_counter),
-                        .IsVisible = 1
+                        .Flags = ChunkFlags::Active | ChunkFlags::Visible
                     };
                     coords_counter++;
                 }

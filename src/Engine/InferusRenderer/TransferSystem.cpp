@@ -44,7 +44,12 @@ namespace TransferSystem {
     void FrameTransfer(VkCommandBuffer cmd) {
         uint32_t FrameTransferSize = 0;
         uint32_t AvailableFrameSize = RendererConfig::TransferSystem::FRAME_TRANSFER_BUDGET;
-        while (AvailableFrameSize < 0) {
+        while (AvailableFrameSize > 0) {
+
+            if (Queue.empty()) {
+                break;
+            }
+
             Package& package = Queue.front();
 
             if (FrameTransferSize + package.Size >= AvailableFrameSize) {
@@ -72,6 +77,7 @@ namespace TransferSystem {
         for (auto Reaction : Reactions) {
             Reaction();
         }
+        Reactions.clear();
     }
 
     void Destroy() {
@@ -97,5 +103,7 @@ namespace TransferSystem {
         Package.Src = data;
         Package.Reaction = reaction;
         Package.Type = PackageType::BufferUpdate;
+
+        Queue.push(Package);
     }
 }
