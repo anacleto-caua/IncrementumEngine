@@ -54,7 +54,7 @@ namespace TransferSystem {
             BufferSystem::del(Buffer);
         }
 
-        void Paste(const void* src, uint64_t upload_size) {
+        void Paste(PackageType type, const void* src, uint64_t upload_size) {
             assert(upload_size < SIZE && "Single queued upload is bigger than staging buffer itself");
             uint64_t neck_size = Head - (MappedHead + SIZE);
             if (upload_size <= neck_size) {
@@ -68,13 +68,21 @@ namespace TransferSystem {
                 uint64_t pre_tail = Tail - (MappedHead);
                 assert(pre_tail > past_neck_upload_size && "Transfer system staging ring buffer got cluttered");
 
+                // Do not split images, it's messy, just discard the neck
+                if (type == PackageType::ImageSliceUpdate) {
+                    assert(pre_tail > upload_size && "Can't fit whole texture in staging buffer pre-tail");
+                    memcpy(MappedHead, src, upload_size);
+                    Head = MappedHead + upload_size;
+                    return; // Look's like bad flow control
+                }
+
                 memcpy(Head, src, neck_size);
                 memcpy(MappedHead, (static_cast<const uint8_t *>(src)+past_neck_upload_size), past_neck_upload_size);
                 Head = MappedHead + past_neck_upload_size;
             }
         }
 
-        void Pick(uint64_t package_size, uint64_t& upload_size1, uint64_t& offset, uint64_t& upload_size2) {
+        void Pick(PackageType type, uint64_t package_size, uint64_t& upload_size1, uint64_t& offset, uint64_t& upload_size2) {
             uint64_t tail_neck_size = Tail - (MappedHead + SIZE);
             if (package_size <= tail_neck_size) {
                 upload_size1 = package_size;
@@ -82,6 +90,13 @@ namespace TransferSystem {
                 upload_size2 = 0;
                 Tail += package_size;
             } else {
+                // Special case to account for images not being split
+                if (type == PackageType::ImageSliceUpdate) {
+                    upload_size1 = package_size;
+                    offset = 0;
+                    Tail = MappedHead + package_size;
+                    return; // Look's like bad flow control
+                }
                 uint64_t past_neck_upload_size = package_size - tail_neck_size;
                 upload_size1 = tail_neck_size;
                 offset =  MappedHead - Tail;
@@ -137,7 +152,7 @@ namespace TransferSystem {
                     uint64_t upload_size1;
                     uint64_t offset;
                     uint64_t upload_size2;
-                    RingBuffer::Pick(package.Size, upload_size1, offset, upload_size2);
+                    RingBuffer::Pick(package.Type, package.Size, upload_size1, offset, upload_size2);
 
                     auto* data_bin_head = FrameBin.Push<VkBufferImageCopy>();
                     *data_bin_head = {
@@ -153,29 +168,6 @@ namespace TransferSystem {
                         .imageOffset = {0, 0, 0},
                         .imageExtent = { Dst->width, Dst->height, 1 }
                     };
-
-                    if (upload_size2 == 0) {
-                        uint32_t bytes_per_row = Dst->width * package.BytesPerPixel;
-                        uint32_t rows_in_first_copy = upload_size1 / bytes_per_row;
-                        uint32_t rows_in_second_copy = Dst->height - rows_in_first_copy;
-
-                        data_bin_head->imageExtent = {Dst->width, rows_in_first_copy, 1};
-
-                        auto data2 = FrameBin.Push<VkBufferImageCopy>();
-                        *data2 = {
-                            .bufferOffset = 0,
-                            .bufferRowLength = 0,
-                            .bufferImageHeight = 0,
-                            .imageSubresource = {
-                                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                                .mipLevel = 0,
-                                .baseArrayLayer = package.TargetLayer,
-                                .layerCount = 1
-                            },
-                            .imageOffset = {0, static_cast<int32_t>(rows_in_first_copy), 0},
-                            .imageExtent = { Dst->width, rows_in_second_copy, 1 }
-                        };
-                    }
 
                     vkCmdCopyBufferToImage(
                         cmd,
@@ -239,7 +231,7 @@ namespace TransferSystem {
     }
 
     void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t bytes_per_pixel, uint32_t target_layer, uint64_t size, UploadReaction reaction) {
-        RingBuffer::Paste(data, size);
+        RingBuffer::Paste(PackageType::ImageSliceUpdate, data, size);
 
         Package package;
         package.Size = size;
