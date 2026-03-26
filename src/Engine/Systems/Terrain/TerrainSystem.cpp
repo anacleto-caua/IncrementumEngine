@@ -142,16 +142,30 @@ namespace TerrainSystem {
         }
 
         /*
+        // TEST AREAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
         for (uint32_t i = 0; i < TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT; i++) {
             ChunkHeightmapLink cl = ChunkLinksBuffer_MappedMem[i];
-            WriteChunk(cl.WorldPos, &HeightmapsBuffer_MappedMem[cl.InstanceId * TerrainConfig::Heightmap::HEIGHTMAP_IMAGE_PIXEL_COUNT]);
-        }
-        */
+            auto target = ChunkLinksMirror[i];
 
+            uint16_t* ChunkBegin = &HeightmapsBuffer_MappedMem[target.InstanceId];
+            uint16_t* ChunkBeginr = ChunkBegin;
+
+            int32_t TerrainRes = TerrainConfig::Chunk::RESOLUTION;
+            for (int32_t x = 0; x < TerrainRes; x++) {
+                for (int32_t z = 0; z < TerrainRes; z++) {
+                    float remapped = .1f;
+                    *ChunkBegin++ = static_cast<uint16_t>(remapped);
+                }
+            }
+
+            TransferSystem::QueueImageSliceUpdate(HeightmapGpu, ChunkBeginr, 2, target.InstanceId, TerrainConfig::Heightmap::HEIGHTMAP_IMAGE_SIZE);
+        }
         for (uint32_t i = 0; i < 50; i++) {
             ChunkLinksMirror[i].Flags = ChunkFlags::None;
             UpdateChunkLinkN(i);
         }
+        // TEST AREAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+        */
     }
 
     void FeedTerrainRenderer(ChunkHeightmapLink* ChunkLinkMap, uint16_t* HeightmapMap) {

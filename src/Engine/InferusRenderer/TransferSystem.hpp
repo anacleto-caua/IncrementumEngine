@@ -5,6 +5,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include "Engine/InferusRenderer/Image/ImageSystem.hpp"
 #include "Engine/InferusRenderer/Buffer/BufferSystem.hpp"
 
 /**
@@ -28,13 +29,13 @@ namespace TransferSystem {
     void QueueBufferUpdate(BufferSystem::Id dst, const void* data, uint64_t size, uint64_t offset);
     void QueueBufferUpdate(BufferSystem::Id dst, const void* data, uint64_t size, uint64_t offset, UploadReaction reaction);
 
+    // vkCmdBufferImageCopy
+    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t bytes_per_pixel, uint32_t target_layer, uint64_t size);
+    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t bytes_per_pixel, uint32_t target_layer, uint64_t size, UploadReaction reaction);
+
     /*
     // vkCmdBufferCopy
     void QueueBufferUpload(BufferSystem::Id* dst, const void* data, uint64_t size);
     void QueueBufferUpload(BufferSystem::Id* dst, const void* data, uint64_t size, UploadReaction reaction);
-
-    // vkCmd-
-    void QueueTextureSliceUpload(ImageSystem::Id* dst, uint32_t targetLayer, const void* data, uint64_t size);
-    void QueueTextureSliceUpload(ImageSystem::Id* dst, uint32_t targetLayer, const void* data, uint64_t size, UploadReaction reaction);
     */
 }

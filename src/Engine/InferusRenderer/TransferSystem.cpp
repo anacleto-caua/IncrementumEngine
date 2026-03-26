@@ -3,6 +3,7 @@
 #include <queue>
 #include <cassert>
 
+#include "Utils/DataBin.hpp"
 #include "Engine/InferusRenderer/RendererConfig.hpp"
 
 namespace TransferSystem {
@@ -17,26 +18,86 @@ namespace TransferSystem {
     struct Package {
         uint64_t Size = 0;
         uint64_t Offset = 1;        // For buffer update
-        BufferSystem::Id Dst;       // For buffer update and buffer upload
+        const void* Src = nullptr;  // It's an outside allocation for buffer update or a RingBuffer head in other methods
+        BufferSystem::Id DstBuffer; // For buffer update and buffer upload
+        ImageSystem::Id DstImage;   // For image slice update
         uint32_t TargetLayer = 0;   // For image slice update
-        const void* Src = nullptr;
+        uint32_t BytesPerPixel = 0; // For image slice update
+        uint64_t BufferOffset = 0;
         UploadReaction Reaction = nullptr;
         PackageType Type;
     };
 
-    BufferSystem::Id Staging;
+    namespace RingBuffer {
+        constexpr auto SIZE = RendererConfig::TransferSystem::STAGING_BUFFER_SIZE;
+
+        BufferSystem::Id Buffer;
+        uint8_t* MappedHead;
+        uint8_t* Head;
+        uint8_t* Tail;
+
+        void Create() {
+            BufferSystem::CreateInfo CreateInfo = {
+                .size = SIZE ,
+                .memType = BufferSystem::CreateInfoMemoryType::STAGING_UPLOAD,
+                .usage = BufferSystem::CreateInfoUsage::STAGING
+            };
+
+            Buffer = BufferSystem::add(CreateInfo);
+            MappedHead = static_cast<uint8_t*>(BufferSystem::map(Buffer));
+            Head = MappedHead;
+            Tail = Head;
+        }
+
+        void Destroy() {
+            BufferSystem::unmap(Buffer);
+            BufferSystem::del(Buffer);
+        }
+
+        void Paste(const void* src, uint64_t upload_size) {
+            assert(upload_size < SIZE && "Single queued upload is bigger than staging buffer itself");
+            uint64_t neck_size = Head - (MappedHead + SIZE);
+            if (upload_size <= neck_size) {
+                memcpy(Head, src, upload_size);
+                Head += upload_size;
+            } else {
+                uint64_t past_neck_upload_size = upload_size - neck_size;
+
+                // Altought it could've been avoided by making a list of non-written actions and
+                // saving their data to a dinamyc growing pool I just want to catch some bad usage.
+                uint64_t pre_tail = Tail - (MappedHead);
+                assert(pre_tail > past_neck_upload_size && "Transfer system staging ring buffer got cluttered");
+
+                memcpy(Head, src, neck_size);
+                memcpy(MappedHead, (static_cast<const uint8_t *>(src)+past_neck_upload_size), past_neck_upload_size);
+                Head = MappedHead + past_neck_upload_size;
+            }
+        }
+
+        void Pick(uint64_t package_size, uint64_t& upload_size1, uint64_t& offset, uint64_t& upload_size2) {
+            uint64_t tail_neck_size = Tail - (MappedHead + SIZE);
+            if (package_size <= tail_neck_size) {
+                upload_size1 = package_size;
+                offset = MappedHead - Tail;
+                upload_size2 = 0;
+                Tail += package_size;
+            } else {
+                uint64_t past_neck_upload_size = package_size - tail_neck_size;
+                upload_size1 = tail_neck_size;
+                offset =  MappedHead - Tail;
+                upload_size2 = past_neck_upload_size;
+                Tail = MappedHead + past_neck_upload_size;
+            }
+        }
+
+    }
+
     std::queue<Package> Queue;
     std::vector<UploadReaction> Reactions;
+    DataBin<1024 * 10> FrameBin;
 
     void Create() {
-        BufferSystem::CreateInfo CreateInfo = {
-            .size = RendererConfig::TransferSystem::STAGING_BUFFER_SIZE,
-            .memType = BufferSystem::CreateInfoMemoryType::STAGING_UPLOAD,
-            .usage = BufferSystem::CreateInfoUsage::STAGING
-        };
-
-        Staging = BufferSystem::add(CreateInfo);
-
+        RingBuffer::Create();
         Reactions.reserve(10);
     }
 
@@ -57,12 +118,78 @@ namespace TransferSystem {
             }
 
             switch (package.Type) {
-                case PackageType::BufferUpdate:
-                    vkCmdUpdateBuffer(cmd, BufferSystem::get(package.Dst)->buffer, package.Offset, package.Size, package.Src);
+                case PackageType::BufferUpdate: {
+                    vkCmdUpdateBuffer(
+                        cmd,
+                        BufferSystem::get(package.DstBuffer)->buffer,
+                        package.Offset,
+                        package.Size,
+                        package.Src
+                    );
                     break;
-                default:
-                    assert(false && "Method not implemented!");
+                }
+                case PackageType::BufferCopy: {
+                    assert(false && "Transfer method not implemented! Buffer copy");
                     break;
+                }
+                case PackageType::ImageSliceUpdate: {
+                    auto Dst = ImageSystem::get(package.DstImage);
+                    uint64_t upload_size1;
+                    uint64_t offset;
+                    uint64_t upload_size2;
+                    RingBuffer::Pick(package.Size, upload_size1, offset, upload_size2);
+
+                    auto* data_bin_head = FrameBin.Push<VkBufferImageCopy>();
+                    *data_bin_head = {
+                        .bufferOffset = offset,
+                        .bufferRowLength = 0,
+                        .bufferImageHeight = 0,
+                        .imageSubresource = {
+                            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                            .mipLevel = 0,
+                            .baseArrayLayer = package.TargetLayer,
+                            .layerCount = 1
+                        },
+                        .imageOffset = {0, 0, 0},
+                        .imageExtent = { Dst->width, Dst->height, 1 }
+                    };
+
+                    if (upload_size2 == 0) {
+                        uint32_t bytes_per_row = Dst->width * package.BytesPerPixel;
+                        uint32_t rows_in_first_copy = upload_size1 / bytes_per_row;
+                        uint32_t rows_in_second_copy = Dst->height - rows_in_first_copy;
+
+                        data_bin_head->imageExtent = {Dst->width, rows_in_first_copy, 1};
+
+                        auto data2 = FrameBin.Push<VkBufferImageCopy>();
+                        *data2 = {
+                            .bufferOffset = 0,
+                            .bufferRowLength = 0,
+                            .bufferImageHeight = 0,
+                            .imageSubresource = {
+                                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                .mipLevel = 0,
+                                .baseArrayLayer = package.TargetLayer,
+                                .layerCount = 1
+                            },
+                            .imageOffset = {0, static_cast<int32_t>(rows_in_first_copy), 0},
+                            .imageExtent = { Dst->width, rows_in_second_copy, 1 }
+                        };
+                    }
+
+                    vkCmdCopyBufferToImage(
+                        cmd,
+                        BufferSystem::get(RingBuffer::Buffer)->buffer,
+                        Dst->image,
+                        Dst->layout,
+                        1, data_bin_head
+                    );
+                    break;
+                }
+                default: {
+                    assert(false && "Transfer method inexistent or not implemented!");
+                    break;
+                }
             }
 
             FrameTransferSize += package.Size;
@@ -71,6 +198,7 @@ namespace TransferSystem {
             }
             Queue.pop();
         }
+        FrameBin.Reset();
     }
 
     void FrameReactions() {
@@ -81,11 +209,11 @@ namespace TransferSystem {
     }
 
     void Destroy() {
-        BufferSystem::del(Staging);
-    }
-
-    void AssertsUploadSize(uint64_t size) {
-        assert(size < RendererConfig::TransferSystem::STAGING_BUFFER_SIZE && "Single upload queue is bigger than staging buffer itself");
+        while (!Queue.empty()) {
+            Queue.pop();
+        }
+        Reactions.clear();
+        RingBuffer::Destroy();
     }
 
     void QueueBufferUpdate(BufferSystem::Id dst, const void* data, uint64_t size, uint64_t offset) {
@@ -93,17 +221,36 @@ namespace TransferSystem {
     }
 
     void QueueBufferUpdate(BufferSystem::Id dst, const void* data, uint64_t size, uint64_t offset, UploadReaction reaction) {
-        AssertsUploadSize(size);
         assert(size < RendererConfig::TransferSystem::BUFFER_UPDATE_CAP && "Upload is bigger than suggest value");
 
-        Package Package;
-        Package.Size = size;
-        Package.Offset = offset;
-        Package.Dst = dst;
-        Package.Src = data;
-        Package.Reaction = reaction;
-        Package.Type = PackageType::BufferUpdate;
+        Package package;
+        package.Size = size;
+        package.Offset = offset;
+        package.DstBuffer = dst;
+        package.Src = data;
+        package.Reaction = reaction;
+        package.Type = PackageType::BufferUpdate;
 
-        Queue.push(Package);
+        Queue.push(package);
     }
+
+    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t bytes_per_pixel, uint32_t target_layer, uint64_t size) {
+        QueueImageSliceUpdate(dst, data, bytes_per_pixel, target_layer, size, nullptr);
+    }
+
+    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t bytes_per_pixel, uint32_t target_layer, uint64_t size, UploadReaction reaction) {
+        RingBuffer::Paste(data, size);
+
+        Package package;
+        package.Size = size;
+        package.DstImage = dst;
+        package.Src = data;
+        package.BytesPerPixel = bytes_per_pixel;
+        package.TargetLayer = target_layer;
+        package.Reaction = reaction;
+        package.Type = PackageType::ImageSliceUpdate;
+
+        Queue.push(package);
+    }
+
 }
