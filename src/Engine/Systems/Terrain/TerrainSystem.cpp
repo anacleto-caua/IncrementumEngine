@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cmath>
+#include <random>
 #include <cstdint>
 
 #include <imgui.h>
@@ -12,6 +13,11 @@
 #include "Engine/InferusRenderer/TransferSystem.hpp"
 
 namespace TerrainSystem {
+
+    // Test only random numbers
+    std::random_device rng_device;
+    std::mt19937 generator(rng_device());
+    std::uniform_int_distribution<> random_chunk_index(0, TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT-1);
 
     uint16_t* HeightmapsBuffer_MappedMem;
     ChunkHeightmapLink* ChunkLinksBuffer_MappedMem;
@@ -49,19 +55,9 @@ namespace TerrainSystem {
         // ...
     }
 
-    void Update() {
-        // TODO: Add some sort of sync system, update chunk after X seconds, after Y distance
-        // has been travelled from center...
-        // ------------------------------------------------------------------------------------
-        // The best would be always be loading and unloading chunks, what I think could be done
-        // if the Heightmap and ChunkLinks had some scratch space, given the usage of same size
-        // allocations we could just update the other ones and provide a glInstanceIndex offset
-        // on the push constants? Maybe have double or triple buffering on Heightmap and
-        // ChunkLink information? I think the last option seems better.
-        // -- Turns out all that stuff has already been figured out, so I may just pick one or
-        // a combination of them and rock with it. One could also consider do a performance
-        // comparisson and etc.
+    void UpdateChunkLinkN(size_t arr_pos);
 
+    void Update() {
         ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_FirstUseEver);
         ImGui::Begin("Terrain System");
 
@@ -93,6 +89,16 @@ namespace TerrainSystem {
         ImGui::Unindent();
 
         ImGui::End();
+
+        // Transfer system testing
+        auto idx = random_chunk_index(generator);
+        auto& chunk = ChunkLinksMirror[idx];
+        if (chunk.Flags == ChunkFlags::None) {
+            chunk.Flags = ChunkFlags::Active | ChunkFlags::Visible;
+        } else {
+            chunk.Flags = ChunkFlags::None;
+        }
+        UpdateChunkLinkN(idx);
     }
 
     void UpdateChunkLinkN(size_t arr_pos) {
@@ -140,32 +146,6 @@ namespace TerrainSystem {
                 }
             }
         }
-
-        /*
-        // TEST AREAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-        for (uint32_t i = 0; i < TerrainConfig::ChunkToHeightmapLinking::INSTANCE_COUNT; i++) {
-            ChunkHeightmapLink cl = ChunkLinksBuffer_MappedMem[i];
-            auto target = ChunkLinksMirror[i];
-
-            uint16_t* ChunkBegin = &HeightmapsBuffer_MappedMem[target.InstanceId];
-            uint16_t* ChunkBeginr = ChunkBegin;
-
-            int32_t TerrainRes = TerrainConfig::Chunk::RESOLUTION;
-            for (int32_t x = 0; x < TerrainRes; x++) {
-                for (int32_t z = 0; z < TerrainRes; z++) {
-                    float remapped = .1f;
-                    *ChunkBegin++ = static_cast<uint16_t>(remapped);
-                }
-            }
-
-            TransferSystem::QueueImageSliceUpdate(HeightmapGpu, ChunkBeginr, 2, target.InstanceId, TerrainConfig::Heightmap::HEIGHTMAP_IMAGE_SIZE);
-        }
-        for (uint32_t i = 0; i < 50; i++) {
-            ChunkLinksMirror[i].Flags = ChunkFlags::None;
-            UpdateChunkLinkN(i);
-        }
-        // TEST AREAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-        */
     }
 
     void FeedTerrainRenderer(ChunkHeightmapLink* ChunkLinkMap, uint16_t* HeightmapMap) {
