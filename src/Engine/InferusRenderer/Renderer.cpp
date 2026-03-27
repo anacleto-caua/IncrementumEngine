@@ -57,8 +57,10 @@ namespace Renderer {
     uint32_t TargetFrameIndex = 0;
     uint32_t TargetImageViewIndex = 0;
 
-    // Drawing -- I imagine this may be shared between all the other pipelines
-    static constexpr VkPipelineStageFlags G_PIPELINE_WAIT_STAGES[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+    static constexpr VkPipelineStageFlags GRAPHICS_PIPELINE_WAIT_STAGES[] = {
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+    };
 
     VkRect2D Scissor {};
     VkViewport Viewport {};
@@ -278,7 +280,7 @@ namespace Renderer {
         RenderingCmdSubmitInfo = {};
         RenderingCmdSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         RenderingCmdSubmitInfo.waitSemaphoreCount = 2;
-        RenderingCmdSubmitInfo.pWaitDstStageMask = G_PIPELINE_WAIT_STAGES;
+        RenderingCmdSubmitInfo.pWaitDstStageMask = GRAPHICS_PIPELINE_WAIT_STAGES;
         RenderingCmdSubmitInfo.commandBufferCount = 1;
         RenderingCmdSubmitInfo.signalSemaphoreCount = 1;
 
