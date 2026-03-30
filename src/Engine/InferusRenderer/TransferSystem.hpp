@@ -30,8 +30,8 @@ namespace TransferSystem {
     void QueueBufferUpdate(BufferSystem::Id dst, const void* data, uint64_t size, uint64_t offset, UploadReaction reaction);
 
     // vkCmdBufferImageCopy
-    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t bytes_per_pixel, uint32_t target_layer, uint64_t size);
-    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t bytes_per_pixel, uint32_t target_layer, uint64_t size, UploadReaction reaction);
+    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t target_layer, uint64_t size);
+    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t target_layer, uint64_t size, UploadReaction reaction);
 
     /*
     // vkCmdBufferCopy

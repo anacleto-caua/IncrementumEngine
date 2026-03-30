@@ -3,7 +3,6 @@
 #include <queue>
 #include <cassert>
 
-#include "Utils/DataBin.hpp"
 #include "Engine/InferusRenderer/RendererConfig.hpp"
 
 namespace TransferSystem {
@@ -14,18 +13,38 @@ namespace TransferSystem {
         ImageSliceUpdate,
     };
 
-    // Fat struct :)
+    namespace PackageData {
+        struct BufferCopy {
+            uint64_t ReadOffset = 0;
+            uint64_t WriteOffset = 0;
+            BufferSystem::Id DstBuffer;
+            const void* Src = nullptr;
+        };
+
+        struct BufferUpdate {
+            uint64_t WriteOffset = 0;
+            BufferSystem::Id DstBuffer;
+            const void* Src = nullptr;
+        };
+
+        struct ImageSliceUpdate {
+            ImageSystem::Id DstImage;
+            uint32_t TargetLayer = 0;
+            uint64_t CopyOffset = 0;
+        };
+
+        union Data {
+            BufferCopy BufferCopy;
+            BufferUpdate BufferUpdate;
+            ImageSliceUpdate ImageSliceUpdate;
+        };
+    }
+
     struct Package {
-        uint64_t Size = 0;
-        uint64_t Offset = 1;        // For buffer update
-        const void* Src = nullptr;  // It's an outside allocation for buffer update or a RingBuffer head in other methods
-        BufferSystem::Id DstBuffer; // For buffer update and buffer upload
-        ImageSystem::Id DstImage;   // For image slice update
-        uint32_t TargetLayer = 0;   // For image slice update
-        uint32_t BytesPerPixel = 0; // For image slice update
-        uint64_t BufferOffset = 0;
-        UploadReaction Reaction = nullptr;
         PackageType Type;
+        UploadReaction Reaction = nullptr;
+        uint64_t Size = 0;
+        PackageData::Data Data;
     };
 
     namespace RingBuffer {
@@ -109,7 +128,6 @@ namespace TransferSystem {
 
     std::queue<Package> Queue;
     std::vector<UploadReaction> Reactions;
-    DataBin<1024 * 10> FrameBin;
 
     void Create() {
         RingBuffer::Create();
@@ -136,10 +154,10 @@ namespace TransferSystem {
                 case PackageType::BufferUpdate: {
                     vkCmdUpdateBuffer(
                         cmd,
-                        BufferSystem::get(package.DstBuffer)->buffer,
-                        package.Offset,
+                        BufferSystem::get(package.Data.BufferUpdate.DstBuffer)->buffer,
+                        package.Data.BufferUpdate.WriteOffset,
                         package.Size,
-                        package.Src
+                        package.Data.BufferUpdate.Src
                     );
                     break;
                 }
@@ -148,21 +166,20 @@ namespace TransferSystem {
                     break;
                 }
                 case PackageType::ImageSliceUpdate: {
-                    auto Dst = ImageSystem::get(package.DstImage);
+                    auto Dst = ImageSystem::get(package.Data.ImageSliceUpdate.DstImage);
                     uint64_t upload_size1;
                     uint64_t offset;
                     uint64_t upload_size2;
                     RingBuffer::Pick(package.Type, package.Size, upload_size1, offset, upload_size2);
 
-                    auto* data_bin_head = FrameBin.Push<VkBufferImageCopy>();
-                    *data_bin_head = {
+                    VkBufferImageCopy buffer_image_copy_cmd = {
                         .bufferOffset = offset,
                         .bufferRowLength = 0,
                         .bufferImageHeight = 0,
                         .imageSubresource = {
                             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                             .mipLevel = 0,
-                            .baseArrayLayer = package.TargetLayer,
+                            .baseArrayLayer = package.Data.ImageSliceUpdate.TargetLayer,
                             .layerCount = 1
                         },
                         .imageOffset = {0, 0, 0},
@@ -174,7 +191,7 @@ namespace TransferSystem {
                         BufferSystem::get(RingBuffer::Buffer)->buffer,
                         Dst->image,
                         Dst->layout,
-                        1, data_bin_head
+                        1, &buffer_image_copy_cmd
                     );
                     break;
                 }
@@ -190,7 +207,6 @@ namespace TransferSystem {
             }
             Queue.pop();
         }
-        FrameBin.Reset();
     }
 
     void FrameReactions() {
@@ -215,32 +231,41 @@ namespace TransferSystem {
     void QueueBufferUpdate(BufferSystem::Id dst, const void* data, uint64_t size, uint64_t offset, UploadReaction reaction) {
         assert(size < RendererConfig::TransferSystem::BUFFER_UPDATE_CAP && "Upload is bigger than suggest value");
 
-        Package package;
-        package.Size = size;
-        package.Offset = offset;
-        package.DstBuffer = dst;
-        package.Src = data;
-        package.Reaction = reaction;
-        package.Type = PackageType::BufferUpdate;
+        Package package {
+            .Type = PackageType::BufferUpdate,
+            .Reaction = reaction,
+            .Size = size,
+            .Data = {
+                .BufferUpdate = {
+                    .WriteOffset = offset,
+                    .DstBuffer = dst,
+                    .Src = data
+                }
+            }
+        };
 
         Queue.push(package);
     }
 
-    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t bytes_per_pixel, uint32_t target_layer, uint64_t size) {
-        QueueImageSliceUpdate(dst, data, bytes_per_pixel, target_layer, size, nullptr);
+    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t target_layer, uint64_t size) {
+        QueueImageSliceUpdate(dst, data, target_layer, size, nullptr);
     }
 
-    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t bytes_per_pixel, uint32_t target_layer, uint64_t size, UploadReaction reaction) {
+    void QueueImageSliceUpdate(ImageSystem::Id dst, const void* data, uint32_t target_layer, uint64_t size, UploadReaction reaction) {
         RingBuffer::Paste(PackageType::ImageSliceUpdate, data, size);
 
-        Package package;
-        package.Size = size;
-        package.DstImage = dst;
-        package.Src = data;
-        package.BytesPerPixel = bytes_per_pixel;
-        package.TargetLayer = target_layer;
-        package.Reaction = reaction;
-        package.Type = PackageType::ImageSliceUpdate;
+        Package package {
+            .Type = PackageType::ImageSliceUpdate,
+            .Reaction = reaction,
+            .Size = size,
+            .Data = {
+                .ImageSliceUpdate = {
+                    .DstImage = dst,
+                    .TargetLayer = target_layer,
+                    .CopyOffset = 0
+                }
+            }
+        };
 
         Queue.push(package);
     }
