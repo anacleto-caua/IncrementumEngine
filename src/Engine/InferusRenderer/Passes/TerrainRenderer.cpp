@@ -57,7 +57,7 @@ namespace TerrainRenderer {
         }
 
         void Upload() {
-            VkCommandBuffer TransferCmd = VulkanContext::SingleTimeCmdBegin(VulkanContext::Transfer);
+            VkCommandBuffer TransferCmd = VulkanContext::SingleTimeCmdBegin(VulkanContext::Graphics);
 
             // Create the actual Plane Mesh index buffer
             BufferSystem::CreateInfo IndiceCreateInfo = {
@@ -82,7 +82,7 @@ namespace TerrainRenderer {
 
             BufferSystem::copy(TransferCmd, StagingIndices, Indices, TerrainConfig::Chunk::INDICES_BUFFER_SIZE);
 
-            VulkanContext::SingleTimeCmdSubmit(VulkanContext::Transfer, TransferCmd);
+            VulkanContext::SingleTimeCmdSubmit(VulkanContext::Graphics, TransferCmd);
 
             // Cleanup
             BufferSystem::unmap(StagingIndices);
@@ -405,8 +405,7 @@ namespace TerrainRenderer {
         Camera.ModelViewProjection = &TerrainPushConstants.CameraMVP;
     }
 
-    void FeedTerrainSystemPointers() {
-        QueueContext& Transfer = VulkanContext::Transfer;
+void FeedTerrainSystemPointers() {
         QueueContext& Graphics = VulkanContext::Graphics;
 
         // to remove btw
@@ -416,9 +415,8 @@ namespace TerrainRenderer {
         );
         TerrainSystem::FeedTerrainData(ChunkLinks::Data, Heightmap::Image);
 
-        VkCommandBuffer cmd = VulkanContext::SingleTimeCmdBegin(Transfer);
+        VkCommandBuffer cmd = VulkanContext::SingleTimeCmdBegin(Graphics);
 
-        // Copy chunk link buffer
         BufferSystem::copy(
             cmd,
             ChunkLinks::Staging,
@@ -428,14 +426,13 @@ namespace TerrainRenderer {
         BufferSystem::unmap(ChunkLinks::Staging);
         BufferSystem::unmap(Heightmap::StagingBuffer);
 
-        // Upload heightmap to staging buffer
         BufferSystem::Buffer* HeightmapStagingBuffer = BufferSystem::get(Heightmap::StagingBuffer);
         ImageSystem::Image* HeightmapImage = ImageSystem::get(Heightmap::Image);
 
-        // Transfer data to heightmap image
         VkImageMemoryBarrier barrier1 = Recipes::ImageMemoryBarrier::TransferDest(HeightmapImage);
         VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
         vkCmdPipelineBarrier(
             cmd,
             srcStage,
@@ -447,6 +444,7 @@ namespace TerrainRenderer {
         );
 
         VkBufferImageCopy HeightmapCopy = Recipes::BufferImageCopy::Default(HeightmapImage);
+
         vkCmdCopyBufferToImage(
             cmd,
             HeightmapStagingBuffer->buffer,
@@ -457,30 +455,7 @@ namespace TerrainRenderer {
         );
 
         VkImageMemoryBarrier barrier2 = Recipes::ImageMemoryBarrier::ShaderRead(HeightmapImage);
-        barrier2.srcQueueFamilyIndex = Transfer.Index;
-        barrier2.dstQueueFamilyIndex = Graphics.Index;
-        barrier2.dstAccessMask = 0;
-        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-
-        vkCmdPipelineBarrier(
-            cmd,
-            srcStage,
-            dstStage,
-            0,
-            0, nullptr,
-            0, nullptr,
-            1, &barrier2
-        );
-
-        VulkanContext::SingleTimeCmdSubmit(Transfer, cmd);
-
-        cmd = VulkanContext::SingleTimeCmdBegin(Graphics);
-
-        VkImageMemoryBarrier barrier3 = Recipes::ImageMemoryBarrier::ShaderRead(HeightmapImage);
-        barrier3.srcQueueFamilyIndex = Transfer.Index;
-        barrier3.dstQueueFamilyIndex = Graphics.Index;
-        barrier3.srcAccessMask = 0;
+        // Assuming your Recipes struct sets src/dstQueueFamilyIndex to VK_QUEUE_FAMILY_IGNORED by default.
         srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 
@@ -491,7 +466,7 @@ namespace TerrainRenderer {
             0,
             0, nullptr,
             0, nullptr,
-            1, &barrier3
+            1, &barrier2
         );
 
         VulkanContext::SingleTimeCmdSubmit(Graphics, cmd);

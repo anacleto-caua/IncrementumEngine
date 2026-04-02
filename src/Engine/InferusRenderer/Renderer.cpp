@@ -24,16 +24,10 @@ namespace Renderer {
         VkCommandPool CmdPool = VK_NULL_HANDLE;
         VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
     };
-    struct TransferFrameData {
-        VkFence InFlight = VK_NULL_HANDLE;
-        VkSemaphore TransferComplete = VK_NULL_HANDLE;
-        VkCommandPool CmdPool = VK_NULL_HANDLE;
-        VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
-    };
+
 
     struct FrameData {
         RenderFrameData Render;
-        TransferFrameData Transfer;
     };
 
     struct SwapchainImage {
@@ -58,7 +52,7 @@ namespace Renderer {
     uint32_t TargetImageViewIndex = 0;
 
     static constexpr VkPipelineStageFlags GRAPHICS_PIPELINE_WAIT_STAGES[] = {
-        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        //VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
     };
 
@@ -67,9 +61,6 @@ namespace Renderer {
     VkRenderingAttachmentInfo ColorAttachment {};
     VkRenderingAttachmentInfo DepthAttachment {};
     VkRenderingInfo RenderingInfo {};
-
-    VkCommandBufferBeginInfo TransferingCmdBeginInfo {};
-    VkSubmitInfo TransferingCmdSubmitInfo {};
 
     VkCommandBufferBeginInfo RenderingCmdBeginInfo {};
     VkSubmitInfo RenderingCmdSubmitInfo {};
@@ -205,9 +196,6 @@ namespace Renderer {
             VkCommandPoolCreateInfo RenderCmdPoolCreateInfo = DefaultPoolCreateInfo;
             RenderCmdPoolCreateInfo.queueFamilyIndex = VulkanContext::Graphics.Index;
 
-            VkCommandPoolCreateInfo TransferCmdPoolCreateInfo = DefaultPoolCreateInfo;
-            TransferCmdPoolCreateInfo.queueFamilyIndex = VulkanContext::Transfer.Index;
-
             VkCommandBufferAllocateInfo AllocInfo {};
             AllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
             AllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -215,17 +203,6 @@ namespace Renderer {
             AllocInfo.commandBufferCount = 1;
 
             for (FrameData &Frame : Frames) {
-                // TransferFrame
-                {
-                    TransferFrameData &TransferFD = Frame.Transfer;
-                    vkCreateSemaphore(VulkanContext::Device, &SemaphoreCreateInfo, nullptr, &TransferFD.TransferComplete);
-                    vkCreateFence(VulkanContext::Device, &FenceCreateInfo, nullptr, &TransferFD.InFlight);
-
-                    vkCreateCommandPool(VulkanContext::Device, &TransferCmdPoolCreateInfo, nullptr, &TransferFD.CmdPool);
-                    AllocInfo.commandPool = TransferFD.CmdPool;
-                    vkAllocateCommandBuffers(VulkanContext::Device, &AllocInfo, &TransferFD.CmdBuffer);
-                }
-
                 // RenderFrame
                 {
                     RenderFrameData &RenderFD = Frame.Render;
@@ -279,23 +256,10 @@ namespace Renderer {
 
         RenderingCmdSubmitInfo = {};
         RenderingCmdSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        RenderingCmdSubmitInfo.waitSemaphoreCount = 2;
+        RenderingCmdSubmitInfo.waitSemaphoreCount = 1;
         RenderingCmdSubmitInfo.pWaitDstStageMask = GRAPHICS_PIPELINE_WAIT_STAGES;
         RenderingCmdSubmitInfo.commandBufferCount = 1;
         RenderingCmdSubmitInfo.signalSemaphoreCount = 1;
-
-        TransferingCmdBeginInfo = {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            .pInheritanceInfo = nullptr
-        };
-
-        TransferingCmdSubmitInfo = {};
-        TransferingCmdSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        TransferingCmdSubmitInfo.waitSemaphoreCount = 0;
-        TransferingCmdSubmitInfo.commandBufferCount = 1;
-        TransferingCmdSubmitInfo.signalSemaphoreCount = 1;
 
         if (
             ImGuiRenderer::Create() !=  InferusResult::SUCCESS
@@ -326,11 +290,6 @@ namespace Renderer {
         ImageSystem::Destroy();
 
         for (FrameData &Frame : Frames) {
-            // Transfer
-            if (Frame.Transfer.TransferComplete) { vkDestroySemaphore(VulkanContext::Device, Frame.Transfer.TransferComplete, nullptr); }
-            if (Frame.Transfer.InFlight) { vkDestroyFence(VulkanContext::Device, Frame.Transfer.InFlight, nullptr); }
-            if (Frame.Transfer.CmdPool) { vkDestroyCommandPool(VulkanContext::Device, Frame.Transfer.CmdPool, nullptr); }
-
             // Render
             if (Frame.Render.ImageAvailable) { vkDestroySemaphore(VulkanContext::Device, Frame.Render.ImageAvailable, nullptr); }
             if (Frame.Render.InFlight) { vkDestroyFence(VulkanContext::Device, Frame.Render.InFlight, nullptr); }
@@ -416,26 +375,6 @@ namespace Renderer {
     void Render() {
         FrameData& TargetFrame = Frames[TargetFrameIndex];
 
-        // Transfering
-        VkCommandBuffer& TransferCmd = TargetFrame.Transfer.CmdBuffer;
-        // TODO: Looks wrong
-        vkWaitForFences(VulkanContext::Device, 1, &TargetFrame.Transfer.InFlight, VK_TRUE, UINT64_MAX);
-
-        vkResetCommandBuffer(TransferCmd, 0);
-        vkBeginCommandBuffer(TransferCmd, &TransferingCmdBeginInfo);
-
-        vkResetFences(VulkanContext::Device, 1, &TargetFrame.Transfer.InFlight);
-
-        // Actual transfer
-        TransferSystem::FrameTransfer(TransferCmd);
-
-        vkEndCommandBuffer(TransferCmd);
-        VkSemaphore TransferSignalSemaphores[] = { TargetFrame.Transfer.TransferComplete };
-
-        TransferingCmdSubmitInfo.pCommandBuffers = &TransferCmd;
-        TransferingCmdSubmitInfo.pSignalSemaphores = TransferSignalSemaphores;
-        vkQueueSubmit(VulkanContext::Transfer.Queue, 1, &TransferingCmdSubmitInfo, TargetFrame.Transfer.InFlight);
-
         // Rendering
         VkCommandBuffer& RenderCmd = TargetFrame.Render.CmdBuffer;
         vkWaitForFences(VulkanContext::Device, 1, &TargetFrame.Render.InFlight, VK_TRUE, UINT64_MAX);
@@ -457,6 +396,25 @@ namespace Renderer {
         vkBeginCommandBuffer(RenderCmd, &RenderingCmdBeginInfo);
 
         vkResetFences(VulkanContext::Device, 1, &TargetFrame.Render.InFlight);
+
+        // Transfer data
+        TransferSystem::FrameTransfer(RenderCmd);
+
+        // Transfer barrier
+        VkMemoryBarrier TransferBarrier {};
+        TransferBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        TransferBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        TransferBarrier.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(
+            RenderCmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0,
+            1, &TransferBarrier,
+            0, nullptr,
+            0, nullptr
+        );
 
         VkImageMemoryBarrier RenderingBarrier =
             Recipes::ImageMemoryBarrier::Rendering::EnableRendering(SwapchainImages[TargetImageViewIndex].Image);
@@ -505,7 +463,7 @@ namespace Renderer {
 
         vkEndCommandBuffer(RenderCmd);
 
-        VkSemaphore RenderWaitSemaphores[] = { TargetFrame.Transfer.TransferComplete, TargetFrame.Render.ImageAvailable };
+        VkSemaphore RenderWaitSemaphores[] = { TargetFrame.Render.ImageAvailable };
         VkSemaphore RenderSignalSemaphores[] = { SwapchainImages[TargetImageViewIndex].RenderFinished };
 
         RenderingCmdSubmitInfo.pCommandBuffers = &RenderCmd;

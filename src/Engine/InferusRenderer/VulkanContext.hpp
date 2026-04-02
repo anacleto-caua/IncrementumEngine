@@ -26,9 +26,8 @@ namespace VulkanContext {
 
     inline QueueContext Graphics;
     inline QueueContext Present;
-    inline QueueContext Transfer;
     inline QueueContext Compute;
-    inline std::vector Queues = { &Graphics, &Present, &Transfer, &Compute };
+    inline std::vector Queues = { &Graphics, &Present, &Compute };
 
     InferusResult Create();
     void Destroy();

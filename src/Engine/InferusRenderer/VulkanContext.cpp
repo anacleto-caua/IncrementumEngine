@@ -252,7 +252,7 @@ namespace VulkanContext {
         QueueRequests[0] = {
             .QueueCtx = &Graphics,
             .LatestScore = -1,
-            .RequiredFlags = VK_QUEUE_GRAPHICS_BIT,
+            .RequiredFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT,
             .AvoidedFlags = 0,
             .NeedsPresent = false,
             .ScoreUniqueness = true
@@ -264,14 +264,6 @@ namespace VulkanContext {
             .AvoidedFlags = VK_QUEUE_COMPUTE_BIT,       // Avoid since I don't explicitly support graphics->compute->present yet
             .NeedsPresent = true,
             .ScoreUniqueness = false
-        };
-        QueueRequests[2] = {
-            .QueueCtx = &Transfer,
-            .LatestScore = -1,
-            .RequiredFlags = VK_QUEUE_TRANSFER_BIT,
-            .AvoidedFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT,
-            .NeedsPresent = false,
-            .ScoreUniqueness = true
         };
         QueueRequests[3] = {
             .QueueCtx = &Compute,
