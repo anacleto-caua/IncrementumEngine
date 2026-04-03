@@ -1,6 +1,7 @@
 #include "TransferSystem.hpp"
 
 #include <queue>
+#include <cstring>
 #include <cassert>
 
 #include "Engine/InferusRenderer/RendererConfig.hpp"
