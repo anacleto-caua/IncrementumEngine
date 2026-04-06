@@ -1,32 +1,12 @@
-#include <exception>
-
-#include <spdlog/spdlog.h>
-
-#include "Engine/Types.hpp"
-#include "Engine/InferusEngine.hpp"
+#include "Engine/Engine.hpp"
 
 int main() {
-    // [Time] [Log Level] Message
-    spdlog::set_pattern("[%H:%M:%S] [%^%l%$] %v");
-    #ifdef NDEBUG
-        spdlog::set_level(spdlog::level::off);
-    #else
-        spdlog::set_level(spdlog::level::debug);
-    #endif
 
-    if ( InferusEngine::Init() != InferusResult::SUCCESS ) {
-        spdlog::critical("Couldn't open engine.");
-        return -1;
-    }
+    INC_CHECK(Engine::Create(), -1 ,"Couldn't create engine. {}", "fail");
 
-    try {
-        InferusEngine::Run();
-    } catch (const std::exception &e) {
-        spdlog::critical("runtime exception - ", e.what());
-        return -1;
-    }
+    Engine::Run();
 
-    InferusEngine::Destroy();
+    Engine::Destroy();
 
     return 0;
 }

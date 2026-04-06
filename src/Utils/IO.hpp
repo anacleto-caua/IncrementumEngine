@@ -6,18 +6,18 @@
 #include <stdexcept>
 
 namespace IO {
-    static inline void BinaryRead(const std::string &Filename, std::vector<char> &Buffer, uint32_t &ShaderSize) {
-        std::ifstream File(Filename, std::ios::ate | std::ios::binary);
+    static inline void BinaryRead(const std::string &filename, std::vector<char> &buffer, uint32_t &file_size) {
+        std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
-        if (!File.is_open()) {
-            throw std::runtime_error("Failed to open file: " + Filename);
+        if (!file.is_open()) {
+            throw std::runtime_error("Failed to open file: " + filename);
         }
 
-        ShaderSize = (uint32_t)File.tellg();
-        Buffer.reserve(ShaderSize);
+        file_size = (uint32_t)file.tellg();
+        buffer.reserve(file_size);
 
-        File.seekg(0);
-        File.read(Buffer.data(), ShaderSize);
-        File.close();
+        file.seekg(0);
+        file.read(buffer.data(), file_size);
+        file.close();
     }
 }
