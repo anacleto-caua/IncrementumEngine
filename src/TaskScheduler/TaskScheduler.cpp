@@ -3,7 +3,10 @@
 #include <mutex>
 #include <vector>
 #include <thread>
+#include <cassert>
 #include <condition_variable>
+
+#include "TaskScheduler/TaskQueue.hpp"
 
 static constexpr u64 THREAD_SCRATCH_MEMORY_SIZE = 1024 * 1024;
 
@@ -46,6 +49,25 @@ namespace TaskScheduler {
     }
 
     void Create() {
+
+        assert(sizeof(Task) == 64 && "Task must equals a perfect x86_64 cache line to avoid unecessary cross thread cache flush");
+
+        assert([](){
+            i32 n = TaskScheduler::CAPACITY;
+            i32 x = 2;
+
+            if (n <= 0 || x <= 0) return false;
+            if (x == 1) return n == 1;
+
+            int temp = n;
+            while (temp % x == 0) {
+                temp /= x;
+            }
+
+            return temp == 1;
+
+        }() && "TaskScheduler queue capacity should be a power of 2");
+
         // Leave one thread for the main thread to avoid (OS overhead)
         NumThreads = std::thread::hardware_concurrency() - 1;
         if (NumThreads == 0) NumThreads = 1;

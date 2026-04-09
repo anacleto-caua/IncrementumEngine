@@ -13,10 +13,11 @@ namespace TaskScheduler {
 
     typedef void (*TaskEntryPoint)(void* payload, WorkerContext& context);
 
-    struct Task {
+    struct alignas(64) Task {
         TaskEntryPoint EntryPoint = nullptr;
         void* Payload = nullptr;
     };
+    static_assert(std::is_trivially_copyable_v<Task>, "Task must be trivially copyable for safe lock-free stealing!");
 
     void Create();
     void Destroy();
