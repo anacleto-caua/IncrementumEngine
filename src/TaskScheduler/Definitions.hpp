@@ -1,25 +1,53 @@
 #pragma once
 
-#include <atomic>
-
-#include "TaskScheduler/TaskScheduler.hpp"
-
 namespace TaskScheduler {
-    static constexpr i32 CAPACITY = 4096;
+    static constexpr i32 TASK_QUEUE_CAPACITY = 4096;
+    static_assert([](){
+        i32 n = TASK_QUEUE_CAPACITY;
+        i32 x = 2;
 
-    static constexpr i32 MASK = CAPACITY - 1;
+        if (n <= 0 || x <= 0) return false;
+        if (x == 1) return n == 1;
+
+        int temp = n;
+        while (temp % x == 0) {
+            temp /= x;
+        }
+
+        return temp == 1;
+
+    }() && "TaskScheduler queue capacity should be a power of 2");
+
+    static constexpr i32 TASK_QUEUE_MASK = TASK_QUEUE_CAPACITY - 1;
+
+    struct WorkerContext;
+    typedef void (*TaskEntryPoint)(void* payload, WorkerContext& context);
+
+    struct alignas(64) Task {
+        TaskEntryPoint EntryPoint = nullptr;
+        void* Payload = nullptr;
+    };
+    static_assert(std::is_trivially_copyable_v<Task>, "Task must be trivially copyable for safe lock-free stealing!");
+    static_assert(sizeof(Task) == 64 && "Task must equals a perfect x86_64 cache line to avoid unecessary cross thread cache flush");
+
 
     class TaskQueue {
         private:
-            Task Tasks[CAPACITY];
+            Task Tasks[TASK_QUEUE_CAPACITY];
 
             std::atomic<i32> Top {0};
             std::atomic<i32> Bottom {0};
 
         public:
+            TaskQueue() {};
+            ~TaskQueue() {};
+
+            TaskQueue(const TaskQueue&) = delete;
+            TaskQueue& operator=(const TaskQueue&) = delete;
+
             void Push(Task task) {
                 i32 b = Bottom.load(std::memory_order_relaxed);
-                Tasks[b & MASK] = task;
+                Tasks[b & TASK_QUEUE_MASK] = task;
 
                 std::atomic_thread_fence(std::memory_order_release);
 
@@ -37,7 +65,7 @@ namespace TaskScheduler {
 
                 if (t <= b) {
                     // We safely claimed a task
-                    task = Tasks[b & MASK];
+                    task = Tasks[b & TASK_QUEUE_MASK];
 
                     if (t != b) {
                         // More than 1 task left in the queue. No conflict with thieves.
@@ -78,7 +106,7 @@ namespace TaskScheduler {
 
                 if (t < b) {
                     // There is at least one Task to steal
-                    task = Tasks[t & MASK];
+                    task = Tasks[t & TASK_QUEUE_MASK];
 
                     // Attempt to increment the top index. If another thief steals it first,
                     // or the owner pops it first, this CAS will fail.
@@ -96,5 +124,17 @@ namespace TaskScheduler {
                 // Queue is empty, or we lost the race to another thief
                 return false;
             }
+    };
+
+
+    struct WorkerContext {
+        u32 ThreadIndex;
+        u8* ScratchMemory;
+        u64 MemoryHead;
+        TaskQueue* Queue;
+
+        void ResetMemory() {
+            MemoryHead = 0;
+        }
     };
 }

@@ -1,12 +1,11 @@
 #include  "TaskScheduler.hpp"
 
+#include <deque>
 #include <mutex>
 #include <vector>
 #include <thread>
 #include <cassert>
 #include <condition_variable>
-
-#include "TaskScheduler/TaskQueue.hpp"
 
 static constexpr u64 THREAD_SCRATCH_MEMORY_SIZE = 1024 * 1024;
 
@@ -14,17 +13,21 @@ namespace TaskScheduler {
     u8 NumThreads;
     std::vector<std::thread> Workers;
     std::vector<WorkerContext> WorkerContexts;
+    std::deque<TaskQueue> WorkersTaskQueues;
 
+    /*
     // The Task Queue is a basic locked queue for simplicity.
     // A more professional approach would be a lock free ring buffer or some other queue for work stealing
     std::vector<Task> TaskQueue;
     std::mutex QueueMutex;
     std::condition_variable Condition;
     bool StopSystem = false;
+    */
 
     void WorkerThreadLoop(u32 thread_index) {
         WorkerContext& context = WorkerContexts[thread_index];
 
+        /*
         while (true) {
             Task task;
             {
@@ -46,39 +49,23 @@ namespace TaskScheduler {
                 task.EntryPoint(task.Payload, context);
             }
         }
+        */
     }
 
     void Create() {
-
-        assert(sizeof(Task) == 64 && "Task must equals a perfect x86_64 cache line to avoid unecessary cross thread cache flush");
-
-        assert([](){
-            i32 n = TaskScheduler::CAPACITY;
-            i32 x = 2;
-
-            if (n <= 0 || x <= 0) return false;
-            if (x == 1) return n == 1;
-
-            int temp = n;
-            while (temp % x == 0) {
-                temp /= x;
-            }
-
-            return temp == 1;
-
-        }() && "TaskScheduler queue capacity should be a power of 2");
-
         // Leave one thread for the main thread to avoid (OS overhead)
         NumThreads = std::thread::hardware_concurrency() - 1;
         if (NumThreads == 0) NumThreads = 1;
 
         WorkerContexts.resize(NumThreads);
+        WorkersTaskQueues.resize(NumThreads);
 
         for (uint32_t i = 0; i < NumThreads; ++i) {
             WorkerContexts[i] = {
                 .ThreadIndex = i,
                 .ScratchMemory = new u8[THREAD_SCRATCH_MEMORY_SIZE],
-                .MemoryHead = 0
+                .MemoryHead = 0,
+                .Queue = nullptr,
             };
 
             Workers.emplace_back(&TaskScheduler::WorkerThreadLoop, i);
@@ -87,6 +74,7 @@ namespace TaskScheduler {
     }
 
     void Destroy() {
+        /*
         {
             std::unique_lock<std::mutex> lock(QueueMutex);
             StopSystem = true;
@@ -102,13 +90,16 @@ namespace TaskScheduler {
         for (auto& ctx : WorkerContexts) {
             delete[] ctx.ScratchMemory;
         }
+        */
     }
 
     void SubmitTask(TaskEntryPoint entry_point, void* payload) {
+        /*
         {
             std::unique_lock<std::mutex> lock(QueueMutex);
             TaskQueue.push_back({entry_point, payload});
         }
         Condition.notify_one();
+        */
     }
 };
