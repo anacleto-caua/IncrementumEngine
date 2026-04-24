@@ -1,59 +1,62 @@
 #include  "TaskScheduler.hpp"
 
 #include <deque>
-#include <mutex>
 #include <vector>
 #include <thread>
 #include <cassert>
-#include <condition_variable>
 
 static constexpr u64 THREAD_SCRATCH_MEMORY_SIZE = 1024 * 1024;
 
 namespace TaskScheduler {
+    std::atomic<bool> StopSystem = false;
+
     u8 NumThreads;
     std::vector<std::thread> Workers;
     std::vector<WorkerContext> WorkerContexts;
     std::deque<TaskQueue> WorkersTaskQueues;
 
-    /*
-    // The Task Queue is a basic locked queue for simplicity.
-    // A more professional approach would be a lock free ring buffer or some other queue for work stealing
-    std::vector<Task> TaskQueue;
-    std::mutex QueueMutex;
-    std::condition_variable Condition;
-    bool StopSystem = false;
-    */
-
     void WorkerThreadLoop(u32 thread_index) {
         WorkerContext& context = WorkerContexts[thread_index];
+        TaskQueue* queue = context.Queue;
 
-        /*
-        while (true) {
-            Task task;
-            {
-                std::unique_lock<std::mutex> lock(QueueMutex);
-                Condition.wait(lock, []{
-                    return !TaskQueue.empty() || StopSystem;
-                });
+        while (!StopSystem) {
+            Task current_task;
+            bool has_task = false;
 
-                if (StopSystem && TaskQueue.empty()) {
-                    return;
+            // Try to pop a task from the self queue
+            has_task = queue->Pop(current_task);
+
+            // No self task, gotta steal
+            if (!has_task) {
+                // Pick a random thread to steal from
+                // TODO: A better approach would be using a fast thread-local xor-shift RNG
+                for (u32 i = 0; i < NumThreads; ++i) {
+                    u32 victim_index = (thread_index + i) % NumThreads;
+                    // TODO: This looks ugly huh
+                    if (victim_index == thread_index) continue;
+
+                    has_task = WorkersTaskQueues[victim_index].Steal(current_task);
+                    if (has_task) {
+                        break; // Successfully stole a task!
+                    }
                 }
-
-                task = TaskQueue.back();
-                TaskQueue.pop_back();
             }
 
             // Execute the task
-            if (task.EntryPoint) {
-                task.EntryPoint(task.Payload, context);
+            if (has_task && current_task.EntryPoint) {
+                current_task.EntryPoint(current_task.Payload, context);
+                // TODO: Reset linear allocator here if task is fully done
+                context.ResetMemory(); // Safe as long as data doesn't outlive the task
+            } else {
+                // TODO: Study for a better idea
+                // Yield or Sleep if there is absolutely no work
+                std::this_thread::yield();
             }
         }
-        */
     }
 
     void Create() {
-        // Leave one thread for the main thread to avoid (OS overhead)
+        // Leave one thread for the main thread to avoid OS overhead
         NumThreads = std::thread::hardware_concurrency() - 1;
         if (NumThreads == 0) NumThreads = 1;
 
@@ -65,7 +68,7 @@ namespace TaskScheduler {
                 .ThreadIndex = i,
                 .ScratchMemory = new u8[THREAD_SCRATCH_MEMORY_SIZE],
                 .MemoryHead = 0,
-                .Queue = nullptr,
+                .Queue = &WorkersTaskQueues[i],
             };
 
             Workers.emplace_back(&TaskScheduler::WorkerThreadLoop, i);
@@ -74,32 +77,54 @@ namespace TaskScheduler {
     }
 
     void Destroy() {
-        /*
-        {
-            std::unique_lock<std::mutex> lock(QueueMutex);
-            StopSystem = true;
-        }
-        Condition.notify_all();
+        // Signal all threads to stop
+        StopSystem.store(true, std::memory_order_release);
 
+        // Wait for all threads to finish their current loop
         for (auto& worker : Workers) {
             if (worker.joinable()) {
                 worker.join();
             }
         }
 
+        // Free the scratch memory
         for (auto& ctx : WorkerContexts) {
             delete[] ctx.ScratchMemory;
         }
-        */
     }
 
+    // TODO: Give the main thread a Single Producer Multiple Consumer Queue,
+    // this approach won't be usefull for workers spawning their own tasks
     void SubmitTask(TaskEntryPoint entry_point, void* payload) {
+        // Basic Round-Robin distribution from the Main Thread
+        static std::atomic<u32> next_queue{0};
+        u32 index = next_queue.fetch_add(1, std::memory_order_relaxed) % NumThreads;
+
+        WorkersTaskQueues[index].Push({entry_point, payload});
+    }
+
+    // TODO: Completely rethink this
+    void Wait(std::atomic<int>& dependency_counter) {
         /*
-        {
-            std::unique_lock<std::mutex> lock(QueueMutex);
-            TaskQueue.push_back({entry_point, payload});
+        // Create a dummy context for the main thread if tasks require it
+        WorkerContext dummy_context{ .ThreadIndex = 999, .ScratchMemory = nullptr, .MemoryHead = 0, .Queue = nullptr };
+
+        while (dependency_counter.load(std::memory_order_acquire) > 0) {
+            Task current_task;
+            bool has_task = false;
+
+            // Main thread doesn't have its own queue to Pop from, so it instantly becomes a thief
+            for (u32 i = 0; i < NumThreads; ++i) {
+                has_task = WorkersTaskQueues[i].Steal(current_task);
+                if (has_task) break;
+            }
+
+            if (has_task && current_task.EntryPoint) {
+                current_task.EntryPoint(current_task.Payload, dummy_context);
+            } else {
+                std::this_thread::yield();
+            }
         }
-        Condition.notify_one();
         */
     }
 };
