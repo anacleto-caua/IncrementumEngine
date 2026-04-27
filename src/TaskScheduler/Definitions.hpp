@@ -43,6 +43,9 @@ namespace TaskScheduler {
     static_assert(std::is_trivially_copyable_v<Task>, "Task must be trivially copyable for safe lock-free stealing!");
     static_assert(sizeof(Task) == 64 && "Task must equals a perfect x86_64 cache line to avoid unecessary cross thread cache flush");
 
+    /**
+     * SPMC "Chase-Lev like queue"
+     */
     class TaskQueue {
         private:
             Task Tasks[TASK_QUEUE_CAPACITY];
@@ -58,28 +61,28 @@ namespace TaskScheduler {
             TaskQueue& operator=(const TaskQueue&) = delete;
 
             void Push(Task task) {
-                i32 b = Tail.load(std::memory_order_relaxed);
-                Tasks[b & TASK_QUEUE_MASK] = task;
+                i32 t = Tail.load(std::memory_order_relaxed);
+                Tasks[t & TASK_QUEUE_MASK] = task;
 
                 std::atomic_thread_fence(std::memory_order_release);
 
-                Tail.store(b + 1, std::memory_order_relaxed);
+                Tail.store(t + 1, std::memory_order_relaxed);
             }
 
             bool Pop(Task& task) {
-                i32 b = Tail.load(std::memory_order_relaxed) - 1;
-                Tail.store(b, std::memory_order_relaxed);
+                i32 t = Tail.load(std::memory_order_relaxed) - 1;
+                Tail.store(t, std::memory_order_relaxed);
 
                 // Force memory synchronization so we get the most up-to-date 'top'
                 std::atomic_thread_fence(std::memory_order_seq_cst);
 
-                i32 t = Head.load(std::memory_order_relaxed);
+                i32 h = Head.load(std::memory_order_relaxed);
 
-                if (t <= b) {
+                if (h <= t) {
                     // We safely claimed a task
-                    task = Tasks[b & TASK_QUEUE_MASK];
+                    task = Tasks[t & TASK_QUEUE_MASK];
 
-                    if (t != b) {
+                    if (h != t) {
                         // More than 1 task left in the queue. No conflict with thieves.
                         return true;
                     }
@@ -88,7 +91,7 @@ namespace TaskScheduler {
                     // We must race the thief using a Compare-And-Swap (CAS).
                     if (
                             !Head.compare_exchange_strong(
-                                t, t + 1,
+                                h, h + 1,
                                 std::memory_order_seq_cst, std::memory_order_relaxed
                             )
                         )
@@ -98,33 +101,33 @@ namespace TaskScheduler {
                     }
 
                     // Reset the queue indices to avoid i32eger overflow over time
-                    Tail.store(b + 1, std::memory_order_relaxed);
+                    Tail.store(t + 1, std::memory_order_relaxed);
                     return true;
 
                 } else {
                     // The queue was already empty. Restore the bottom poi32er.
-                    Tail.store(b + 1, std::memory_order_relaxed);
+                    Tail.store(t + 1, std::memory_order_relaxed);
                     return false;
                 }
             }
 
             bool Steal(Task& task) {
-                i32 t = Head.load(std::memory_order_acquire);
+                i32 h = Head.load(std::memory_order_acquire);
 
                 // Force sync to ensure we read bottom after top
                 std::atomic_thread_fence(std::memory_order_seq_cst);
 
-                i32 b = Tail.load(std::memory_order_acquire);
+                i32 t = Tail.load(std::memory_order_acquire);
 
-                if (t < b) {
+                if (h < t) {
                     // There is at least one Task to steal
-                    task = Tasks[t & TASK_QUEUE_MASK];
+                    task = Tasks[h & TASK_QUEUE_MASK];
 
                     // Attempt to increment the top index. If another thief steals it first,
                     // or the owner pops it first, this CAS will fail.
                     if (
                             Head.compare_exchange_strong(
-                                t, t + 1,
+                                h, h + 1,
                                 std::memory_order_seq_cst, std::memory_order_relaxed
                             )
                         )
