@@ -7,4 +7,6 @@ namespace TaskScheduler {
     void Destroy();
 
     void SubmitTask(TaskEntryPoint entry_point, void* payload);
+
+    void Wait(std::atomic<u32>& dependency_counter);
 }

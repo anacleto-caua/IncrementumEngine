@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 namespace TaskScheduler {
     class TaskQueue;
     struct WorkerContext;
@@ -43,9 +45,6 @@ namespace TaskScheduler {
     static_assert(std::is_trivially_copyable_v<Task>, "Task must be trivially copyable for safe lock-free stealing!");
     static_assert(sizeof(Task) == 64 && "Task must equals a perfect x86_64 cache line to avoid unecessary cross thread cache flush");
 
-    /**
-     * SPMC "Chase-Lev like queue"
-     */
     class TaskQueue {
         private:
             Task Tasks[TASK_QUEUE_CAPACITY];
@@ -54,35 +53,36 @@ namespace TaskScheduler {
             std::atomic<i32> Tail {0};
 
         public:
-            TaskQueue() {};
-            ~TaskQueue() {};
+            TaskQueue() = default;
+            ~TaskQueue() = default;
 
             TaskQueue(const TaskQueue&) = delete;
             TaskQueue& operator=(const TaskQueue&) = delete;
 
             void Push(Task task) {
-                i32 t = Tail.load(std::memory_order_relaxed);
-                Tasks[t & TASK_QUEUE_MASK] = task;
+                i32 h = Head.load(std::memory_order_relaxed);
+                Tasks[h & TASK_QUEUE_MASK] = task;
 
                 std::atomic_thread_fence(std::memory_order_release);
 
-                Tail.store(t + 1, std::memory_order_relaxed);
+                Head.store(h + 1, std::memory_order_relaxed);
             }
 
             bool Pop(Task& task) {
-                i32 t = Tail.load(std::memory_order_relaxed) - 1;
-                Tail.store(t, std::memory_order_relaxed);
+                i32 h = Head.load(std::memory_order_relaxed);
+                h-=1;
+                Head.store(h, std::memory_order_relaxed);
 
-                // Force memory synchronization so we get the most up-to-date 'top'
+                // Force memory synchronization to get the most up-to-date 'top'
                 std::atomic_thread_fence(std::memory_order_seq_cst);
 
-                i32 h = Head.load(std::memory_order_relaxed);
+                i32 t = Tail.load(std::memory_order_relaxed);
 
-                if (h <= t) {
+                if (t <= h) {
                     // We safely claimed a task
-                    task = Tasks[t & TASK_QUEUE_MASK];
+                    task = Tasks[h & TASK_QUEUE_MASK];
 
-                    if (h != t) {
+                    if (t != h) {
                         // More than 1 task left in the queue. No conflict with thieves.
                         return true;
                     }
@@ -90,8 +90,8 @@ namespace TaskScheduler {
                     // Exactly 1 task left. A thief might be trying to steal it right now!
                     // We must race the thief using a Compare-And-Swap (CAS).
                     if (
-                            !Head.compare_exchange_strong(
-                                h, h + 1,
+                            !Tail.compare_exchange_strong(
+                                t, t + 1,
                                 std::memory_order_seq_cst, std::memory_order_relaxed
                             )
                         )
@@ -100,43 +100,43 @@ namespace TaskScheduler {
                         return false;
                     }
 
-                    // Reset the queue indices to avoid i32eger overflow over time
-                    Tail.store(t + 1, std::memory_order_relaxed);
+                    // Reset the queue indices to avoid integer overflow over time
+                    Head.store(h + 1, std::memory_order_relaxed);
                     return true;
 
                 } else {
-                    // The queue was already empty. Restore the bottom poi32er.
-                    Tail.store(t + 1, std::memory_order_relaxed);
+                    // The queue was already empty. Restore the bottom pointer.
+                    Head.store(h + 1, std::memory_order_relaxed);
                     return false;
                 }
             }
 
             bool Steal(Task& task) {
-                i32 h = Head.load(std::memory_order_acquire);
+                i32 t = Tail.load(std::memory_order_acquire);
 
                 // Force sync to ensure we read bottom after top
                 std::atomic_thread_fence(std::memory_order_seq_cst);
 
-                i32 t = Tail.load(std::memory_order_acquire);
+                i32 h = Head.load(std::memory_order_acquire);
 
-                if (h < t) {
+                if (t < h) {
                     // There is at least one Task to steal
-                    task = Tasks[h & TASK_QUEUE_MASK];
+                    task = Tasks[t & TASK_QUEUE_MASK];
 
                     // Attempt to increment the top index. If another thief steals it first,
                     // or the owner pops it first, this CAS will fail.
                     if (
-                            Head.compare_exchange_strong(
-                                h, h + 1,
+                            Tail.compare_exchange_strong(
+                                t, t + 1,
                                 std::memory_order_seq_cst, std::memory_order_relaxed
                             )
                         )
                     {
-                        return true; // We successfully stole the job!
+                        return true; // Job was successfully stolen
                     }
                 }
 
-                // Queue is empty, or we lost the race to another thief
+                // Queue is empty, or the CAS was lost
                 return false;
             }
     };

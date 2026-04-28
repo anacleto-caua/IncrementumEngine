@@ -1,8 +1,11 @@
+-- For dev run:     xmake run
+-- For profiling:   xmake f -m releasedbg && xmake
+
 -- Project Settings
-add_rules("mode.debug", "mode.release")
+add_rules("mode.debug", "mode.release", "mode.releasedbg")
 add_rules("plugin.compile_commands.autoupdate", {outputdir = "./build/"})
 
-set_project("Inferus Engine - The terrain thing.")
+set_project("Incrementum Engine - The terrain thing.")
 set_version("0.0.1")
 
 -- Defaults to using clang and debug build
@@ -10,7 +13,6 @@ set_languages("c++23")
 set_defaultmode("debug")
 
 set_toolchains("clang")
-
 
 -- Custom rule for shader compilation
 rule("compile_shaders")
@@ -63,14 +65,25 @@ rule("copy_assets")
         end, {files = sourcefile})
     end)
 
-target("InferusEngine")
+target("IncrementumEngine")
     set_kind("binary")
     set_default()
 
     -- Generate debug files, keep symbols and disable optimazations
-    set_symbols("debug")
-    set_strip("none")
-    set_optimize("none")
+    if is_mode("debug") then
+        set_symbols("debug")
+        set_strip("none")
+        set_optimize("none")
+
+    -- Release Debug version for profiling
+    elseif is_mode("releasedbg") then
+        set_symbols("debug")
+        set_optimize("fastest")
+        set_strip("none")
+
+        -- Crucial for AMD μProf to unwind Clang call stacks accurately
+        add_cxflags("-fno-omit-frame-pointer", {force = true})
+    end
 
     set_warnings("all", "extra")
     add_cxflags("-Wpedantic")

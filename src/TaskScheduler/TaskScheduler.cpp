@@ -104,8 +104,7 @@ namespace TaskScheduler {
     }
 
     // TODO: Completely rethink this
-    void Wait(std::atomic<int>& dependency_counter) {
-        /*
+    void Wait(std::atomic<u32>& dependency_counter) {
         // Create a dummy context for the main thread if tasks require it
         WorkerContext dummy_context{ .ThreadIndex = 999, .ScratchMemory = nullptr, .MemoryHead = 0, .Queue = nullptr };
 
@@ -125,6 +124,5 @@ namespace TaskScheduler {
                 std::this_thread::yield();
             }
         }
-        */
     }
 };
