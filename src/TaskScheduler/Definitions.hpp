@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+
 namespace TaskScheduler {
     class TaskQueue;
     struct WorkerContext;
