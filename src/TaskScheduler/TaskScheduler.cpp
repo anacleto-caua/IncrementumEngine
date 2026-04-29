@@ -5,6 +5,7 @@
 #include <vector>
 #include <thread>
 #include <cassert>
+#include <condition_variable>
 
 static constexpr u64 THREAD_SCRATCH_MEMORY_SIZE = 1024 * 1024;
 

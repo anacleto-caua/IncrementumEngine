@@ -1,9 +1,10 @@
 #include "Engine.hpp"
-#include "TaskScheduler/TaskScheduler.hpp"
 
+#include <cmath>
 #include <vector>
 #include <atomic>
-#include <cmath>
+
+#include "TaskScheduler/TaskScheduler.hpp"
 
 // Workload 1: CPU bound trigonometry burner
 struct HeavyMathPayload {
