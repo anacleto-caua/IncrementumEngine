@@ -1,6 +1,6 @@
 #pragma once
 
-#include <atomic>
+#include "concurrentqueue.h"
 
 namespace TaskScheduler {
     class TaskQueue;
@@ -47,97 +47,37 @@ namespace TaskScheduler {
 
     class TaskQueue {
         private:
-            Task Tasks[TASK_QUEUE_CAPACITY];
+            moodycamel::ConcurrentQueue<Task> Queue;
 
-            std::atomic<i32> Head {0};
-            std::atomic<i32> Tail {0};
+            moodycamel::ProducerToken ProducerToken;
+            moodycamel::ConsumerToken ConsumerToken;
 
         public:
-            TaskQueue() = default;
-            ~TaskQueue() = default;
+            TaskQueue() : ProducerToken(Queue), ConsumerToken(Queue) {}
 
             TaskQueue(const TaskQueue&) = delete;
             TaskQueue& operator=(const TaskQueue&) = delete;
 
+            // --- Owner thread methods - not thread safe
             void Push(Task task) {
-                i32 h = Head.load(std::memory_order_relaxed);
-                Tasks[h & TASK_QUEUE_MASK] = task;
-
-                std::atomic_thread_fence(std::memory_order_release);
-
-                Head.store(h + 1, std::memory_order_relaxed);
+                Queue.enqueue(ProducerToken, std::move(task));
             }
 
             bool Pop(Task& task) {
-                i32 h = Head.load(std::memory_order_relaxed);
-                h-=1;
-                Head.store(h, std::memory_order_relaxed);
-
-                // Force memory synchronization to get the most up-to-date 'top'
-                std::atomic_thread_fence(std::memory_order_seq_cst);
-
-                i32 t = Tail.load(std::memory_order_relaxed);
-
-                if (t <= h) {
-                    // We safely claimed a task
-                    task = Tasks[h & TASK_QUEUE_MASK];
-
-                    if (t != h) {
-                        // More than 1 task left in the queue. No conflict with thieves.
-                        return true;
-                    }
-
-                    // Exactly 1 task left. A thief might be trying to steal it right now!
-                    // We must race the thief using a Compare-And-Swap (CAS).
-                    if (
-                            !Tail.compare_exchange_strong(
-                                t, t + 1,
-                                std::memory_order_seq_cst, std::memory_order_relaxed
-                            )
-                        )
-                    {
-                        // The thief beat us to it. The queue is empty.
-                        return false;
-                    }
-
-                    // Reset the queue indices to avoid integer overflow over time
-                    Head.store(h + 1, std::memory_order_relaxed);
-                    return true;
-
-                } else {
-                    // The queue was already empty. Restore the bottom pointer.
-                    Head.store(h + 1, std::memory_order_relaxed);
-                    return false;
-                }
+                return Queue.try_dequeue(ConsumerToken, task);
             }
 
+            // --- External threads methods - thread safe
             bool Steal(Task& task) {
-                i32 t = Tail.load(std::memory_order_acquire);
+                return Queue.try_dequeue(task);
+            }
 
-                // Force sync to ensure we read bottom after top
-                std::atomic_thread_fence(std::memory_order_seq_cst);
+            void PushExternal(Task task) {
+                Queue.enqueue(std::move(task));
+            }
 
-                i32 h = Head.load(std::memory_order_acquire);
-
-                if (t < h) {
-                    // There is at least one Task to steal
-                    task = Tasks[t & TASK_QUEUE_MASK];
-
-                    // Attempt to increment the top index. If another thief steals it first,
-                    // or the owner pops it first, this CAS will fail.
-                    if (
-                            Tail.compare_exchange_strong(
-                                t, t + 1,
-                                std::memory_order_seq_cst, std::memory_order_relaxed
-                            )
-                        )
-                    {
-                        return true; // Job was successfully stolen
-                    }
-                }
-
-                // Queue is empty, or the CAS was lost
-                return false;
+            size_t SizeApprox() const {
+                return Queue.size_approx();
             }
     };
 }

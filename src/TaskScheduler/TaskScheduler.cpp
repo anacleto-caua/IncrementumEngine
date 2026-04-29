@@ -1,6 +1,7 @@
 #include  "TaskScheduler.hpp"
 
 #include <deque>
+#include <mutex>
 #include <vector>
 #include <thread>
 #include <cassert>
@@ -9,6 +10,11 @@ static constexpr u64 THREAD_SCRATCH_MEMORY_SIZE = 1024 * 1024;
 
 namespace TaskScheduler {
     std::atomic<bool> StopSystem = false;
+
+    // Global Sleep Primitives
+    std::atomic<u32> PendingTasks{0};
+    std::mutex WakeMutex;
+    std::condition_variable WakeCondition;
 
     u8 NumThreads;
     std::vector<std::thread> Workers;
@@ -19,7 +25,7 @@ namespace TaskScheduler {
         WorkerContext& context = WorkerContexts[thread_index];
         TaskQueue* queue = context.Queue;
 
-        while (!StopSystem) {
+        while (!StopSystem.load(std::memory_order_acquire)) {
             Task current_task;
             bool has_task = false;
 
@@ -45,12 +51,14 @@ namespace TaskScheduler {
             // Execute the task
             if (has_task && current_task.EntryPoint) {
                 current_task.EntryPoint(current_task.Payload, context);
-                // TODO: Reset linear allocator here if task is fully done
                 context.ResetMemory(); // Safe as long as data doesn't outlive the task
             } else {
-                // TODO: Study for a better idea
-                // Yield or Sleep if there is absolutely no work
-                std::this_thread::yield();
+                // Lock if there is absolutely no work
+                std::unique_lock<std::mutex> lock(WakeMutex);
+                WakeCondition.wait(lock, [] {
+                    return PendingTasks.load(std::memory_order_acquire) > 0 ||
+                           StopSystem.load(std::memory_order_acquire);
+                });
             }
         }
     }
@@ -58,12 +66,12 @@ namespace TaskScheduler {
     void Create() {
         // Leave one thread for the main thread to avoid OS overhead
         NumThreads = std::thread::hardware_concurrency() - 1;
-        if (NumThreads == 0) NumThreads = 1;
+        if (NumThreads == 0) NumThreads = 1; // lol
 
         WorkerContexts.resize(NumThreads);
         WorkersTaskQueues.resize(NumThreads);
 
-        for (uint32_t i = 0; i < NumThreads; ++i) {
+        for (u32 i = 0; i < NumThreads; i++) {
             WorkerContexts[i] = {
                 .ThreadIndex = i,
                 .ScratchMemory = new u8[THREAD_SCRATCH_MEMORY_SIZE],
@@ -79,6 +87,7 @@ namespace TaskScheduler {
     void Destroy() {
         // Signal all threads to stop
         StopSystem.store(true, std::memory_order_release);
+        WakeCondition.notify_all();
 
         // Wait for all threads to finish their current loop
         for (auto& worker : Workers) {
@@ -93,17 +102,19 @@ namespace TaskScheduler {
         }
     }
 
-    // TODO: Give the main thread a Single Producer Multiple Consumer Queue,
-    // this approach won't be usefull for workers spawning their own tasks
     void SubmitTask(TaskEntryPoint entry_point, void* payload) {
+        PendingTasks.fetch_add(1, std::memory_order_release);
+
         // Basic Round-Robin distribution from the Main Thread
         static std::atomic<u32> next_queue{0};
         u32 index = next_queue.fetch_add(1, std::memory_order_relaxed) % NumThreads;
+        WorkersTaskQueues[index].PushExternal({entry_point, payload});
 
-        WorkersTaskQueues[index].Push({entry_point, payload});
+        // Wake up ONE sleeping worker to handle this new task
+        WakeCondition.notify_one();
     }
 
-    // TODO: Completely rethink this
+    // TODO: Rethink this, I don't like the busy wait neither the dummy context
     void Wait(std::atomic<u32>& dependency_counter) {
         // Create a dummy context for the main thread if tasks require it
         WorkerContext dummy_context{ .ThreadIndex = 999, .ScratchMemory = nullptr, .MemoryHead = 0, .Queue = nullptr };
@@ -112,15 +123,19 @@ namespace TaskScheduler {
             Task current_task;
             bool has_task = false;
 
-            // Main thread doesn't have its own queue to Pop from, so it instantly becomes a thief
+            // Main thread goes to steal
             for (u32 i = 0; i < NumThreads; ++i) {
                 has_task = WorkersTaskQueues[i].Steal(current_task);
                 if (has_task) break;
             }
 
-            if (has_task && current_task.EntryPoint) {
-                current_task.EntryPoint(current_task.Payload, dummy_context);
+            if (has_task) {
+                if (current_task.EntryPoint) {
+                    current_task.EntryPoint(current_task.Payload, dummy_context);
+                }
+                PendingTasks.fetch_sub(1, std::memory_order_release);
             } else {
+                // Main thread can't really afford a fancy pause
                 std::this_thread::yield();
             }
         }

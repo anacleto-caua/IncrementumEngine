@@ -63,8 +63,8 @@ namespace Engine {
         TaskScheduler::Create();
 
         // Heavy CPU Bound Tasks
-        constexpr u32 NUM_MATH_JOBS = 10;
-        constexpr u32 MATH_ITERATIONS = 500;
+        constexpr u32 NUM_MATH_JOBS = 10000;
+        constexpr u32 MATH_ITERATIONS = 500000;
         std::atomic<u32> math_jobs_pending(NUM_MATH_JOBS);
         std::vector<HeavyMathPayload> math_payloads(NUM_MATH_JOBS);
 
@@ -80,8 +80,8 @@ namespace Engine {
         analog::info("Math jobs finished!");
 
         // Phase 2: Memory Bound Tasks
-        constexpr u32 MATRIX_SIZE = 100;
-        constexpr u32 CHUNK_SIZE = 32;
+        constexpr u32 MATRIX_SIZE = 1000;
+        constexpr u32 CHUNK_SIZE = 64;
         constexpr u32 NUM_MATRIX_JOBS = MATRIX_SIZE / CHUNK_SIZE;
 
         std::vector<float> matA(MATRIX_SIZE * MATRIX_SIZE, 1.0f);
