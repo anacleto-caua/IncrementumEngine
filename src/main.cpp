@@ -1,8 +1,10 @@
 #include "Engine/Engine.hpp"
 
 int main() {
-
-    INC_CHECK(Engine::Create(), -1 ,"Couldn't create engine. {}", "fail");
+    if (Engine::Create() != IncResult::SUCCESS) {
+        analog::info("Couldn't create engine");
+        return -1;
+    }
 
     Engine::Run();
 

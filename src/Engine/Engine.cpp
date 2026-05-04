@@ -1,6 +1,7 @@
 #include "Engine.hpp"
 
 #include "Engine/Core/Input.hpp"
+#include "Renderer/Renderer.hpp"
 #include "Engine/Core/Platform.hpp"
 #include "TaskScheduler/TaskScheduler.hpp"
 
@@ -8,16 +9,17 @@ namespace Engine {
     void ResizeEvent(u32 width, u32 height);
 
     IncResult Create() {
-        INC_CHECK(Platform::Initialize(1280, 720, "yes", Engine::ResizeEvent), IncResult::FAIL , "Couldn't create platform layer.");
+        INC_CHECK(
+            Platform::Initialize(1280, 720, "yes", Engine::ResizeEvent),
+            "Couldn't create platform layer."
+        );
+
+        INC_CHECK(
+            Renderer::Create(),
+            "Couldn't create renderer."
+        );
+
         TaskScheduler::Create();
-
-        Input::Mouse::RegisterCallback(Input::Mouse::Button::Left, []() {
-            analog::info("mouse pos - x: {} - y: {}", Input::Mouse::XPos, Input::Mouse::YPos);
-        });
-
-        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Space, []() {
-            analog::info("space was pressed");
-        });
 
         return IncResult::SUCCESS;
     }
