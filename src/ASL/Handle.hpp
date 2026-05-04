@@ -6,6 +6,7 @@ struct Handle {
     uint32_t Index = UINT32_MAX;
     uint32_t Generation = 0;
 
+    // not very sure on this "design decision"
     bool IsValid() const {
         return Index != UINT32_MAX;
     }

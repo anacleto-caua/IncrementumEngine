@@ -3,7 +3,7 @@
 #include <vector>
 #include <cassert>
 
-#include "Utils/Handle.hpp"
+#include "Handle.hpp"
 
 template <typename T>
 class ResourcePool {
