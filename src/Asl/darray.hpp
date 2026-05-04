@@ -8,60 +8,84 @@
 namespace asl {
 
 template <typename T>
-class darray {
+class DArray {
 private:
-    static_assert(std::is_trivially_copyable<T>::value, "darray supports only plain old data, no complex data types.");
+    static_assert(std::is_trivially_copyable<T>::value, "DArray supports only plain old data, no complex data types.");
 public:
     T* Data = nullptr;
-    size_t Count = 0;
+    size_t Size = 0;
     size_t Capacity = 0;
 
-private:
 public:
-    darray() = default;
-    ~darray() {
+    DArray() = default;
+    ~DArray() {
         free(Data);
     }
 
-    darray(const darray&) = delete;
-    darray& operator=(const darray&) = delete;
+    DArray(const DArray&) = delete;
+    DArray& operator=(const DArray&) = delete;
 
     T& operator[](size_t index) {
-        assert(index < Count && "index was out of bounds.");
+        assert(index < Size && "index was out of bounds.");
         return Data[index];
     }
 
-    void push(T element) {
-        if (Count == Capacity) {
-            Count++;
-            Capacity++;
+    void Push(T element) {
+        if (Size == Capacity) {
+            Capacity = (Capacity == 0) ? 1 : Capacity * 2;
             Data = (T*)realloc(Data, Capacity * sizeof(T));
-        } else {
-            Data[Count] = element;
-            Count++;
+            assert(Data != nullptr && "allocation failed.");
         }
+
+        Data[Size] = element;
+        Size++;
     }
 
-    void pop() {
-        assert(Count > 0 && "can't pop an empty darray.");
-        Count--;
+    void Pop() {
+        assert(Size > 0 && "can't pop an empty DArray.");
+        Size--;
     }
 
-    void pack() {
-        if (Count == 0) {
+    void Pack() {
+        if (Size == 0) {
             free(Data);
             Data = nullptr;
             Capacity = 0;
         } else {
-            Data = (T*)realloc(Data, Count * sizeof(T));
-            Capacity = Count;
+            Data = (T*)realloc(Data, Size * sizeof(T));
+            Capacity = Size;
         }
     }
 
-    void reserve(size_t new_size) {
-        assert(new_size >= Count && "new_size should be bigger than previous size.");
+    void Reserve(size_t new_size) {
+        assert(new_size >= Size && "new_size should be bigger than previous size.");
         Data = (T*)realloc(Data, new_size * sizeof(T));
         Capacity = new_size;
+    }
+
+    void Clear() {
+        Size = 0;
+    }
+
+    // Defining standard iterator types for standard library compatibility
+    using iterator = T*;
+    using const_iterator = const T*;
+
+    iterator begin() {
+        return Data;
+    }
+
+    iterator end() {
+        return Data + Size;
+    }
+
+    // Const versions (for when the DArray itself is const). lol.
+    const_iterator begin() const {
+        return Data;
+    }
+
+    const_iterator end() const {
+        return Data + Size;
     }
 };
 
