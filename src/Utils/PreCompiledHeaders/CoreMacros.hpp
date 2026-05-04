@@ -7,5 +7,6 @@
     do {                                                \
         if ((expr) != IncResult::SUCCESS) {             \
             analog::error(__VA_ARGS__);                 \
+            return IncResult::FAIL;                     \
         }                                               \
     } while(0)
