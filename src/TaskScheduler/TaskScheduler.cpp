@@ -36,10 +36,8 @@ namespace TaskScheduler {
             // No self task, gotta steal
             if (!has_task) {
                 // Pick a random thread to steal from
-                // TODO: A better approach would be using a fast thread-local xor-shift RNG
                 for (u32 i = 0; i < NumThreads; ++i) {
                     u32 victim_index = (thread_index + i) % NumThreads;
-                    // TODO: This looks ugly huh
                     if (victim_index == thread_index) continue;
 
                     has_task = WorkersTaskQueues[victim_index].Steal(current_task);
