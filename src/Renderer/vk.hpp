@@ -1,12 +1,43 @@
 #pragma once
 
+#include <array>
+
 #include <vulkan/vulkan.h>
+#include <vma/vk_mem_alloc.h>
 
 #define VK_CHECK(expr, ...)                                             \
     do {                                                                \
         if ((expr) != VK_SUCCESS) {                                     \
                 analog::error(__VA_ARGS__);                             \
-                analog::error("vulkan function returned: {}", expr);    \
                 return IncResult::FAIL;                                 \
             }                                                           \
     } while(0)
+
+struct QueueContext {
+    u32 Index;
+    VkQueue Queue = VK_NULL_HANDLE;
+    VkCommandPool MainCmdPool = VK_NULL_HANDLE;
+};
+
+namespace VulkanContext {
+    inline VkInstance Instance;
+    inline VkPhysicalDevice PhysicalDevice;
+    inline VkDevice Device;
+    inline VmaAllocator VmaAllocator;
+
+    inline VkSurfaceKHR Surface;
+    inline VkSurfaceFormatKHR SurfaceFormat;
+    inline VkPresentModeKHR PresentMode;
+
+    inline QueueContext Graphics;
+    inline QueueContext Present;
+    inline QueueContext Transfer;
+    inline QueueContext Compute;
+    inline std::array<QueueContext*, 4> Queues = {{ &Graphics, &Present, &Transfer, &Compute }};
+
+    IncResult Create();
+    void Destroy();
+
+    VkCommandBuffer SingleTimeCmdBegin(QueueContext& ctx);
+    void SingleTimeCmdSubmit(QueueContext& ctx, VkCommandBuffer cmd);
+};

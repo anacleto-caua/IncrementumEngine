@@ -27,17 +27,12 @@ namespace Engine {
     void Run() {
         while(!Platform::ShouldClose()) {
             Platform::Update();
-            if(Input::Keyboard::IsKeyDown(Input::Keyboard::Key::Interact)) {
-                analog::info("interact key is down");
-            }
-
-            if(Input::Mouse::IsButtonDown(Input::Mouse::Button::Right)) {
-                analog::info("mouse delta - x: {} - y: {}", Input::Mouse::XDelta, Input::Mouse::YDelta);
-            }
+            Renderer::Frame();
         }
     }
 
     void Destroy() {
+        Renderer::Destroy();
         Platform::Shutdown();
         TaskScheduler::Destroy();
     }
