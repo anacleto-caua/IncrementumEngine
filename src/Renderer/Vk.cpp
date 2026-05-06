@@ -460,6 +460,7 @@ namespace VulkanContext {
         }
         // Non desirable surface format picked.
         SurfaceFormat = SurfaceFormats[0];
+        analog::warn("non desirable surface format was picked");
     }
 
     void PickPresentMode() {
