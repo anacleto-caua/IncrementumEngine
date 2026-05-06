@@ -103,11 +103,36 @@ target("IncrementumEngine")
 
     add_packages("sdl3")
 
+    -- Warnings
+    set_warnings("all", "extra")
+    add_cxflags(
+        "-Wpedantic",
+        "-Wshadow",
+        "-Wconversion",
+        "-Wsign-conversion",
+        "-Wformat=2"
+    )
+
     -- Generate debug files, keep symbols and disable optimazations
     if is_mode("debug") then
         set_symbols("debug")
         set_strip("none")
         set_optimize("none")
+
+        -- Buffer overflow protection
+        add_cxflags("-fstack-protector-strong")
+        -- Accurate call stacks when a sanitizer crashes
+        add_cxflags("-fno-omit-frame-pointer", {force = true})
+
+        if is_plat("windows") then
+            -- Microsoft is a pain with clang's asan, so leave it be.
+            add_defines("_ITERATOR_DEBUG_LEVEL=2")
+        elseif is_plat("linux") then
+            -- Enable's asan
+            set_policy("build.sanitizer.address", true)
+            set_policy("build.sanitizer.undefined", true)
+            add_defines("_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG")
+        end
 
     -- Release Debug version for profiling
     elseif is_mode("releasedbg") then
@@ -118,10 +143,6 @@ target("IncrementumEngine")
         -- Crucial for AMD μProf to unwind Clang call stacks accurately
         add_cxflags("-fno-omit-frame-pointer", {force = true})
     end
-
-    set_warnings("all", "extra")
-    add_cxflags("-Wpedantic")
-    add_cxflags("-Wshadow")
 
     -- Pre compiled headers
     set_pcxxheader("src/Utils/PreCompiledHeaders/root.hpp")
