@@ -6,5 +6,5 @@ namespace Renderer {
 
     void Frame();
 
-    void Resize(u32 Width, u32 Height);
+    void Resize(i32 Width, i32 Height);
 }

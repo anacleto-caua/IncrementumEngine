@@ -24,7 +24,7 @@ namespace Platform {
     bool ToClose = false;
     bool SDLCALL EventWatcher([[maybe_unused]]void* userdata, SDL_Event* event);
 
-    IncResult Initialize(u32 width, u32 height, const std::string title, ResizeCallback callback) {
+    IncResult Initialize(i32 width, i32 height, const std::string title, ResizeCallback callback) {
         using namespace Window;
 
         if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -203,7 +203,7 @@ namespace Input {
                     auto& actionList = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) ? MouseCallbacks.Presses : MouseCallbacks.Releases;
                     if (actionList[i]) actionList[i]();
                     break;
-                }
+                    }
             }
         }
     }
@@ -220,11 +220,11 @@ namespace Window {
         return SDL_Vulkan_CreateSurface(SdlWindow, instance, nullptr, &surface);
     }
 
-    void GetFramebufferSize(u32 &width, u32 &height) {
+    void GetFramebufferSize(i32 &width, i32 &height) {
         int w = 0, h = 0;
         SDL_GetWindowSizeInPixels(SdlWindow, &w, &h);
-        width = static_cast<u32>(w);
-        height = static_cast<u32>(h);
+        width = w;
+        height = h;
     }
 }
 

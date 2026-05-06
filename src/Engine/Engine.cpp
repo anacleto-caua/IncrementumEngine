@@ -5,7 +5,7 @@
 #include "TaskScheduler/TaskScheduler.hpp"
 
 namespace Engine {
-    void ResizeEvent(u32 width, u32 height);
+    void ResizeEvent(i32 width, i32 height);
 
     IncResult Create() {
         INC_CHECK(
@@ -36,7 +36,7 @@ namespace Engine {
         TaskScheduler::Destroy();
     }
 
-    void ResizeEvent(u32 width, u32 height) {
+    void ResizeEvent(i32 width, i32 height) {
         analog::info("resize event - w: {} - h: {}", width, height);
     }
 }

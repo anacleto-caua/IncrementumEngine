@@ -17,7 +17,7 @@ namespace Renderer {
         // ...
     }
 
-    void Resize([[maybe_unused]]u32 Width, [[maybe_unused]]u32 Height) {
+    void Resize([[maybe_unused]]i32 Width, [[maybe_unused]]i32 Height) {
         // ...
     }
 }
