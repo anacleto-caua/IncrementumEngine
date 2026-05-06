@@ -59,4 +59,7 @@ namespace VulkanContext {
 
     VkCommandBuffer SingleTimeCmdBegin(QueueContext& ctx);
     void SingleTimeCmdSubmit(QueueContext& ctx, VkCommandBuffer cmd);
+
+    VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities();
 };
+

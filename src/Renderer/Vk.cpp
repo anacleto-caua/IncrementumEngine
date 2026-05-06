@@ -556,4 +556,11 @@ namespace VulkanContext {
 
         vkFreeCommandBuffers(Device, ctx.MainCmdPool, 1, &cmd);
     }
+
+    VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities() {
+        VkSurfaceCapabilitiesKHR capabilities {};
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(PhysicalDevice, Surface, &capabilities);
+        return capabilities;
+    }
+
 }
