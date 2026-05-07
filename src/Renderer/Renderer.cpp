@@ -117,6 +117,8 @@ namespace Renderer {
         VkImageView DepthBufferImageView = ImageSystem::View::get(DepthBuffer::ImageView)->imageView;
         DepthAttachment.imageView = DepthBufferImageView;
         */
+        DepthAttachment = {};
+        DepthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
 
         RenderingInfo = {};
         RenderingInfo.renderArea = {
@@ -160,7 +162,111 @@ namespace Renderer {
     }
 
     void Frame() {
-        // ...
+        FrameData& target_frame = Frames[TargetFrameIndex];
+
+        // Rendering
+        VkCommandBuffer& render_cmd = target_frame.CmdBuffer;
+        vkWaitForFences(VulkanContext::Device, 1, &target_frame.InFlight, VK_TRUE, UINT64_MAX);
+
+        VkResult result = vkAcquireNextImageKHR(
+            VulkanContext::Device,
+            Swapchain::Swapchain,
+            UINT64_MAX,
+            target_frame.ImageAvailable,
+            VK_NULL_HANDLE,
+            &TargetImageViewIndex
+        );
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+            vkDeviceWaitIdle(VulkanContext::Device);
+            return;
+        }
+
+        vkResetCommandBuffer(render_cmd, 0);
+        vkBeginCommandBuffer(render_cmd, &RenderingCmdBeginInfo);
+
+        vkResetFences(VulkanContext::Device, 1, &target_frame.InFlight);
+
+        VkImageMemoryBarrier rendering_barrier = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = Swapchain::Images[TargetImageViewIndex].Image,
+            .subresourceRange {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            }
+        };
+        VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        vkCmdPipelineBarrier(
+            render_cmd,
+            src_stage, dst_stage,
+            0, 0, nullptr, 0, nullptr, 1,
+            &rendering_barrier
+        );
+
+        ColorAttachment.imageView = Swapchain::Images[TargetImageViewIndex].ImageView;
+        vkCmdBeginRendering(render_cmd, &RenderingInfo);
+        vkCmdSetViewport(render_cmd, 0, 1, &Viewport);
+        vkCmdSetScissor(render_cmd, 0, 1, &Scissor);
+
+        // Actual frame begins
+
+        // Actual frame ends
+
+        vkCmdEndRendering(render_cmd);
+
+        VkImageMemoryBarrier presenting_barrier = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = 0,
+            .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .srcQueueFamilyIndex =VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = Swapchain::Images[TargetImageViewIndex].Image,
+            .subresourceRange {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            }
+        };
+        VkPipelineStageFlags src_stage_2 = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkPipelineStageFlags dst_stage_2 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        vkCmdPipelineBarrier(
+            render_cmd,
+            src_stage_2, dst_stage_2,
+            0, 0, nullptr, 0, nullptr, 1,
+            &presenting_barrier
+        );
+
+        vkEndCommandBuffer(render_cmd);
+
+        VkSemaphore RenderWaitSemaphores[] = { target_frame.ImageAvailable };
+        VkSemaphore RenderSignalSemaphores[] = { Swapchain::Images[TargetImageViewIndex].RenderFinished };
+
+        RenderingCmdSubmitInfo.pCommandBuffers = &render_cmd;
+        RenderingCmdSubmitInfo.pWaitSemaphores = RenderWaitSemaphores;
+        RenderingCmdSubmitInfo.pSignalSemaphores = RenderSignalSemaphores;
+
+        Swapchain::PresentInfo.pWaitSemaphores = RenderSignalSemaphores;
+
+        vkQueueSubmit(VulkanContext::Graphics.Queue, 1, &RenderingCmdSubmitInfo, target_frame.InFlight);
+        vkQueuePresentKHR(VulkanContext::Present.Queue, &Swapchain::PresentInfo);
+
+        TargetFrameIndex = (TargetFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+
     }
 
     void Resize(i32 width, i32 height) {
