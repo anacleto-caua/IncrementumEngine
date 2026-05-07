@@ -27,7 +27,7 @@ public:
     }
 
     size_t Add(T element) {
-        size_t index = -1;
+        size_t index;
         if (FreeIndices.Size > 0) {
             index = FreeIndices[FreeIndices.Size-1];
             FreeIndices.Pop();

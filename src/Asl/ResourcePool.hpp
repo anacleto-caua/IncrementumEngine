@@ -33,7 +33,7 @@ private:
 
 public:
     Handle<T> Add(T element) {
-        size_t index = Data.Add(element);
+        u32 index = static_cast<u32>(Data.Add(element));
 
         if (index == Generations.Size) {
             Generations.Push(0);
@@ -51,9 +51,19 @@ public:
     }
 
     void Remove(Handle<T> handle) {
-        assert(handle.Generation == Generations[handle.Index] && "Tried to remove a stale handle.");
+        assert(handle.Generation == Generations[handle.Index] && "tried to remove a stale handle.");
         Generations[handle.Index]++;
         Data.Remove(handle.Index);
-    }};
+    }
 
+    using Iterator = typename FreeList<T>::Iterator;
+
+    Iterator begin() {
+        return Data.begin();
+    }
+
+    Iterator end() {
+        return Data.end();
+    }
+};
 }
