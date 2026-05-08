@@ -5,6 +5,7 @@
 
 #include "Vk.hpp"
 #include "Engine/Core/Window.hpp"
+#include "Renderer/Resources/ResourceManager.hpp"
 
 namespace Renderer {
     struct FrameData {
@@ -52,6 +53,16 @@ namespace Renderer {
 
         // Implies recreation btw
         IncResult Resize(u32 width, u32 height);
+    }
+
+    namespace DepthBuffer {
+        Image::Id Image;
+        ImageView::Id ImageView;
+
+        void Create(u32 width, u32 height);
+        void Destroy();
+
+        void Resize(u32 width, u32 height);
     }
 
     static constexpr VkPipelineStageFlags GRAPHICS_PIPELINE_WAIT_STAGES[] = {
@@ -111,14 +122,12 @@ namespace Renderer {
         ColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         ColorAttachment.clearValue.color = { .float32 = { 0.1f, 0.1f, 0.1f, 1.0f } };
 
-        /*
-        DepthAttachment = Recipes::DepthAttachment::Default();
-        DepthBuffer::Create(Extent.width, Extent.height);
-        VkImageView DepthBufferImageView = ImageSystem::View::get(DepthBuffer::ImageView)->imageView;
-        DepthAttachment.imageView = DepthBufferImageView;
-        */
-        DepthAttachment = {};
+        DepthBuffer::Create(Swapchain::Extent.width, Swapchain::Extent.height);
         DepthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        DepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        DepthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        DepthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        DepthAttachment.clearValue.depthStencil = { 1.0f, 0 };
 
         RenderingInfo = {};
         RenderingInfo.renderArea = {
@@ -158,6 +167,7 @@ namespace Renderer {
         }
 
         Swapchain::Destroy();
+        DepthBuffer::Destroy();
         VulkanContext::Destroy();
     }
 
@@ -273,8 +283,11 @@ namespace Renderer {
         if (width == 0 || height == 0) {
             return;
         }
+        u32 uw = static_cast<u32>(width);
+        u32 uh = static_cast<u32>(height);
         vkDeviceWaitIdle(VulkanContext::Device);
-        Swapchain::Resize(static_cast<u32>(width), static_cast<u32>(height));
+        Swapchain::Resize(uw, uh);
+        DepthBuffer::Resize(uw, uh);
     }
 
     namespace Swapchain {
@@ -351,11 +364,6 @@ namespace Renderer {
                 .offset = { 0, 0 },
                 .extent = Extent
             };
-            /*
-            DepthBuffer::Recreate(Width, Height);
-            VkImageView DepthBufferImageView = ImageSystem::View::get(DepthBuffer::ImageView)->imageView;
-            DepthAttachment.imageView = DepthBufferImageView;
-            */
 
             INC_CHECK(Recreate(Swapchain), "failed to recreate the swapchain on a resize event w:{} - h:{}", width, height);
 
@@ -431,4 +439,76 @@ namespace Renderer {
             }
         }
     }
+
+    namespace DepthBuffer {
+        VkClearDepthStencilValue ClearStencilValue = {
+            .depth = 0.0,
+            .stencil = 1
+        };
+
+        VkImageSubresourceRange Range = {
+            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        };
+
+        void Create(u32 width, u32 height) {
+            Image::CreateInfo image_create_info {};
+            image_create_info.Width = width;
+            image_create_info.Height = height;
+            image_create_info.Format = RendererConfig::DepthBuffer::Format;
+            image_create_info.Usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+            Image = Image::Add(image_create_info);
+            Image::Value* depth_image_value = Image::Get(DepthBuffer::Image);
+            depth_image_value->Format = RendererConfig::DepthBuffer::Format;
+
+            // Despite having a creation format the image still starts as a _UNDEFINED, so transit it a first time
+            VkCommandBuffer cmd = VulkanContext::SingleTimeCmdBegin(VulkanContext::Graphics);
+
+            VkImageMemoryBarrier barrier {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .pNext = nullptr,
+                .srcAccessMask = 0,
+                .dstAccessMask = 0,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = depth_image_value->Image,
+                .subresourceRange = Range
+            };
+            VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+
+            vkCmdPipelineBarrier(
+                cmd,
+                srcStage, dstStage,
+                0, 0, nullptr, 0, nullptr, 1,
+                &barrier
+            );
+
+            VulkanContext::SingleTimeCmdSubmit(VulkanContext::Graphics, cmd);
+
+            VkImageViewCreateInfo image_view_create_info = ImageView::FillCreateInfo(depth_image_value);
+            image_view_create_info.subresourceRange = DepthBuffer::Range;
+
+            ImageView = ImageView::Add(image_view_create_info);
+            DepthAttachment.imageView = ImageView::Get(DepthBuffer::ImageView)->ImageView;
+        }
+
+        void Destroy() {
+            Image::Del(Image);
+            ImageView::Del(ImageView);
+        }
+
+        void Resize(u32 width, u32 height) {
+            Image::Del(Image);
+            ImageView::Del(ImageView);
+            Create(width, height);
+        }
+    }
+
 }

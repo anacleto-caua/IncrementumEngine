@@ -88,11 +88,12 @@ namespace Image {
     void Destroy(Value* image) {
         if (image->Image) { vmaDestroyImage(VulkanContext::VmaAllocator, image->Image, image->Allocation); }
         image->Image = VK_NULL_HANDLE;
+        image->Allocation = VK_NULL_HANDLE;
     }
 
     void DestroyAll() {
-        for (auto image_id : ImagePool) {
-            Destroy(&image_id);
+        for (auto image : ImagePool) {
+            Destroy(&image);
         }
     }
 }
@@ -100,9 +101,34 @@ namespace Image {
 namespace ImageView {
     asl::ResourcePool<Value> ViewPool;
 
-    Id Add(Image::Value* image) {
+    Id Add(VkImageViewCreateInfo create_info) {
         Value image_view {};
 
+        if (
+            vkCreateImageView(
+                VulkanContext::Device,
+                &create_info,
+                nullptr,
+                &image_view.ImageView
+            ) != VK_SUCCESS
+        ) {
+            analog::error("buffer creation failed.");
+        }
+
+        return ViewPool.Add(image_view);
+    }
+
+    void Del(Id id) {
+        auto image_view = Get(id);
+        Destroy(image_view);
+        ViewPool.Remove(id);
+    }
+
+    Value* Get(Id id) {
+        return &ViewPool.Get(id);
+    }
+
+    VkImageViewCreateInfo FillCreateInfo(Image::Value* image) {
         VkImageViewCreateInfo image_view_create_info {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
             .pNext = nullptr,
@@ -125,37 +151,17 @@ namespace ImageView {
             }
         };
 
-        if (
-            vkCreateImageView(
-                VulkanContext::Device,
-                &image_view_create_info,
-                nullptr,
-                &image_view.ImageView
-            ) != VK_SUCCESS
-        ) {
-            analog::error("buffer creation failed.");
-        }
-
-        return ViewPool.Add(image_view);
-    }
-
-    void Del(Id id) {
-        auto image_view = Get(id);
-        image_view->ImageView = VK_NULL_HANDLE;
-        Destroy(image_view);
-    }
-
-    Value* Get(Id id) {
-        return &ViewPool.Get(id);
+        return image_view_create_info;
     }
 
     void Destroy(Value* image_view) {
         if (image_view->ImageView) { vkDestroyImageView(VulkanContext::Device, image_view->ImageView, nullptr); }
+        image_view->ImageView = VK_NULL_HANDLE;
     }
 
     void DestroyAll() {
-        for(auto image_view_id : ViewPool) {
-            Destroy(&image_view_id);
+        for(auto image_view : ViewPool) {
+            Destroy(&image_view);
         }
     }
 }
@@ -253,8 +259,8 @@ namespace Buffer {
     }
 
     void DestroyAll() {
-        for(auto buffer_id : BufferPool) {
-            Destroy(&buffer_id);
+        for(auto buffer : BufferPool) {
+            Destroy(&buffer);
         }
     }
 }

@@ -37,8 +37,10 @@ namespace Image {
 }
 
 namespace ImageView {
-    Id Add(Image::Value* image);
+    Id Add(VkImageViewCreateInfo create_info);
     void Del(Id id);
     Value* Get(Id id);
+
+    VkImageViewCreateInfo FillCreateInfo(Image::Value* image);
 }
 
