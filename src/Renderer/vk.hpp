@@ -61,5 +61,11 @@ namespace VulkanContext {
     void SingleTimeCmdSubmit(QueueContext& ctx, VkCommandBuffer cmd);
 
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities();
-};
+}
+
+namespace Renderer {
+    namespace Swapchain {
+        inline u32 ImageCount = 0;
+    }
+}
 

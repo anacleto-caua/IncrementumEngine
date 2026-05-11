@@ -1,5 +1,7 @@
 #include "Engine.hpp"
 
+#include <imgui.h>
+
 #include "Renderer/Renderer.hpp"
 #include "Engine/Core/Platform.hpp"
 #include "TaskScheduler/TaskScheduler.hpp"
@@ -25,6 +27,9 @@ namespace Engine {
 
     void Run() {
         while(!Platform::ShouldClose()) {
+            bool show_demo_window = true;
+            ImGui::ShowDemoWindow(&show_demo_window);
+
             Platform::Update();
             Renderer::Frame();
         }

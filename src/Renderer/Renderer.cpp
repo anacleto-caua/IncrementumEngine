@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "Vk.hpp"
+#include "Passes/ImGuiPass.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Renderer/Resources/ResourceManager.hpp"
 
@@ -42,9 +43,7 @@ namespace Renderer {
         VkExtent2D Extent;
         VkSwapchainKHR Swapchain;
 
-        VkPresentInfoKHR PresentInfo {}; // ?
-
-        u32 ImageCount = 0;
+        VkPresentInfoKHR PresentInfo {};
 
         std::vector<SwapchainImage> Images;
 
@@ -154,6 +153,8 @@ namespace Renderer {
         RenderingCmdSubmitInfo.commandBufferCount = 1;
         RenderingCmdSubmitInfo.signalSemaphoreCount = 1;
 
+        INC_CHECK(ImGuiPass::Create(), "failed to create imgui context");
+
         return IncResult::SUCCESS;
     }
 
@@ -166,6 +167,7 @@ namespace Renderer {
             if (frame.CmdPool) { vkDestroyCommandPool(VulkanContext::Device, frame.CmdPool, nullptr); }
         }
 
+        ImGuiPass::Destroy();
         Swapchain::Destroy();
         DepthBuffer::Destroy();
         VulkanContext::Destroy();
@@ -229,6 +231,8 @@ namespace Renderer {
         vkCmdSetScissor(render_cmd, 0, 1, &Scissor);
 
         // Actual frame begins
+
+        ImGuiPass::Render(render_cmd);
 
         // Actual frame ends
 
