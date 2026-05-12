@@ -169,6 +169,10 @@ namespace ImageView {
 namespace Buffer {
     asl::ResourcePool<Value> BufferPool;
 
+    Value* Get(Id id) {
+        return &BufferPool.Get(id);
+    }
+
     Id Add(CreateInfo create_info) {
         Value buffer {};
 
@@ -248,8 +252,39 @@ namespace Buffer {
         }
     }
 
-    Value* Get(Id id) {
-        return &BufferPool.Get(id);
+    template <typename T, u32 COUNT>
+    Mirror<T, COUNT> AddMirror(Type type) {
+        u64 size = COUNT * sizeof(T);
+        Mirror<T, COUNT> mirror {};
+        mirror.Device = Add(
+            {
+                .Size = size,
+                .Type = type
+            }
+        );
+        mirror.Host = Add(
+            {
+                .Size = COUNT,
+                .Type = Type::STAGING
+            }
+        );
+        mirror.Data = static_cast<T>(Map(Get(mirror.Host)->Allocation));
+
+        return mirror;
+    }
+
+    template <typename T, u32 COUNT>
+    void DelMirror(Mirror<T, COUNT> mirror);
+
+    void* Map(const VmaAllocation alloc) {
+        void* mapped_data;
+        auto result = vmaMapMemory(VulkanContext::VmaAllocator, alloc, &mapped_data);
+        assert(result == VK_SUCCESS && "Failed to map VMA buffer");
+        return mapped_data;
+    }
+
+    void Unmap(const VmaAllocation alloc) {
+        vmaUnmapMemory(VulkanContext::VmaAllocator, alloc);
     }
 
     void Destroy(Value* buffer) {

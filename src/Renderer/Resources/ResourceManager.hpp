@@ -17,7 +17,18 @@ namespace Buffer {
 
     Id Add(CreateInfo create_info);
     void Del(Id id);
+
+    template <typename T, u32 COUNT>
+    Mirror<T, COUNT> AddMirror(Type type);
+
+    // Wanted to call it BreakMirror() so badly
+    template <typename T, u32 COUNT>
+    void DelMirror(Mirror<T, COUNT> mirror);
+
     Value* Get(Id id);
+
+    void* Map(const VmaAllocation alloc);
+    void Unmap(const VmaAllocation alloc);
 }
 
 namespace Image {
