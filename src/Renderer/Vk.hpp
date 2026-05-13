@@ -18,17 +18,6 @@ namespace RendererConfig {
     namespace DepthBuffer {
         CONFIG VkFormat Format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     };
-
-    namespace TransferSystem {
-        CONFIG u64 STAGING_BUFFER_SIZE = 10 * 1024 * 1024;
-        CONFIG u32 FRAME_TRANSFER_BUDGET = 2 * 1024 * 1024;
-
-        /**
-         * Terribly arbitrary value meant to be harsher than the Vulkan limit of
-         * 65536 bytes for vkCmdUpdateBuffer(), to avoid bad usage
-         */
-        CONFIG u32 BUFFER_UPDATE_CAP = 30000;
-    };
 }
 #undef CONFIG
 
