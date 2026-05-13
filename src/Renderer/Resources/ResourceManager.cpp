@@ -274,12 +274,14 @@ namespace Buffer {
     }
 
     template <typename T, u32 COUNT>
-    void DelMirror(Mirror<T, COUNT> mirror);
+    void DelMirror(Mirror<T, COUNT> mirror) {
+        Del(mirror.Device);
+        Del(mirror.Host);
+    }
 
     void* Map(const VmaAllocation alloc) {
         void* mapped_data;
-        auto result = vmaMapMemory(VulkanContext::VmaAllocator, alloc, &mapped_data);
-        assert(result == VK_SUCCESS && "Failed to map VMA buffer");
+        vmaMapMemory(VulkanContext::VmaAllocator, alloc, &mapped_data);
         return mapped_data;
     }
 
