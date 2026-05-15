@@ -16,9 +16,7 @@ namespace Renderer {
         VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
     };
 
-    // Per frame data
-    static constexpr u32 MAX_FRAMES_IN_FLIGHT = 2;
-    std::array<FrameData, MAX_FRAMES_IN_FLIGHT> Frames;
+    std::array<FrameData, RendererConfig::MAX_FRAMES_IN_FLIGHT> Frames;
 
     u32 TargetFrameIndex = 0;
     u32 TargetImageViewIndex = 0;
@@ -279,7 +277,7 @@ namespace Renderer {
         vkQueueSubmit(VulkanContext::Graphics.Queue, 1, &RenderingCmdSubmitInfo, target_frame.InFlight);
         vkQueuePresentKHR(VulkanContext::Present.Queue, &Swapchain::PresentInfo);
 
-        TargetFrameIndex = (TargetFrameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+        TargetFrameIndex = (TargetFrameIndex + 1) % RendererConfig::MAX_FRAMES_IN_FLIGHT;
 
     }
 

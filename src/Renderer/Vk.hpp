@@ -15,6 +15,8 @@
 
 #define CONFIG static constexpr
 namespace RendererConfig {
+    CONFIG u32 MAX_FRAMES_IN_FLIGHT = 2;
+
     namespace DepthBuffer {
         CONFIG VkFormat Format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     };
