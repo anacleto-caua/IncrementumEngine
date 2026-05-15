@@ -43,6 +43,8 @@ namespace VulkanContext {
     inline QueueContext Compute;
     inline std::array<QueueContext*, 4> Queues = {{ &Graphics, &Present, &Transfer, &Compute }};
 
+    inline std::array<VkFormat, 1> ColorAttachmentFormats { }; // Will be filled by the SurfaceFormat.format
+
     IncResult Create();
     void Destroy();
 

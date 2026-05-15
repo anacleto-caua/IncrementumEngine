@@ -24,14 +24,12 @@ namespace ImGuiPass {
 
         ImGui_ImplSDL3_InitForVulkan(Window::SdlWindow);
 
-        std::array<VkFormat, 1> color_attachment_formats = { VulkanContext::SurfaceFormat.format };
-
         VkPipelineRenderingCreateInfoKHR pipeline_rendering_create_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
             .pNext = nullptr,
             .viewMask = {},
-            .colorAttachmentCount = color_attachment_formats.size(),
-            .pColorAttachmentFormats = color_attachment_formats.data(),
+            .colorAttachmentCount = VulkanContext::ColorAttachmentFormats.size(),
+            .pColorAttachmentFormats = VulkanContext::ColorAttachmentFormats.data(),
             .depthAttachmentFormat = RendererConfig::DepthBuffer::Format,
             .stencilAttachmentFormat = RendererConfig::DepthBuffer::Format
         };

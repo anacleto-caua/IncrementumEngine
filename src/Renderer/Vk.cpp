@@ -451,17 +451,25 @@ namespace VulkanContext {
         SurfaceFormats.resize(SurfaceFormatCount);
         vkGetPhysicalDeviceSurfaceFormatsKHR(PhysicalDevice, Surface, &SurfaceFormatCount, SurfaceFormats.data());
 
+        bool found = false;
         for (VkSurfaceFormatKHR CurrSurfaceFormat : SurfaceFormats) {
             if ((CurrSurfaceFormat.format == DESIRABLE_SURFACE_FORMAT.format) &&
                 (CurrSurfaceFormat.colorSpace == DESIRABLE_SURFACE_FORMAT.colorSpace)) {
                 // Desirable surface format picked
                 SurfaceFormat = CurrSurfaceFormat;
-                return;
+                found = true;
+                break;
             }
         }
+
         // Non desirable surface format picked.
-        SurfaceFormat = SurfaceFormats[0];
-        analog::warn("non desirable surface format was picked");
+        if (!found) {
+            SurfaceFormat = SurfaceFormats[0];
+            analog::warn("non desirable surface format was picked");
+        }
+
+        // Remember to fill in the collor attachment formats
+        ColorAttachmentFormats[0] = SurfaceFormat.format;
     }
 
     void PickPresentMode() {
