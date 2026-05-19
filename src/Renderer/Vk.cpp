@@ -392,9 +392,14 @@ namespace VulkanContext {
         dynamic_rendering_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
         dynamic_rendering_features.dynamicRendering = VK_TRUE;
 
+        VkPhysicalDeviceTimelineSemaphoreFeatures timeline_features = {};
+        timeline_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
+        timeline_features.timelineSemaphore = VK_TRUE;
+
         device_features_2.pNext= &sync_2_features;
         sync_2_features.pNext = &dynamic_rendering_features;
-        dynamic_rendering_features.pNext = nullptr;
+        dynamic_rendering_features.pNext = &timeline_features;
+        timeline_features.pNext = nullptr;
 
         VkDeviceCreateInfo device_create_info{};
         device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -439,6 +444,22 @@ namespace VulkanContext {
             VK_CHECK(
                 vkCreateCommandPool(Device, &cmd_pool_create_info, nullptr, &Queue->MainCmdPool),
                 "main command pool creation failed"
+            );
+
+            VkSemaphoreTypeCreateInfo semaphore_type_create_info = {};
+            semaphore_type_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+            semaphore_type_create_info.pNext = nullptr;
+            semaphore_type_create_info.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+            semaphore_type_create_info.initialValue = 0;
+
+            VkSemaphoreCreateInfo semaphore_create_info = {};
+            semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            semaphore_create_info.pNext = &semaphore_type_create_info;
+            semaphore_create_info.flags = 0;
+
+            VK_CHECK(
+                vkCreateSemaphore(Device, &semaphore_create_info, nullptr, &Queue->Semaphore),
+                "queue semaphore creation failed"
             );
         }
         return IncResult::SUCCESS;
@@ -521,6 +542,7 @@ namespace VulkanContext {
 
         for (QueueContext *queue : Queues) {
             if (queue->MainCmdPool) { vkDestroyCommandPool(Device, queue->MainCmdPool, nullptr); }
+            if (queue->Semaphore) { vkDestroySemaphore(Device, queue->Semaphore, nullptr); }
         }
 
         if (VmaAllocator) { vmaDestroyAllocator(VmaAllocator); }

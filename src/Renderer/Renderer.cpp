@@ -10,13 +10,14 @@
 
 namespace Renderer {
     struct FrameData {
-        VkFence InFlight = VK_NULL_HANDLE;
-        VkSemaphore ImageAvailable = VK_NULL_HANDLE;
         VkCommandPool CmdPool = VK_NULL_HANDLE;
         VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
+        VkSemaphore ImageAvailable = VK_NULL_HANDLE;
+        u64 LastSignaledValue = 0;
     };
 
     std::array<FrameData, RendererConfig::MAX_FRAMES_IN_FLIGHT> Frames;
+    u64 GlobalTimelineValue = 0; // Tracks the next timeline semaphore value to signal
 
     u32 TargetFrameIndex = 0;
     u32 TargetImageViewIndex = 0;
@@ -75,10 +76,6 @@ namespace Renderer {
         VkSemaphoreCreateInfo semaphore_create_info {};
         semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-        VkFenceCreateInfo fence_create_info {};
-        fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
         VkCommandPoolCreateInfo render_cmd_pool_create_info {};
         render_cmd_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         render_cmd_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -92,7 +89,6 @@ namespace Renderer {
 
         for (FrameData &frame : Frames) {
             vkCreateSemaphore(VulkanContext::Device, &semaphore_create_info, nullptr, &frame.ImageAvailable);
-            vkCreateFence(VulkanContext::Device, &fence_create_info, nullptr, &frame.InFlight);
 
             vkCreateCommandPool(VulkanContext::Device, &render_cmd_pool_create_info, nullptr, &frame.CmdPool);
             cmd_buffer_alloc_info.commandPool = frame.CmdPool;
@@ -160,9 +156,8 @@ namespace Renderer {
         vkDeviceWaitIdle(VulkanContext::Device);
 
         for (FrameData &frame : Frames) {
-            if (frame.ImageAvailable) { vkDestroySemaphore(VulkanContext::Device, frame.ImageAvailable, nullptr); }
-            if (frame.InFlight) { vkDestroyFence(VulkanContext::Device, frame.InFlight, nullptr); }
             if (frame.CmdPool) { vkDestroyCommandPool(VulkanContext::Device, frame.CmdPool, nullptr); }
+            if (frame.ImageAvailable) { vkDestroySemaphore(VulkanContext::Device, frame.ImageAvailable, nullptr); }
         }
 
         ImGuiPass::Destroy();
@@ -176,7 +171,15 @@ namespace Renderer {
 
         // Rendering
         VkCommandBuffer& render_cmd = target_frame.CmdBuffer;
-        vkWaitForFences(VulkanContext::Device, 1, &target_frame.InFlight, VK_TRUE, UINT64_MAX);
+        VkSemaphoreWaitInfo wait_info = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .semaphoreCount = 1,
+            .pSemaphores = &VulkanContext::Graphics.Semaphore,
+            .pValues = &target_frame.LastSignaledValue
+        };
+        vkWaitSemaphores(VulkanContext::Device, &wait_info, UINT64_MAX);
 
         VkResult result = vkAcquireNextImageKHR(
             VulkanContext::Device,
@@ -193,8 +196,6 @@ namespace Renderer {
 
         vkResetCommandBuffer(render_cmd, 0);
         vkBeginCommandBuffer(render_cmd, &RenderingCmdBeginInfo);
-
-        vkResetFences(VulkanContext::Device, 1, &target_frame.InFlight);
 
         VkImageMemoryBarrier rendering_barrier = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -243,7 +244,7 @@ namespace Renderer {
             .dstAccessMask = 0,
             .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .srcQueueFamilyIndex =VK_QUEUE_FAMILY_IGNORED,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .image = Swapchain::Images[TargetImageViewIndex].Image,
             .subresourceRange {
@@ -255,7 +256,7 @@ namespace Renderer {
             }
         };
         VkPipelineStageFlags src_stage_2 = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        VkPipelineStageFlags dst_stage_2 = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        VkPipelineStageFlags dst_stage_2 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
         vkCmdPipelineBarrier(
             render_cmd,
             src_stage_2, dst_stage_2,
@@ -265,20 +266,49 @@ namespace Renderer {
 
         vkEndCommandBuffer(render_cmd);
 
-        VkSemaphore RenderWaitSemaphores[] = { target_frame.ImageAvailable };
-        VkSemaphore RenderSignalSemaphores[] = { Swapchain::Images[TargetImageViewIndex].RenderFinished };
+        VkSemaphore submit_wait_semaphores[] = { target_frame.ImageAvailable };
+        VkSemaphore submit_signal_semaphores[] = {
+            Swapchain::Images[TargetImageViewIndex].RenderFinished, // Signals Present
+            VulkanContext::Graphics.Semaphore                       // Signals the Timeline
+        };
 
+        // Map the timeline values (1-to-1 with the signal array above)
+        u64 signal_value = ++GlobalTimelineValue;
+        u64 signal_values[] = {
+            0,             // Ignored by the driver for the binary RenderFinished semaphore
+            signal_value   // Applied to the Timeline Graphics.Semaphore
+        };
+
+        VkTimelineSemaphoreSubmitInfo timeline_semaphore_submit_info = {
+            .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+            .pNext = nullptr,
+            .waitSemaphoreValueCount = 0, // We're only waiting on a binary semaphore, so 0 is fine
+            .pWaitSemaphoreValues = nullptr,
+            .signalSemaphoreValueCount = 2,
+            .pSignalSemaphoreValues = signal_values
+        };
+
+        // Assemble the Submit Info
+        RenderingCmdSubmitInfo.pNext = &timeline_semaphore_submit_info;
+
+        RenderingCmdSubmitInfo.waitSemaphoreCount = 1;
+        RenderingCmdSubmitInfo.pWaitSemaphores = submit_wait_semaphores;
+
+        RenderingCmdSubmitInfo.signalSemaphoreCount = 2;
+        RenderingCmdSubmitInfo.pSignalSemaphores = submit_signal_semaphores;
+
+        RenderingCmdSubmitInfo.commandBufferCount = 1;
         RenderingCmdSubmitInfo.pCommandBuffers = &render_cmd;
-        RenderingCmdSubmitInfo.pWaitSemaphores = RenderWaitSemaphores;
-        RenderingCmdSubmitInfo.pSignalSemaphores = RenderSignalSemaphores;
 
-        Swapchain::PresentInfo.pWaitSemaphores = RenderSignalSemaphores;
+        vkQueueSubmit(VulkanContext::Graphics.Queue, 1, &RenderingCmdSubmitInfo, VK_NULL_HANDLE);
 
-        vkQueueSubmit(VulkanContext::Graphics.Queue, 1, &RenderingCmdSubmitInfo, target_frame.InFlight);
+        Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[TargetImageViewIndex].RenderFinished;
         vkQueuePresentKHR(VulkanContext::Present.Queue, &Swapchain::PresentInfo);
 
-        TargetFrameIndex = (TargetFrameIndex + 1) % RendererConfig::MAX_FRAMES_IN_FLIGHT;
+        // Save the timeline value so the CPU can wait on it next time!
+        target_frame.LastSignaledValue = signal_value;
 
+        TargetFrameIndex = (TargetFrameIndex + 1) % RendererConfig::MAX_FRAMES_IN_FLIGHT;
     }
 
     void Resize(i32 width, i32 height) {

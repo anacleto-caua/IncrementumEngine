@@ -27,6 +27,7 @@ struct QueueContext {
     u32 Index;
     VkQueue Queue = VK_NULL_HANDLE;
     VkCommandPool MainCmdPool = VK_NULL_HANDLE;
+    VkSemaphore Semaphore = VK_NULL_HANDLE;
 };
 
 namespace VulkanContext {
