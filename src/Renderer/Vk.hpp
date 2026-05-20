@@ -24,7 +24,7 @@ namespace RendererConfig {
 #undef CONFIG
 
 struct TimelineSemaphore {
-    u64 Value = 0;
+    std::atomic<u64> Value = 0;
     VkSemaphore Handle = VK_NULL_HANDLE;
 };
 
