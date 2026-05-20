@@ -23,11 +23,16 @@ namespace RendererConfig {
 }
 #undef CONFIG
 
+struct TimelineSemaphore {
+    u64 Value = 0;
+    VkSemaphore Handle = VK_NULL_HANDLE;
+};
+
 struct QueueContext {
     u32 Index;
     VkQueue Queue = VK_NULL_HANDLE;
     VkCommandPool MainCmdPool = VK_NULL_HANDLE;
-    VkSemaphore Semaphore = VK_NULL_HANDLE;
+    TimelineSemaphore Semaphore = {};
 };
 
 namespace VulkanContext {

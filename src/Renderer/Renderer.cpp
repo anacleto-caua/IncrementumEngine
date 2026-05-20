@@ -17,7 +17,6 @@ namespace Renderer {
     };
 
     std::array<FrameData, RendererConfig::MAX_FRAMES_IN_FLIGHT> Frames;
-    u64 GlobalTimelineValue = 0; // Tracks the next timeline semaphore value to signal
 
     u32 TargetFrameIndex = 0;
     u32 TargetImageViewIndex = 0;
@@ -176,7 +175,7 @@ namespace Renderer {
             .pNext = nullptr,
             .flags = 0,
             .semaphoreCount = 1,
-            .pSemaphores = &VulkanContext::Graphics.Semaphore,
+            .pSemaphores = &VulkanContext::Graphics.Semaphore.Handle,
             .pValues = &target_frame.LastSignaledValue
         };
         vkWaitSemaphores(VulkanContext::Device, &wait_info, UINT64_MAX);
@@ -269,11 +268,11 @@ namespace Renderer {
         VkSemaphore submit_wait_semaphores[] = { target_frame.ImageAvailable };
         VkSemaphore submit_signal_semaphores[] = {
             Swapchain::Images[TargetImageViewIndex].RenderFinished, // Signals Present
-            VulkanContext::Graphics.Semaphore                       // Signals the Timeline
+            VulkanContext::Graphics.Semaphore.Handle                // Signals the Timeline
         };
 
         // Map the timeline values (1-to-1 with the signal array above)
-        u64 signal_value = ++GlobalTimelineValue;
+        u64 signal_value = ++VulkanContext::Graphics.Semaphore.Value;
         u64 signal_values[] = {
             0,             // Ignored by the driver for the binary RenderFinished semaphore
             signal_value   // Applied to the Timeline Graphics.Semaphore

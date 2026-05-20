@@ -437,14 +437,17 @@ namespace VulkanContext {
         VkCommandPoolCreateInfo cmd_pool_create_info {};
         cmd_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         cmd_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        for (QueueContext *Queue : Queues) {
-            vkGetDeviceQueue(Device, Queue->Index, 0, &Queue->Queue);
-            cmd_pool_create_info.queueFamilyIndex = Queue->Index;
+        for (QueueContext *queue : Queues) {
+            vkGetDeviceQueue(Device, queue->Index, 0, &queue->Queue);
+            cmd_pool_create_info.queueFamilyIndex = queue->Index;
 
             VK_CHECK(
-                vkCreateCommandPool(Device, &cmd_pool_create_info, nullptr, &Queue->MainCmdPool),
+                vkCreateCommandPool(Device, &cmd_pool_create_info, nullptr, &queue->MainCmdPool),
                 "main command pool creation failed"
             );
+
+            // Timeline semaphore
+            queue->Semaphore.Value = 0;
 
             VkSemaphoreTypeCreateInfo semaphore_type_create_info = {};
             semaphore_type_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
@@ -458,7 +461,7 @@ namespace VulkanContext {
             semaphore_create_info.flags = 0;
 
             VK_CHECK(
-                vkCreateSemaphore(Device, &semaphore_create_info, nullptr, &Queue->Semaphore),
+                vkCreateSemaphore(Device, &semaphore_create_info, nullptr, &queue->Semaphore.Handle),
                 "queue semaphore creation failed"
             );
         }
@@ -542,7 +545,7 @@ namespace VulkanContext {
 
         for (QueueContext *queue : Queues) {
             if (queue->MainCmdPool) { vkDestroyCommandPool(Device, queue->MainCmdPool, nullptr); }
-            if (queue->Semaphore) { vkDestroySemaphore(Device, queue->Semaphore, nullptr); }
+            if (queue->Semaphore.Handle) { vkDestroySemaphore(Device, queue->Semaphore.Handle, nullptr); }
         }
 
         if (VmaAllocator) { vmaDestroyAllocator(VmaAllocator); }
