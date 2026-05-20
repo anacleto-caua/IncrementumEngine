@@ -196,6 +196,30 @@ namespace Renderer {
         vkResetCommandBuffer(render_cmd, 0);
         vkBeginCommandBuffer(render_cmd, &RenderingCmdBeginInfo);
 
+        // Has transfers
+        // if (has_transfers) {
+        if (false) {
+            // Record the copies (vkCmdCopyBuffer, vkCmdUpdateBuffer, etc.)
+            // GraphicsTransfer(render_cmd);
+
+            VkMemoryBarrier transfer_sync_barrier = {
+                .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+                .pNext = nullptr,
+                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_INDEX_READ_BIT
+            };
+
+            // Command the GPU to pause the graphics pipeline until transfers finish
+            vkCmdPipelineBarrier(
+                render_cmd,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                0,
+                1, &transfer_sync_barrier,
+                0, nullptr, 0, nullptr
+            );
+        }
+
         VkImageMemoryBarrier rendering_barrier = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext = nullptr,
