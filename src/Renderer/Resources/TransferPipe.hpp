@@ -1,0 +1,26 @@
+#pragma once
+
+#include "ResourceManager.hpp"
+
+namespace TransferPipe {
+    struct Ticket;
+
+    enum class TransferType {
+        Normal,
+        FrameSensible   // This transfer will be inserted at the begining of the frame,
+                        // worse perf wise, use only for data that needs to be available at the current frame
+    };
+
+    void Create();
+    void Destroy();
+
+    bool IsFinished(Ticket ticket);
+
+    /**
+     * Prepares the frames command buffer:
+     * One per Queue Family(Currently only using Graphics and Transfer)
+     */
+    void Frame();
+
+    Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type = TransferType::Normal);
+}
