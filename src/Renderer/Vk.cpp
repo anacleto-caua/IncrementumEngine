@@ -349,31 +349,48 @@ namespace VulkanContext {
             }
         }
 
+        // Track unique queues
+        std::vector<QueueContext*> same_queue_different_context;
+        for (QueueContext* queue : Queues) {
+            bool is_unique = true;
+            for (QueueContext* q2 : UniqueQueues) {
+                if (queue == q2) {
+                    break;
+                }
+                if (queue->Index == q2->Index) {
+                    is_unique = false;
+                    same_queue_different_context.push_back(q2);
+                }
+            }
+            if (is_unique) {
+                queue->ResourceIndex = static_cast<u32>(UniqueQueues.size());
+                UniqueQueues.push_back(queue);
+                for (QueueContext* q2 : same_queue_different_context) {
+                    q2->ResourceIndex = queue->ResourceIndex;
+                }
+            }
+            same_queue_different_context.clear();
+        }
+
         return IncResult::SUCCESS;
     }
 
     IncResult CreateLogicalDevice() {
         f32 queue_priority = 1.0f;
+
         std::vector<VkDeviceQueueCreateInfo> queue_create_infos = {};
-        for (QueueContext *queue :Queues) {
-            bool is_unique = true;
-            for (auto create_info : queue_create_infos) {
-                if (queue->Index == create_info.queueFamilyIndex) {
-                    is_unique = false;
-                    break;
-                }
-            }
-            if (is_unique) {
-                VkDeviceQueueCreateInfo queue_create_info {
-                    .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-                    .pNext = nullptr,
-                    .flags = 0,
-                    .queueFamilyIndex = queue->Index,
-                    .queueCount = 1,
-                    .pQueuePriorities = &queue_priority
-                };
-                queue_create_infos.push_back(queue_create_info);
-            }
+        queue_create_infos.reserve(UniqueQueues.size());
+
+        for (QueueContext *queue : UniqueQueues) {
+            VkDeviceQueueCreateInfo create_info = {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = 0,
+                .queueFamilyIndex = queue->Index,
+                .queueCount = 1,
+                .pQueuePriorities = &queue_priority
+            };
+            queue_create_infos.push_back(create_info);
         }
 
         VkPhysicalDeviceFeatures device_features{};
@@ -432,19 +449,24 @@ namespace VulkanContext {
         return IncResult::SUCCESS;
     }
 
-    IncResult CreateQueuesCmdPool() {
-        // Create the Queues
+    IncResult CreateQueuesResourcePool() {
+        QueueResources.resize(UniqueQueues.size());
+
+        // Create the Queues resources
         VkCommandPoolCreateInfo cmd_pool_create_info {};
         cmd_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         cmd_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        for (QueueContext *queue : Queues) {
+        for (QueueContext* queue : Queues) {
             vkGetDeviceQueue(Device, queue->Index, 0, &queue->Queue);
-            cmd_pool_create_info.queueFamilyIndex = queue->Index;
 
-            VK_CHECK(
-                vkCreateCommandPool(Device, &cmd_pool_create_info, nullptr, &queue->MainCmdPool),
-                "main command pool creation failed"
-            );
+            if (QueueResources[queue->ResourceIndex].MainCmdPool == VK_NULL_HANDLE) {
+                auto& r = QueueResources[queue->ResourceIndex];
+                cmd_pool_create_info.queueFamilyIndex = queue->Index;
+                VK_CHECK(
+                    vkCreateCommandPool(Device, &cmd_pool_create_info, nullptr, &r.MainCmdPool),
+                    "main command pool creation failed"
+                );
+            }
 
             // Timeline semaphore
             queue->Semaphore.Value = 0;
@@ -535,7 +557,7 @@ namespace VulkanContext {
         PickPresentMode();
         PickQueues();
         CreateLogicalDevice();
-        CreateQueuesCmdPool();
+        CreateQueuesResourcePool();
         CreateVmaAllocator();
         return IncResult::SUCCESS;
     }
@@ -543,8 +565,30 @@ namespace VulkanContext {
     void Destroy() {
         vkDeviceWaitIdle(Device);
 
+        for (QueueResourcePool r :  QueueResources) {
+            if (r.MainCmdPool) { vkDestroyCommandPool(Device, r.MainCmdPool, nullptr); }
+
+            // Just deleting pending commands could be rather problematic - I think
+            if (!r.PendingCommands.empty()) {
+                analog::warn("pending command buffer was deleted");
+                vkFreeCommandBuffers(
+                    Device,
+                    r.MainCmdPool,
+                    static_cast<u32>(r.PendingCommands.size()),
+                    r.PendingCommands.data()
+                );
+            }
+            if (!r.FreeCommands.empty()) {
+                vkFreeCommandBuffers(
+                    Device,
+                    r.MainCmdPool,
+                    static_cast<u32>(r.FreeCommands.size()),
+                    r.FreeCommands.data()
+                );
+            }
+        }
+
         for (QueueContext *queue : Queues) {
-            if (queue->MainCmdPool) { vkDestroyCommandPool(Device, queue->MainCmdPool, nullptr); }
             if (queue->Semaphore.Handle) { vkDestroySemaphore(Device, queue->Semaphore.Handle, nullptr); }
         }
 
@@ -563,7 +607,7 @@ namespace VulkanContext {
         VkCommandBufferAllocateInfo cmd_buffer_alloc_info {};
         cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        cmd_buffer_alloc_info.commandPool = ctx.MainCmdPool;
+        cmd_buffer_alloc_info.commandPool = QueueResources[ctx.ResourceIndex].MainCmdPool;
         cmd_buffer_alloc_info.commandBufferCount = 1;
 
         VkCommandBuffer cmd;
@@ -588,7 +632,23 @@ namespace VulkanContext {
 
         vkQueueWaitIdle(ctx.Queue);
 
-        vkFreeCommandBuffers(Device, ctx.MainCmdPool, 1, &cmd);
+        vkFreeCommandBuffers(Device, QueueResources[ctx.ResourceIndex].MainCmdPool, 1, &cmd);
+    }
+
+    VkCommandBuffer GetCommand(QueueContext& ctx) {
+        QueueResourcePool& q = QueueResources[ctx.ResourceIndex];
+        if (q.FreeCommands.empty()) {
+            return SingleTimeCmdBegin(ctx);
+        }
+
+        auto cmd = q.FreeCommands.back();
+        q.FreeCommands.pop_back();
+        return cmd;
+    }
+
+    void PushPendingCommand(QueueContext& ctx, VkCommandBuffer cmd) {
+        vkEndCommandBuffer(cmd);
+        QueueResources[ctx.ResourceIndex].PendingCommands.push_back(cmd);
     }
 
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities() {

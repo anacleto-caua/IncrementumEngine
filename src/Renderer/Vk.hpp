@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <vector>
 
 #include <vulkan/vulkan.h>
 #include <vma/vk_mem_alloc.h>
@@ -13,15 +14,13 @@
             }                                                           \
     } while(0)
 
-#define CONFIG static constexpr
 namespace RendererConfig {
-    CONFIG u32 MAX_FRAMES_IN_FLIGHT = 2;
+    static constexpr u32 MAX_FRAMES_IN_FLIGHT = 2;
 
     namespace DepthBuffer {
-        CONFIG VkFormat Format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+        static constexpr VkFormat Format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     };
 }
-#undef CONFIG
 
 struct TimelineSemaphore {
     std::atomic<u64> Value = 0;
@@ -30,9 +29,15 @@ struct TimelineSemaphore {
 
 struct QueueContext {
     u32 Index;
+    u32 ResourceIndex; // Direct index to std::vector<QueueResources>
     VkQueue Queue = VK_NULL_HANDLE;
-    VkCommandPool MainCmdPool = VK_NULL_HANDLE;
     TimelineSemaphore Semaphore = {};
+};
+
+struct QueueResourcePool {
+    VkCommandPool MainCmdPool = VK_NULL_HANDLE;
+    std::vector<VkCommandBuffer> PendingCommands = {};
+    std::vector<VkCommandBuffer> FreeCommands = {};
 };
 
 namespace VulkanContext {
@@ -50,6 +55,8 @@ namespace VulkanContext {
     inline QueueContext Transfer;
     inline QueueContext Compute;
     inline std::array<QueueContext*, 4> Queues = {{ &Graphics, &Present, &Transfer, &Compute }};
+    inline std::vector<QueueResourcePool> QueueResources;
+    inline std::vector<QueueContext*> UniqueQueues;
 
     inline std::array<VkFormat, 1> ColorAttachmentFormats { }; // Will be filled by the SurfaceFormat.format
 
@@ -59,8 +66,15 @@ namespace VulkanContext {
     VkCommandBuffer SingleTimeCmdBegin(QueueContext& ctx);
     void SingleTimeCmdSubmit(QueueContext& ctx, VkCommandBuffer cmd);
 
+    VkCommandBuffer GetCommand(QueueContext& ctx);
+    void PushPendingCommand(QueueContext& ctx, VkCommandBuffer cmd);
+
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities();
 }
+
+// Shorter
+namespace VkVault = VulkanContext;
+namespace VkV = VkVault;
 
 namespace Renderer {
     namespace Swapchain {
