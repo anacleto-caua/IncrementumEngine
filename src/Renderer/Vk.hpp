@@ -29,7 +29,7 @@ struct TimelineSemaphore {
 
 struct QueueContext {
     u32 Index;
-    u32 ResourceIndex; // Direct index to std::vector<QueueResources>
+    u32 ResourceIndex; // Direct index to std::vector<QueueResourcePool> QueueResources
     VkQueue Queue = VK_NULL_HANDLE;
     TimelineSemaphore Semaphore = {};
 };
