@@ -189,8 +189,8 @@ namespace Renderer {
         vkBeginCommandBuffer(render_cmd, &RenderingCmdBeginInfo);
 
         // Has transfers
-        // if (has_transfers) {
-        if (false) {
+        bool has_transfers  = false;
+        if (has_transfers) {
             // Record the copies (vkCmdCopyBuffer, vkCmdUpdateBuffer, etc.)
             // GraphicsTransfer(render_cmd);
 
@@ -316,7 +316,38 @@ namespace Renderer {
             .pSignalSemaphores = submit_signal_semaphores
         };
 
-        vkQueueSubmit(VulkanContext::Graphics.Queue, 1, &render_cmd_submit_info, VK_NULL_HANDLE);
+        u32 frame_submission_count = 1;
+        VkSubmitInfo utils_cmd_submit_info = {};
+        VkSubmitInfo frame_submit[] = { render_cmd_submit_info, utils_cmd_submit_info };
+
+        // Utility commands, image format transfers and acquire/release non frame dependant operations
+        bool has_utils = false;
+        if (has_utils) {
+            frame_submission_count = 2;
+            // Fetch this later
+            VkCommandBuffer utils_cmd = VK_NULL_HANDLE;
+            VkSemaphore external_signal_semaphore = VK_NULL_HANDLE;
+
+            utils_cmd_submit_info = {
+                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                .pNext = nullptr, // Add timeline info here
+                .waitSemaphoreCount = 0,
+                .pWaitSemaphores = nullptr,
+                .pWaitDstStageMask = nullptr,
+                .commandBufferCount = 1,
+                .pCommandBuffers = &utils_cmd,
+                .signalSemaphoreCount = 1,
+                .pSignalSemaphores = &external_signal_semaphore
+            };
+        }
+
+        // Submit
+        vkQueueSubmit(
+            VulkanContext::Graphics.Queue,
+            frame_submission_count,
+            frame_submit,
+            VK_NULL_HANDLE
+        );
 
         Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[TargetImageViewIndex].RenderFinished;
         vkQueuePresentKHR(VulkanContext::Present.Queue, &Swapchain::PresentInfo);
