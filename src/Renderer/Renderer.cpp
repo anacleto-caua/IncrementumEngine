@@ -29,7 +29,6 @@ namespace Renderer {
     VkRenderingInfo RenderingInfo {};
 
     VkCommandBufferBeginInfo RenderingCmdBeginInfo {};
-    VkSubmitInfo RenderingCmdSubmitInfo {};
 
     namespace Swapchain {
         struct SwapchainImage {
@@ -138,13 +137,6 @@ namespace Renderer {
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
             .pInheritanceInfo = nullptr
         };
-
-        RenderingCmdSubmitInfo = {};
-        RenderingCmdSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        RenderingCmdSubmitInfo.waitSemaphoreCount = 1;
-        RenderingCmdSubmitInfo.pWaitDstStageMask = GRAPHICS_PIPELINE_WAIT_STAGES;
-        RenderingCmdSubmitInfo.commandBufferCount = 1;
-        RenderingCmdSubmitInfo.signalSemaphoreCount = 1;
 
         INC_CHECK(ImGuiPass::Create(), "failed to create imgui context");
 
@@ -299,7 +291,7 @@ namespace Renderer {
         u64 signal_value = ++VulkanContext::Graphics.Semaphore.Value;
         u64 signal_values[] = {
             0,             // Ignored by the driver for the binary RenderFinished semaphore
-            signal_value   // Applied to the Timeline Graphics.Semaphore
+            signal_value   // Applied to the timeline Graphics semaphore
         };
 
         VkTimelineSemaphoreSubmitInfo timeline_semaphore_submit_info = {
@@ -312,18 +304,19 @@ namespace Renderer {
         };
 
         // Assemble the Submit Info
-        RenderingCmdSubmitInfo.pNext = &timeline_semaphore_submit_info;
+        VkSubmitInfo render_cmd_submit_info = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = &timeline_semaphore_submit_info,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = submit_wait_semaphores,
+            .pWaitDstStageMask = GRAPHICS_PIPELINE_WAIT_STAGES,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &render_cmd,
+            .signalSemaphoreCount = 2,
+            .pSignalSemaphores = submit_signal_semaphores
+        };
 
-        RenderingCmdSubmitInfo.waitSemaphoreCount = 1;
-        RenderingCmdSubmitInfo.pWaitSemaphores = submit_wait_semaphores;
-
-        RenderingCmdSubmitInfo.signalSemaphoreCount = 2;
-        RenderingCmdSubmitInfo.pSignalSemaphores = submit_signal_semaphores;
-
-        RenderingCmdSubmitInfo.commandBufferCount = 1;
-        RenderingCmdSubmitInfo.pCommandBuffers = &render_cmd;
-
-        vkQueueSubmit(VulkanContext::Graphics.Queue, 1, &RenderingCmdSubmitInfo, VK_NULL_HANDLE);
+        vkQueueSubmit(VulkanContext::Graphics.Queue, 1, &render_cmd_submit_info, VK_NULL_HANDLE);
 
         Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[TargetImageViewIndex].RenderFinished;
         vkQueuePresentKHR(VulkanContext::Present.Queue, &Swapchain::PresentInfo);
