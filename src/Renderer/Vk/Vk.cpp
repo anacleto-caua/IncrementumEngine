@@ -1,6 +1,7 @@
 #include "Vk.hpp"
 
 #include "Renderer/VkVault.hpp"
+#include "vulkan/vulkan_core.h"
 
 TimelineSemaphore CreateTimelineSemaphore() {
     TimelineSemaphore semaphore = {};
@@ -24,4 +25,21 @@ TimelineSemaphore CreateTimelineSemaphore() {
 
 void DestroyTimelineSemaphore(TimelineSemaphore& semaphore) {
     if (semaphore.Handle) { vkDestroySemaphore(VkVault::Device, semaphore.Handle, nullptr); }
+}
+
+
+u64 QueryTimelineSemaphoreValue(TimelineSemaphore& semaphore) {
+    u64 value;
+    vkGetSemaphoreCounterValue(VkVault::Device, semaphore.Handle, &value);
+    return value;
+}
+
+void SignalTimelineSemaphore(TimelineSemaphore& semaphore, u64 value) {
+    VkSemaphoreSignalInfo signal_info = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO,
+        .pNext = nullptr,
+        .semaphore = semaphore.Handle,
+        .value = value
+    };
+    vkSignalSemaphore(VkVault::Device, &signal_info);
 }

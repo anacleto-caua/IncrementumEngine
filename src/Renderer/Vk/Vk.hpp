@@ -10,3 +10,5 @@ struct TimelineSemaphore {
 
 TimelineSemaphore CreateTimelineSemaphore();
 void DestroyTimelineSemaphore(TimelineSemaphore& semaphore);
+
+u64 QueryTimelineSemaphoreValue(TimelineSemaphore& semaphore);
