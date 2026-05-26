@@ -1,7 +1,6 @@
 #include "Vk.hpp"
 
 #include "Renderer/VkVault.hpp"
-#include "vulkan/vulkan_core.h"
 
 TimelineSemaphore CreateTimelineSemaphore() {
     TimelineSemaphore semaphore = {};
