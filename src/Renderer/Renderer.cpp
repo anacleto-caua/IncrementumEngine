@@ -3,7 +3,7 @@
 #include <array>
 #include <vector>
 
-#include "Vk.hpp"
+#include "VkVault.hpp"
 #include "Passes/ImGuiPass.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Renderer/Resources/ResourceManager.hpp"
@@ -16,6 +16,7 @@ namespace Renderer {
         u64 LastSignaledValue = 0;
     };
 
+    TimelineSemaphore FrameSemaphore;
     std::array<FrameData, RendererConfig::MAX_FRAMES_IN_FLIGHT> Frames;
 
     u32 TargetFrameIndex = 0;
@@ -66,7 +67,7 @@ namespace Renderer {
     };
 
     IncResult Create() {
-        INC_CHECK(VulkanContext::Create(), "vulkan context creation failed");
+        INC_CHECK(VkVault::Create(), "vulkan context creation failed");
 
         Swapchain::Create();
 
@@ -77,7 +78,7 @@ namespace Renderer {
         VkCommandPoolCreateInfo render_cmd_pool_create_info {};
         render_cmd_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         render_cmd_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        render_cmd_pool_create_info.queueFamilyIndex = VulkanContext::Graphics.Index;
+        render_cmd_pool_create_info.queueFamilyIndex = VkVault::Graphics.Index;
 
         VkCommandBufferAllocateInfo cmd_buffer_alloc_info {};
         cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -85,12 +86,13 @@ namespace Renderer {
         cmd_buffer_alloc_info.commandPool = VK_NULL_HANDLE;
         cmd_buffer_alloc_info.commandBufferCount = 1;
 
+        FrameSemaphore = CreateTimelineSemaphore();
         for (FrameData &frame : Frames) {
-            vkCreateSemaphore(VulkanContext::Device, &semaphore_create_info, nullptr, &frame.ImageAvailable);
+            vkCreateSemaphore(VkVault::Device, &semaphore_create_info, nullptr, &frame.ImageAvailable);
 
-            vkCreateCommandPool(VulkanContext::Device, &render_cmd_pool_create_info, nullptr, &frame.CmdPool);
+            vkCreateCommandPool(VkVault::Device, &render_cmd_pool_create_info, nullptr, &frame.CmdPool);
             cmd_buffer_alloc_info.commandPool = frame.CmdPool;
-            vkAllocateCommandBuffers(VulkanContext::Device, &cmd_buffer_alloc_info, &frame.CmdBuffer);
+            vkAllocateCommandBuffers(VkVault::Device, &cmd_buffer_alloc_info, &frame.CmdBuffer);
         }
 
         // Fill general rendering information
@@ -144,17 +146,18 @@ namespace Renderer {
     }
 
     void Destroy() {
-        vkDeviceWaitIdle(VulkanContext::Device);
+        vkDeviceWaitIdle(VkVault::Device);
 
+        DestroyTimelineSemaphore(FrameSemaphore);
         for (FrameData &frame : Frames) {
-            if (frame.CmdPool) { vkDestroyCommandPool(VulkanContext::Device, frame.CmdPool, nullptr); }
-            if (frame.ImageAvailable) { vkDestroySemaphore(VulkanContext::Device, frame.ImageAvailable, nullptr); }
+            if (frame.CmdPool) { vkDestroyCommandPool(VkVault::Device, frame.CmdPool, nullptr); }
+            if (frame.ImageAvailable) { vkDestroySemaphore(VkVault::Device, frame.ImageAvailable, nullptr); }
         }
 
         ImGuiPass::Destroy();
         Swapchain::Destroy();
         DepthBuffer::Destroy();
-        VulkanContext::Destroy();
+        VkVault::Destroy();
     }
 
     void Frame() {
@@ -167,13 +170,13 @@ namespace Renderer {
             .pNext = nullptr,
             .flags = 0,
             .semaphoreCount = 1,
-            .pSemaphores = &VulkanContext::Graphics.Semaphore.Handle,
+            .pSemaphores = &FrameSemaphore.Handle,
             .pValues = &target_frame.LastSignaledValue
         };
-        vkWaitSemaphores(VulkanContext::Device, &wait_info, UINT64_MAX);
+        vkWaitSemaphores(VkVault::Device, &wait_info, UINT64_MAX);
 
         VkResult result = vkAcquireNextImageKHR(
-            VulkanContext::Device,
+            VkVault::Device,
             Swapchain::Swapchain,
             UINT64_MAX,
             target_frame.ImageAvailable,
@@ -181,7 +184,7 @@ namespace Renderer {
             &TargetImageViewIndex
         );
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-            vkDeviceWaitIdle(VulkanContext::Device);
+            vkDeviceWaitIdle(VkVault::Device);
             return;
         }
 
@@ -284,11 +287,11 @@ namespace Renderer {
         VkSemaphore submit_wait_semaphores[] = { target_frame.ImageAvailable };
         VkSemaphore submit_signal_semaphores[] = {
             Swapchain::Images[TargetImageViewIndex].RenderFinished, // Signals Present
-            VulkanContext::Graphics.Semaphore.Handle                // Signals the Timeline
+            FrameSemaphore.Handle                                   // Signals the Timeline
         };
 
         // Map the timeline values (1-to-1 with the signal array above)
-        u64 signal_value = ++VulkanContext::Graphics.Semaphore.Value;
+        u64 signal_value = ++FrameSemaphore.LastValue;
         u64 signal_values[] = {
             0,             // Ignored by the driver for the binary RenderFinished semaphore
             signal_value   // Applied to the timeline Graphics semaphore
@@ -343,14 +346,14 @@ namespace Renderer {
 
         // Submit
         vkQueueSubmit(
-            VulkanContext::Graphics.Queue,
+            VkVault::Graphics.Queue,
             frame_submission_count,
             frame_submit,
             VK_NULL_HANDLE
         );
 
         Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[TargetImageViewIndex].RenderFinished;
-        vkQueuePresentKHR(VulkanContext::Present.Queue, &Swapchain::PresentInfo);
+        vkQueuePresentKHR(VkVault::Present.Queue, &Swapchain::PresentInfo);
 
         // Save the timeline value so the CPU can wait on it next time!
         target_frame.LastSignaledValue = signal_value;
@@ -364,7 +367,7 @@ namespace Renderer {
         }
         u32 uw = static_cast<u32>(width);
         u32 uh = static_cast<u32>(height);
-        vkDeviceWaitIdle(VulkanContext::Device);
+        vkDeviceWaitIdle(VkVault::Device);
         Swapchain::Resize(uw, uh);
         DepthBuffer::Resize(uw, uh);
     }
@@ -378,25 +381,25 @@ namespace Renderer {
         void CleanupImages();
 
         IncResult Create() {
-            auto capabilities = VulkanContext::QuerySurfaceCapabilities();
+            auto capabilities = VkVault::QuerySurfaceCapabilities();
             Extent = capabilities.currentExtent;
             ImageCount = capabilities.minImageCount + 1;
 
             CreateInfo = {};
             CreateInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-            CreateInfo.surface = VulkanContext::Surface;
+            CreateInfo.surface = VkVault::Surface;
             CreateInfo.minImageCount = Swapchain::ImageCount;
-            CreateInfo.imageFormat = VulkanContext::SurfaceFormat.format;
-            CreateInfo.imageColorSpace = VulkanContext::SurfaceFormat.colorSpace;
+            CreateInfo.imageFormat = VkVault::SurfaceFormat.format;
+            CreateInfo.imageColorSpace = VkVault::SurfaceFormat.colorSpace;
             CreateInfo.imageArrayLayers = 1;
             CreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
             CreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-            CreateInfo.presentMode = VulkanContext::PresentMode;
+            CreateInfo.presentMode = VkVault::PresentMode;
             CreateInfo.clipped = VK_TRUE;
             CreateInfo.oldSwapchain = VK_NULL_HANDLE;
 
-            u32 QueueFamilyIndices[] = { VulkanContext::Graphics.Index, VulkanContext::Present.Index };
-            if (VulkanContext::Graphics.Index != VulkanContext::Present.Index) {
+            u32 QueueFamilyIndices[] = { VkVault::Graphics.Index, VkVault::Present.Index };
+            if (VkVault::Graphics.Index != VkVault::Present.Index) {
                 CreateInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
                 CreateInfo.queueFamilyIndexCount = 2;
                 CreateInfo.pQueueFamilyIndices = QueueFamilyIndices;
@@ -430,7 +433,7 @@ namespace Renderer {
         }
 
         IncResult Resize(u32 width, u32 height) {
-            auto capabilities = VulkanContext::QuerySurfaceCapabilities();
+            auto capabilities = VkVault::QuerySurfaceCapabilities();
             VkExtent2D min_extent = capabilities.minImageExtent;
             VkExtent2D max_extent = capabilities.maxImageExtent;
             auto clamp = [](auto val, auto min, auto max) { return (val < min) ? min : (val > max) ? max : val; };
@@ -450,17 +453,17 @@ namespace Renderer {
         }
 
         IncResult Recreate(VkSwapchainKHR old_swapchain) {
-            vkDeviceWaitIdle(VulkanContext::Device);
+            vkDeviceWaitIdle(VkVault::Device);
             CreateInfo.imageExtent = Extent;
             CreateInfo.oldSwapchain = old_swapchain;
-            auto capabilities = VulkanContext::QuerySurfaceCapabilities();
+            auto capabilities = VkVault::QuerySurfaceCapabilities();
             CreateInfo.preTransform = capabilities.currentTransform;
 
-            VK_CHECK(vkCreateSwapchainKHR(VulkanContext::Device, &CreateInfo, nullptr, &Swapchain), "swapchain creation failed");
+            VK_CHECK(vkCreateSwapchainKHR(VkVault::Device, &CreateInfo, nullptr, &Swapchain), "swapchain creation failed");
 
-            vkGetSwapchainImagesKHR(VulkanContext::Device, Swapchain, &ImageCount, nullptr);
+            vkGetSwapchainImagesKHR(VkVault::Device, Swapchain, &ImageCount, nullptr);
             std::vector<VkImage> ImagesTemp(ImageCount);
-            vkGetSwapchainImagesKHR(VulkanContext::Device, Swapchain, &ImageCount, ImagesTemp.data());
+            vkGetSwapchainImagesKHR(VkVault::Device, Swapchain, &ImageCount, ImagesTemp.data());
             Images.resize(ImageCount);
 
             CleanupImages();
@@ -473,7 +476,7 @@ namespace Renderer {
                 .flags = 0,
                 .image = VK_NULL_HANDLE, // to fill later
                 .viewType = VK_IMAGE_VIEW_TYPE_2D,
-                .format = VulkanContext::SurfaceFormat.format,
+                .format = VkVault::SurfaceFormat.format,
                 .components = {
                     .r = VK_COMPONENT_SWIZZLE_IDENTITY,
                     .g = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -493,11 +496,11 @@ namespace Renderer {
                 Images[i].Image = ImagesTemp[i];
                 swapchain_image_view_create_info.image = Images[i].Image;
                 VK_CHECK(
-                    vkCreateImageView(VulkanContext::Device, &swapchain_image_view_create_info, nullptr, &Images[i].ImageView),
+                    vkCreateImageView(VkVault::Device, &swapchain_image_view_create_info, nullptr, &Images[i].ImageView),
                     "swapchain image view creation failed"
                 );
                 VK_CHECK(
-                    vkCreateSemaphore(VulkanContext::Device, &semaphore_create_info, nullptr, &Images[i].RenderFinished),
+                    vkCreateSemaphore(VkVault::Device, &semaphore_create_info, nullptr, &Images[i].RenderFinished),
                     "swapchain semaphore creation failed"
                 );
             }
@@ -508,13 +511,13 @@ namespace Renderer {
         }
 
         void Destroy(VkSwapchainKHR old_swapchain) {
-            if (Swapchain) { vkDestroySwapchainKHR(VulkanContext::Device, old_swapchain, nullptr); }
+            if (Swapchain) { vkDestroySwapchainKHR(VkVault::Device, old_swapchain, nullptr); }
         }
 
         void CleanupImages() {
             for (SwapchainImage& image : Images) {
-                if (image.ImageView) { vkDestroyImageView(VulkanContext::Device, image.ImageView, nullptr); }
-                if (image.RenderFinished) { vkDestroySemaphore(VulkanContext::Device, image.RenderFinished, nullptr); }
+                if (image.ImageView) { vkDestroyImageView(VkVault::Device, image.ImageView, nullptr); }
+                if (image.RenderFinished) { vkDestroySemaphore(VkVault::Device, image.RenderFinished, nullptr); }
             }
         }
     }
@@ -545,7 +548,7 @@ namespace Renderer {
             depth_image_value->Format = RendererConfig::DepthBuffer::Format;
 
             // Despite having a creation format the image still starts as a _UNDEFINED, so transit it a first time
-            VkCommandBuffer cmd = VulkanContext::SingleTimeCmdBegin(VulkanContext::Graphics);
+            VkCommandBuffer cmd = VkVault::SingleTimeCmdBegin(VkVault::Graphics);
 
             VkImageMemoryBarrier barrier {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -569,7 +572,7 @@ namespace Renderer {
                 &barrier
             );
 
-            VulkanContext::SingleTimeCmdSubmit(VulkanContext::Graphics, cmd);
+            VkVault::SingleTimeCmdSubmit(VkVault::Graphics, cmd);
 
             VkImageViewCreateInfo image_view_create_info = ImageView::FillCreateInfo(depth_image_value);
             image_view_create_info.subresourceRange = DepthBuffer::Range;

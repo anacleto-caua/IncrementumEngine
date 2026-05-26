@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Renderer/Vk.hpp"
+#include "Renderer/VkVault.hpp"
 #include "Asl/ResourcePool.hpp"
 
 namespace Image {
@@ -14,7 +14,7 @@ namespace Image {
         u32 ArrayLayers;
         VkFormat Format;
         VkImageLayout Layout;
-        QueueContext* OwnerQueue = &VulkanContext::Transfer;
+        QueueContext* OwnerQueue = &VkVault::Transfer;
     };
 
     using Id = asl::Handle<Value>;

@@ -54,7 +54,7 @@ namespace Image {
 
         if (
             vmaCreateImage(
-                VulkanContext::VmaAllocator,
+                VkVault::VmaAllocator,
                 &image_create_info, &alloc_create_info,
                 &image.Image, &image.Allocation,
                 nullptr
@@ -86,7 +86,7 @@ namespace Image {
     }
 
     void Destroy(Value* image) {
-        if (image->Image) { vmaDestroyImage(VulkanContext::VmaAllocator, image->Image, image->Allocation); }
+        if (image->Image) { vmaDestroyImage(VkVault::VmaAllocator, image->Image, image->Allocation); }
         image->Image = VK_NULL_HANDLE;
         image->Allocation = VK_NULL_HANDLE;
     }
@@ -106,7 +106,7 @@ namespace ImageView {
 
         if (
             vkCreateImageView(
-                VulkanContext::Device,
+                VkVault::Device,
                 &create_info,
                 nullptr,
                 &image_view.ImageView
@@ -155,7 +155,7 @@ namespace ImageView {
     }
 
     void Destroy(Value* image_view) {
-        if (image_view->ImageView) { vkDestroyImageView(VulkanContext::Device, image_view->ImageView, nullptr); }
+        if (image_view->ImageView) { vkDestroyImageView(VkVault::Device, image_view->ImageView, nullptr); }
         image_view->ImageView = VK_NULL_HANDLE;
     }
 
@@ -229,7 +229,7 @@ namespace Buffer {
 
         if (
             vmaCreateBuffer(
-                VulkanContext::VmaAllocator,
+                VkVault::VmaAllocator,
                 &buffer_create_info, &alloc_create_info,
                 &buffer.Buffer, &buffer.Allocation,
                 nullptr
@@ -281,16 +281,16 @@ namespace Buffer {
 
     void* Map(const VmaAllocation alloc) {
         void* mapped_data;
-        vmaMapMemory(VulkanContext::VmaAllocator, alloc, &mapped_data);
+        vmaMapMemory(VkVault::VmaAllocator, alloc, &mapped_data);
         return mapped_data;
     }
 
     void Unmap(const VmaAllocation alloc) {
-        vmaUnmapMemory(VulkanContext::VmaAllocator, alloc);
+        vmaUnmapMemory(VkVault::VmaAllocator, alloc);
     }
 
     void Destroy(Value* buffer) {
-        if (buffer->Buffer) { vmaDestroyBuffer(VulkanContext::VmaAllocator, buffer->Buffer, buffer->Allocation); }
+        if (buffer->Buffer) { vmaDestroyBuffer(VkVault::VmaAllocator, buffer->Buffer, buffer->Allocation); }
         buffer->Buffer = VK_NULL_HANDLE;
         buffer->Allocation = VK_NULL_HANDLE;
     }

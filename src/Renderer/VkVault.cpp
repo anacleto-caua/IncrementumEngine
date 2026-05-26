@@ -1,4 +1,4 @@
-#include "Vk.hpp"
+#include "VkVault.hpp"
 
 #include <array>
 #include <string>
@@ -12,7 +12,7 @@
     constexpr bool EnableValidadtionLayers_ = true;
 #endif
 
-namespace VulkanContext {
+namespace VkVault {
     static constexpr std::array<const char*, 5> DEVICE_EXTENSIONS = {
             VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
             // VMA extensions
@@ -467,25 +467,6 @@ namespace VulkanContext {
                     "main command pool creation failed"
                 );
             }
-
-            // Timeline semaphore
-            queue->Semaphore.Value = 0;
-
-            VkSemaphoreTypeCreateInfo semaphore_type_create_info = {};
-            semaphore_type_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-            semaphore_type_create_info.pNext = nullptr;
-            semaphore_type_create_info.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-            semaphore_type_create_info.initialValue = 0;
-
-            VkSemaphoreCreateInfo semaphore_create_info = {};
-            semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-            semaphore_create_info.pNext = &semaphore_type_create_info;
-            semaphore_create_info.flags = 0;
-
-            VK_CHECK(
-                vkCreateSemaphore(Device, &semaphore_create_info, nullptr, &queue->Semaphore.Handle),
-                "queue semaphore creation failed"
-            );
         }
         return IncResult::SUCCESS;
     }
@@ -586,10 +567,6 @@ namespace VulkanContext {
                     r.FreeCommands.data()
                 );
             }
-        }
-
-        for (QueueContext *queue : Queues) {
-            if (queue->Semaphore.Handle) { vkDestroySemaphore(Device, queue->Semaphore.Handle, nullptr); }
         }
 
         if (VmaAllocator) { vmaDestroyAllocator(VmaAllocator); }

@@ -63,7 +63,7 @@ namespace TransferPipe {
 
         // Wonky but works
         u32 koth = 0;
-        for (auto q : VulkanContext::Queues) {
+        for (auto q : VkVault::Queues) {
             if (q->Index > koth) {
                 koth = q->Index;
             }
@@ -95,7 +95,7 @@ namespace TransferPipe {
         // so I could consider just copying this to another buffer in RAM
         // --- RingBuffer.Write(src, size);
 
-        Packages[VulkanContext::Transfer.Index].push(
+        Packages[VkVault::Transfer.Index].push(
             {
                 .Type = PackageType::BufferUpdate,
                 .Size = size,

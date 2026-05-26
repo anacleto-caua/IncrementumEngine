@@ -28,8 +28,8 @@ namespace ImGuiPass {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
             .pNext = nullptr,
             .viewMask = {},
-            .colorAttachmentCount = VulkanContext::ColorAttachmentFormats.size(),
-            .pColorAttachmentFormats = VulkanContext::ColorAttachmentFormats.data(),
+            .colorAttachmentCount = VkVault::ColorAttachmentFormats.size(),
+            .pColorAttachmentFormats = VkVault::ColorAttachmentFormats.data(),
             .depthAttachmentFormat = RendererConfig::DepthBuffer::Format,
             .stencilAttachmentFormat = RendererConfig::DepthBuffer::Format
         };
@@ -39,15 +39,15 @@ namespace ImGuiPass {
 
         ImGui_ImplVulkan_InitInfo vk_init_info {};
         vk_init_info.ApiVersion = VK_API_VERSION_1_4;
-        vk_init_info.Instance = VulkanContext::Instance;
-        vk_init_info.PhysicalDevice = VulkanContext::PhysicalDevice;
-        vk_init_info.Device = VulkanContext::Device;
-        vk_init_info.QueueFamily = VulkanContext::Graphics.Index;
-        vk_init_info.Queue = VulkanContext::Graphics.Queue;
+        vk_init_info.Instance = VkVault::Instance;
+        vk_init_info.PhysicalDevice = VkVault::PhysicalDevice;
+        vk_init_info.Device = VkVault::Device;
+        vk_init_info.QueueFamily = VkVault::Graphics.Index;
+        vk_init_info.Queue = VkVault::Graphics.Queue;
         vk_init_info.PipelineInfoMain = pipeline_info;
         // vk_init_info.DescriptorPool; // Leave it alone so the backend creates one with .DescriptorPoolSize
         vk_init_info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE;
-        vk_init_info.MinImageCount = VulkanContext::QuerySurfaceCapabilities().minImageCount;
+        vk_init_info.MinImageCount = VkVault::QuerySurfaceCapabilities().minImageCount;
         vk_init_info.ImageCount = Renderer::Swapchain::ImageCount;
         vk_init_info.UseDynamicRendering = true;
         vk_init_info.MinAllocationSize = 1024 * 1024; // To satisfaz zealous best practices validation layer and waste a little memory.

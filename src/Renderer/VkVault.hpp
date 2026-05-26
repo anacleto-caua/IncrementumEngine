@@ -3,8 +3,7 @@
 #include <array>
 #include <vector>
 
-#include <vulkan/vulkan.h>
-#include <vma/vk_mem_alloc.h>
+#include "Vk/Vk.hpp"
 
 #define VK_CHECK(expr, ...)                                             \
     do {                                                                \
@@ -22,16 +21,10 @@ namespace RendererConfig {
     };
 }
 
-struct TimelineSemaphore {
-    std::atomic<u64> Value = 0;
-    VkSemaphore Handle = VK_NULL_HANDLE;
-};
-
 struct QueueContext {
     u32 Index;
     u32 ResourceIndex; // Direct index to std::vector<QueueResourcePool> QueueResources
     VkQueue Queue = VK_NULL_HANDLE;
-    TimelineSemaphore Semaphore = {};
 };
 
 struct QueueResourcePool {
@@ -40,7 +33,8 @@ struct QueueResourcePool {
     std::vector<VkCommandBuffer> FreeCommands = {};
 };
 
-namespace VulkanContext {
+// Vulkan Vault
+namespace VkVault {
     inline VkInstance Instance;
     inline VkPhysicalDevice PhysicalDevice;
     inline VkDevice Device;
@@ -71,10 +65,6 @@ namespace VulkanContext {
 
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities();
 }
-
-// Shorter
-namespace VkVault = VulkanContext;
-namespace VkV = VkVault;
 
 namespace Renderer {
     namespace Swapchain {

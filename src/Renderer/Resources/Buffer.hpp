@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Renderer/Vk.hpp"
+#include "Renderer/VkVault.hpp"
 #include "Asl/ResourcePool.hpp"
 
 namespace Buffer {
