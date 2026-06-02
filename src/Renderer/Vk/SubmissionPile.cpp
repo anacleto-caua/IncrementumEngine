@@ -71,7 +71,12 @@ void End(SubmissionPile& pile) {
     };
 }
 
-void SubmitHarvestedPiles(QueueContext& ctx, VkFence execution_fence, SubmissionPile* piles, u64 pile_count) {
+void SubmitPile(QueueContext& ctx, SubmissionPile& pile, VkFence execution_fence) {
+    vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence);
+    Reset(pile);
+}
+
+void SubmitMultiplePiles(QueueContext& ctx, SubmissionPile* piles, u64 pile_count, VkFence execution_fence) {
     std::array<VkSubmitInfo2, 128> global_submits;
     u64 total_submits = 0;
 
