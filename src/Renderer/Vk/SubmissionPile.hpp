@@ -2,7 +2,25 @@
 
 #include "Renderer/VkVault.hpp"
 
-struct SubmissionPile;
+constexpr u64 MAX_SUBMITS = 32;
+constexpr u64 MAX_COMMAND_BUFFERS = 64;
+constexpr u64 MAX_SEMAPHORES = 64;
+
+struct SubmissionPile {
+    std::array<VkSubmitInfo2, MAX_SUBMITS> Submits;
+    std::array<VkCommandBufferSubmitInfo, MAX_COMMAND_BUFFERS> CommandBuffers;
+    std::array<VkSemaphoreSubmitInfo, MAX_SEMAPHORES> WaitSemaphores;
+    std::array<VkSemaphoreSubmitInfo, MAX_SEMAPHORES> SignalSemaphores;
+
+    u64 SubmitCount = 0;
+    u64 CmdCount = 0;
+    u64 WaitCount = 0;
+    u64 SignalCount = 0;
+
+    u64 CmdStart = 0;
+    u64 WaitStart = 0;
+    u64 SignalStart = 0;
+};
 
 void Reset(SubmissionPile& pile);
 
