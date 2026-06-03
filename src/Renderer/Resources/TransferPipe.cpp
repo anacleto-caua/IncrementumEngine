@@ -65,7 +65,7 @@ namespace TransferPipe {
 
         Packages.resize(VkVault::UniqueQueues.size());
 
-        for (auto semaphore : Semaphores) {
+        for (auto& semaphore : Semaphores) {
             semaphore = CreateTimelineSemaphore();
         }
     }
