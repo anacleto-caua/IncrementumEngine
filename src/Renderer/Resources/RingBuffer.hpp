@@ -30,9 +30,10 @@ public:
         Buffer::Del(Buffer);
     }
 
-    void Write(const void* src, u64 upload_size) {
+    u64 Write(const void* src, u64 upload_size) {
         assert(upload_size < SIZE && "single queued upload is bigger than staging buffer itself");
         u64 neck_size = static_cast<u64>((MappedHead + SIZE) - Head);
+        u64 write_offset = Head - MappedHead;
         if (upload_size <= neck_size) {
             memcpy(Head, src, upload_size);
             Head += upload_size;
@@ -46,21 +47,24 @@ public:
             // the heftier sollution can come in later
             assert(pre_tail > upload_size && "can't fit whole data from the head on, staging buffer is cluttered");
 
+            write_offset = 0;
             memcpy(MappedHead, src, upload_size);
             Head = MappedHead + upload_size;
         }
+
+        return write_offset;
     }
 
-    u64 Read(u64 package_size) {
-        u64 offset = 0;
+    void Read(u64 package_size) {
+        // u64 offset = 0; - who knows right?
         u64 tail_neck_size = static_cast<u64>((MappedHead + SIZE) - Tail);
         if (package_size <= tail_neck_size) {
-            offset = static_cast<u64>(Tail - MappedHead);
+            // offset = static_cast<u64>(Tail - MappedHead);
             Tail += package_size;
         } else {
-            offset = 0;
+            // offset = 0;
             Tail = MappedHead + package_size;
         }
-        return offset;
+        // return offset;
     }
 };
