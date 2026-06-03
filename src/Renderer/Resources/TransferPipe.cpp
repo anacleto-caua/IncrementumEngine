@@ -71,18 +71,36 @@ namespace TransferPipe {
             }
         }
         Packages.resize(koth+1);
+
+        for (auto semaphore : Semaphores) {
+            semaphore = CreateTimelineSemaphore();
+        }
     }
 
     void Destroy() {
         StagingBuffer.Destroy();
+
+        for (auto& semaphore : Semaphores) {
+            DestroyTimelineSemaphore(semaphore);
+        }
     }
 
     bool IsFinished(Ticket ticket) {
-        return ticket.Value == 0;
+        TimelineSemaphore& semaphore = Semaphores[ticket.TargetSemaphore];
+        if (semaphore.LastInqueriedValue < ticket.Value) {
+            QueryTimelineSemaphoreValue(semaphore);
+        }
+        return semaphore.LastInqueriedValue > ticket.Value;
     }
 
     Ticket MakeTicket() {
-        return { .Value = 69 };
+        TimelineSemaphore& semaphore = Semaphores[CurrentSemaphore];
+        Ticket ticket = {
+            .Value = static_cast<u32>(semaphore.LastSignaledValue),
+            .TargetSemaphore = CurrentSemaphore
+        };
+        CurrentSemaphore = ++CurrentSemaphore % PARALLEL_TRANSFERS_COUNT;
+        return ticket;
     }
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type) {
