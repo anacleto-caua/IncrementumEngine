@@ -3,6 +3,9 @@
 #include <queue>
 
 #include "RingBuffer.hpp"
+#include "Renderer/Vk/Vk.hpp"
+#include "Renderer/Vk/SubmissionPile.hpp"
+#include "Renderer/Vk/CommandBufferBlock.hpp"
 
 static constexpr u64 STAGING_BUFFER_SIZE = 10 * 1024 * 1024; // 10 MB
 static constexpr u64 PARALLEL_TRANSFERS_COUNT = 5;
@@ -58,6 +61,9 @@ namespace TransferPipe {
     u32 CurrentSemaphore = 0;
 
     std::vector<std::queue<Package>> Packages;
+    CommandBufferBlock CommandBufferBlock;
+    SubmissionPile SubmissionPile;
+
     RingBuffer<STAGING_BUFFER_SIZE> StagingBuffer;
 
     void Create() {
@@ -97,7 +103,31 @@ namespace TransferPipe {
     }
 
     void Frame() {
-        // ...
+        auto& package_queue = Packages[VkVault::Transfer.ResourceIndex];
+
+        if(!package_queue.empty()) {
+            Package package = package_queue.back();
+            switch(package.Type) {
+                case PackageType::BufferUpdate:
+                    {
+
+                    }
+                    break;
+                case PackageType::BufferUpload:
+                    {
+
+                    }
+                    break;
+                case PackageType::ImageSliceUpdate:
+                    {
+
+                    }
+                    break;
+                default:
+                    assert(false && "unreachable path has been hit");
+                    break;
+            }
+        }
     }
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type) {
