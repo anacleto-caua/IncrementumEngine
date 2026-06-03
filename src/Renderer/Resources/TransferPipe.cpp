@@ -63,14 +63,7 @@ namespace TransferPipe {
     void Create() {
         StagingBuffer.Create();
 
-        // Wonky but works
-        u32 koth = 0;
-        for (auto q : VkVault::Queues) {
-            if (q->Index > koth) {
-                koth = q->Index;
-            }
-        }
-        Packages.resize(koth+1);
+        Packages.resize(VkVault::UniqueQueues.size());
 
         for (auto semaphore : Semaphores) {
             semaphore = CreateTimelineSemaphore();
@@ -115,7 +108,7 @@ namespace TransferPipe {
         // so I could consider just copying this to another buffer in RAM
         // --- RingBuffer.Write(src, size);
 
-        Packages[VkVault::Transfer.Index].push(
+        Packages[VkVault::Transfer.ResourceIndex].push(
             {
                 .Type = PackageType::BufferUpdate,
                 .Size = size,
@@ -136,7 +129,7 @@ namespace TransferPipe {
         assert(type == TransferType::Normal && "transfer type yet unsupported");
 
         u64 read_offset = StagingBuffer.Write(src, size);
-        Packages[VkVault::Transfer.Index].push(
+        Packages[VkVault::Transfer.ResourceIndex].push(
             {
                 .Type = PackageType::BufferUpload,
                 .Size = size,
@@ -156,7 +149,7 @@ namespace TransferPipe {
         assert(type == TransferType::Normal && "transfer type yet unsupported");
 
         u64 read_offset = StagingBuffer.Write(src, size);
-        Packages[VkVault::Transfer.Index].push(
+        Packages[VkVault::Transfer.ResourceIndex].push(
             {
                 .Type = PackageType::ImageSliceUpdate,
                 .Size = size,
