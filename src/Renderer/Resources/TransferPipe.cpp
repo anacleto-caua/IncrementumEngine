@@ -5,26 +5,20 @@
 #include "RingBuffer.hpp"
 
 static constexpr u64 STAGING_BUFFER_SIZE = 10 * 1024 * 1024; // 10 MB
+static constexpr u64 PARALLEL_TRANSFERS_COUNT = 5;
 
 // Supposed to be harsher than the Vulkan limit of 65536 bytes to avoid bad usage
 static constexpr u64 BUFFER_UPDATE_SIZE_LIMIT = 30000;
 
 namespace TransferPipe {
-    struct Ticket {
-        u64 Value;
-    };
-
-    u64 CurrentTransfer = 0; // The last transfer made
-    u64 TransferCounter = 0; // The ammount of transfers registered
-
     enum class PackageType {
         BufferUpdate,
-        BufferCopy,
+        BufferUpload,
         ImageSliceUpdate,
     };
 
     namespace PackageData {
-        struct BufferCopy {
+        struct BufferUpload {
             u64 ReadOffset = 0;
             u64 WriteOffset = 0;
             Buffer::Id DstBuffer;
@@ -43,8 +37,8 @@ namespace TransferPipe {
         };
 
         union Data {
-            BufferCopy BufferCopy;
             BufferUpdate BufferUpdate;
+            BufferUpload BufferUpload;
             ImageSliceUpdate ImageSliceUpdate;
         };
     }
@@ -55,11 +49,19 @@ namespace TransferPipe {
         PackageData::Data Data;
     };
 
+    struct Ticket {
+        u32 Value;
+        u32 TargetSemaphore; // Point to one of the members in the array bellow
+    };
+
+    std::array<TimelineSemaphore, PARALLEL_TRANSFERS_COUNT> Semaphores;
+    u32 CurrentSemaphore = 0;
+
     std::vector<std::queue<Package>> Packages;
-    RingBuffer<STAGING_BUFFER_SIZE> RingBuffer;
+    RingBuffer<STAGING_BUFFER_SIZE> StagingBuffer;
 
     void Create() {
-        RingBuffer.Create();
+        StagingBuffer.Create();
 
         // Wonky but works
         u32 koth = 0;
@@ -72,15 +74,15 @@ namespace TransferPipe {
     }
 
     void Destroy() {
-        RingBuffer.Destroy();
+        StagingBuffer.Destroy();
     }
 
     bool IsFinished(Ticket ticket) {
-        return ticket.Value <= CurrentTransfer;
+        return ticket.Value == 0;
     }
 
     Ticket MakeTicket() {
-        return { .Value = TransferCounter + 1 };
+        return { .Value = 69 };
     }
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type) {
@@ -111,4 +113,45 @@ namespace TransferPipe {
 
         return MakeTicket();
     }
+
+    Ticket QueueBufferUpload(Buffer::Id dst, u64 write_offset, const void* src, u64 size, TransferType type) {
+        assert(type == TransferType::Normal && "transfer type yet unsupported");
+
+        u64 read_offset = StagingBuffer.Write(src, size);
+        Packages[VkVault::Transfer.Index].push(
+            {
+                .Type = PackageType::BufferUpload,
+                .Size = size,
+                .Data = {
+                    .BufferUpload = {
+                        .ReadOffset = read_offset,
+                        .WriteOffset = write_offset,
+                        .DstBuffer = dst
+                    }
+                }
+            });
+
+        return MakeTicket();
+    }
+
+    Ticket QueueImageSliceUpload(Image::Id dst, u32 target_layer, const void* src, u64 size, TransferType type) {
+        assert(type == TransferType::Normal && "transfer type yet unsupported");
+
+        u64 read_offset = StagingBuffer.Write(src, size);
+        Packages[VkVault::Transfer.Index].push(
+            {
+                .Type = PackageType::ImageSliceUpdate,
+                .Size = size,
+                .Data = {
+                    .ImageSliceUpdate = {
+                        .DstImage = dst,
+                        .TargetLayer = target_layer,
+                        .CopyOffset = read_offset
+                    }
+                }
+            });
+
+        return MakeTicket();
+    }
+
 }
