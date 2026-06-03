@@ -78,14 +78,6 @@ namespace TransferPipe {
         }
     }
 
-    bool IsFinished(Ticket ticket) {
-        TimelineSemaphore& semaphore = Semaphores[ticket.TargetSemaphore];
-        if (semaphore.LastInqueriedValue < ticket.Value) {
-            QueryTimelineSemaphoreValue(semaphore);
-        }
-        return semaphore.LastInqueriedValue > ticket.Value;
-    }
-
     Ticket MakeTicket() {
         TimelineSemaphore& semaphore = Semaphores[CurrentSemaphore];
         Ticket ticket = {
@@ -94,6 +86,18 @@ namespace TransferPipe {
         };
         CurrentSemaphore = ++CurrentSemaphore % PARALLEL_TRANSFERS_COUNT;
         return ticket;
+    }
+
+    bool IsFinished(Ticket ticket) {
+        TimelineSemaphore& semaphore = Semaphores[ticket.TargetSemaphore];
+        if (semaphore.LastInqueriedValue < ticket.Value) {
+            QueryTimelineSemaphoreValue(semaphore);
+        }
+        return semaphore.LastInqueriedValue > ticket.Value;
+    }
+
+    void Frame() {
+        // ...
     }
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type) {
