@@ -28,9 +28,9 @@ SubmissionPile& Begin(SubmissionPile& pile);
 
 SubmissionPile& Command(SubmissionPile& pile, VkCommandBuffer command);
 
-SubmissionPile& Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage);
+SubmissionPile& Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
 
-SubmissionPile& Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage);
+SubmissionPile& Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
 
 void End(SubmissionPile& pile);
 
