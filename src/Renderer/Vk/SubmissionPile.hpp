@@ -24,13 +24,13 @@ struct SubmissionPile {
 
 void Reset(SubmissionPile& pile);
 
-SubmissionPile& Begin(SubmissionPile& pile);
+void Begin(SubmissionPile& pile);
 
-SubmissionPile& Command(SubmissionPile& pile, VkCommandBuffer command);
+void Command(SubmissionPile& pile, VkCommandBuffer command);
 
-SubmissionPile& Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
+void Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
 
-SubmissionPile& Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
+void Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
 
 void End(SubmissionPile& pile);
 

@@ -7,35 +7,31 @@ void Reset(SubmissionPile& pile) {
     pile.CmdStart = pile.WaitStart = pile.SignalStart = 0;
 }
 
-SubmissionPile& Begin(SubmissionPile& pile) {
+void Begin(SubmissionPile& pile) {
     pile.CmdStart = pile.CmdCount;
     pile.WaitStart = pile.WaitCount;
     pile.SignalStart = pile.SignalCount;
-    return pile;
 }
 
-SubmissionPile& Command(SubmissionPile& pile, VkCommandBuffer command) {
+void Command(SubmissionPile& pile, VkCommandBuffer command) {
     pile.CommandBuffers[pile.CmdCount++] = {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, nullptr,
         command, 0
     };
-    return pile;
 }
 
-SubmissionPile& Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage) {
+void Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage) {
     pile.WaitSemaphores[pile.WaitCount++] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
         semaphore, value, stage, 0
     };
-    return pile;
 }
 
-SubmissionPile& Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage) {
+void Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage) {
     pile.SignalSemaphores[pile.SignalCount++] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
         semaphore, value, stage, 0
     };
-    return pile;
 }
 
 void End(SubmissionPile& pile) {
