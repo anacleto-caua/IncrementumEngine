@@ -4,6 +4,7 @@
 
 #include "RingBuffer.hpp"
 #include "Renderer/Vk/Vk.hpp"
+#include "Renderer/Vk/VkCmdLean.hpp"
 #include "Renderer/Vk/SubmissionPile.hpp"
 #include "Renderer/Vk/CommandBufferBlock.hpp"
 
@@ -14,51 +15,55 @@ static constexpr u64 PARALLEL_TRANSFERS_COUNT = 5;
 static constexpr u64 BUFFER_UPDATE_SIZE_LIMIT = 30000;
 
 namespace TransferPipe {
+
+    struct Ticket {
+        u32 Value;
+        u32 TargetSemaphore; // Point to one of the members in the array bellow
+    };
+    std::array<TimelineSemaphore, PARALLEL_TRANSFERS_COUNT> SignalSemaphores;
+    u32 CurrentSemaphore = 0;
+
+    // Image transfers need another set of semaphores for layer transition and queue ownership transfers
+    std::array<TimelineSemaphore, PARALLEL_TRANSFERS_COUNT> ImageTransferSemaphores;
+    u32 CurrentImageTransferSemaphore = 0;
+
+    // Tagged union to define each type of package
     enum class PackageType {
         BufferUpdate,
         BufferUpload,
         ImageSliceUpdate,
     };
 
-    namespace PackageData {
-        struct BufferUpload {
-            u64 ReadOffset = 0;
-            u64 WriteOffset = 0;
-            Buffer::Id DstBuffer;
-        };
+    struct BufferUpload {
+        u64 ReadOffset = 0;
+        u64 WriteOffset = 0;
+        Buffer::Id DstBuffer;
+    };
 
-        struct BufferUpdate {
-            u64 WriteOffset = 0;
-            Buffer::Id DstBuffer;
-            const void* Src = nullptr;
-        };
+    struct BufferUpdate {
+        u64 WriteOffset = 0;
+        Buffer::Id DstBuffer;
+        const void* Src = nullptr;
+    };
 
-        struct ImageSliceUpdate {
-            Image::Id DstImage;
-            u32 TargetLayer = 0;
-            u64 CopyOffset = 0;
-        };
+    struct ImageSliceUpdate {
+        Image::Id DstImage;
+        u32 TargetLayer = 0;
+        u64 CopyOffset = 0;
+    };
 
-        union Data {
-            BufferUpdate BufferUpdate;
-            BufferUpload BufferUpload;
-            ImageSliceUpdate ImageSliceUpdate;
-        };
-    }
+    union Data {
+        BufferUpdate BufferUpdate;
+        BufferUpload BufferUpload;
+        ImageSliceUpdate ImageSliceUpdate;
+    };
 
     struct Package {
         PackageType Type;
         u64 Size = 0;
-        PackageData::Data Data;
+        Ticket TicketToSignal;
+        Data Data;
     };
-
-    struct Ticket {
-        u32 Value;
-        u32 TargetSemaphore; // Point to one of the members in the array bellow
-    };
-
-    std::array<TimelineSemaphore, PARALLEL_TRANSFERS_COUNT> Semaphores;
-    u32 CurrentSemaphore = 0;
 
     std::vector<std::queue<Package>> Packages;
     CommandBufferBlock CommandBufferBlock;
@@ -71,7 +76,10 @@ namespace TransferPipe {
 
         Packages.resize(VkVault::UniqueQueues.size());
 
-        for (auto& semaphore : Semaphores) {
+        for (auto& semaphore : SignalSemaphores) {
+            semaphore = CreateTimelineSemaphore();
+        }
+        for (auto& semaphore : ImageTransferSemaphores) {
             semaphore = CreateTimelineSemaphore();
         }
     }
@@ -79,13 +87,16 @@ namespace TransferPipe {
     void Destroy() {
         StagingBuffer.Destroy();
 
-        for (auto& semaphore : Semaphores) {
+        for (auto& semaphore : SignalSemaphores) {
+            DestroyTimelineSemaphore(semaphore);
+        }
+        for (auto& semaphore : ImageTransferSemaphores) {
             DestroyTimelineSemaphore(semaphore);
         }
     }
 
     Ticket MakeTicket() {
-        TimelineSemaphore& semaphore = Semaphores[CurrentSemaphore];
+        TimelineSemaphore& semaphore = SignalSemaphores[CurrentSemaphore];
         Ticket ticket = {
             .Value = static_cast<u32>(semaphore.LastSignaledValue),
             .TargetSemaphore = CurrentSemaphore
@@ -95,7 +106,7 @@ namespace TransferPipe {
     }
 
     bool IsFinished(Ticket ticket) {
-        TimelineSemaphore& semaphore = Semaphores[ticket.TargetSemaphore];
+        TimelineSemaphore& semaphore = SignalSemaphores[ticket.TargetSemaphore];
         if (semaphore.LastInqueriedValue < ticket.Value) {
             QueryTimelineSemaphoreValue(semaphore);
         }
@@ -103,31 +114,72 @@ namespace TransferPipe {
     }
 
     void Frame() {
+        // Since we are doing just the fire and forget submission stuff for now
         auto& package_queue = Packages[VkVault::Transfer.ResourceIndex];
 
-        if(!package_queue.empty()) {
-            Package package = package_queue.back();
+        Begin(SubmissionPile);
+
+        while(!package_queue.empty()) {
+            Package& package = package_queue.back();
+            TimelineSemaphore& semaphore = SignalSemaphores[package.TicketToSignal.TargetSemaphore];
+
+            // Guarantee submission order
+            Wait(SubmissionPile, semaphore.Handle, package.TicketToSignal.Value-1);
+            Signal(SubmissionPile, semaphore.Handle, package.TicketToSignal.Value);
+
+            // Prepare a command
+            VkCommandBuffer cmd = GetNext(CommandBufferBlock);
+            VkCmdLean::Begin(cmd);
+
+            // Tagged union stuff
             switch(package.Type) {
                 case PackageType::BufferUpdate:
                     {
-
+                        BufferUpdate update_info = package.Data.BufferUpdate;
+                        vkCmdUpdateBuffer(
+                            cmd,
+                            Buffer::Get(update_info.DstBuffer)->Buffer,
+                            update_info.WriteOffset,
+                            package.Size,
+                            update_info.Src
+                        );
                     }
                     break;
                 case PackageType::BufferUpload:
                     {
+                        BufferUpload upload_info = package.Data.BufferUpload;
 
+                        VkBufferCopy copy_region {};
+                        copy_region.srcOffset = upload_info.ReadOffset;
+                        copy_region.dstOffset = upload_info.WriteOffset;
+                        copy_region.size = package.Size;
+
+                        vkCmdCopyBuffer(
+                            cmd,
+                            Buffer::Get(StagingBuffer.Buffer)->Buffer,
+                            Buffer::Get(upload_info.DstBuffer)->Buffer,
+                            1,
+                            &copy_region
+                        );
                     }
                     break;
                 case PackageType::ImageSliceUpdate:
                     {
-
+                        assert(false && "unimplemented method");
                     }
                     break;
                 default:
                     assert(false && "unreachable path has been hit");
                     break;
             }
+
+            // End the command
+            VkCmdLean::End(cmd);
+            Command(SubmissionPile, cmd);
         }
+
+        // Finish the submission pile
+        End(SubmissionPile);
     }
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type) {
@@ -142,10 +194,12 @@ namespace TransferPipe {
         // so I could consider just copying this to another buffer in RAM
         // --- RingBuffer.Write(src, size);
 
+        auto ticket = MakeTicket();
         Packages[VkVault::Transfer.ResourceIndex].push(
             {
                 .Type = PackageType::BufferUpdate,
                 .Size = size,
+                .TicketToSignal = ticket,
                 .Data = {
                     .BufferUpdate = {
                         .WriteOffset = offset,
@@ -156,17 +210,19 @@ namespace TransferPipe {
             }
         );
 
-        return MakeTicket();
+        return ticket;
     }
 
     Ticket QueueBufferUpload(Buffer::Id dst, u64 write_offset, const void* src, u64 size, TransferType type) {
         assert(type == TransferType::Normal && "transfer type yet unsupported");
 
+        auto ticket = MakeTicket();
         u64 read_offset = StagingBuffer.Write(src, size);
         Packages[VkVault::Transfer.ResourceIndex].push(
             {
                 .Type = PackageType::BufferUpload,
                 .Size = size,
+                .TicketToSignal = ticket,
                 .Data = {
                     .BufferUpload = {
                         .ReadOffset = read_offset,
@@ -176,17 +232,19 @@ namespace TransferPipe {
                 }
             });
 
-        return MakeTicket();
+        return ticket;
     }
 
     Ticket QueueImageSliceUpload(Image::Id dst, u32 target_layer, const void* src, u64 size, TransferType type) {
         assert(type == TransferType::Normal && "transfer type yet unsupported");
 
+        auto ticket = MakeTicket();
         u64 read_offset = StagingBuffer.Write(src, size);
         Packages[VkVault::Transfer.ResourceIndex].push(
             {
                 .Type = PackageType::ImageSliceUpdate,
                 .Size = size,
+                .TicketToSignal = ticket,
                 .Data = {
                     .ImageSliceUpdate = {
                         .DstImage = dst,
@@ -196,7 +254,6 @@ namespace TransferPipe {
                 }
             });
 
-        return MakeTicket();
+        return ticket;
     }
-
 }
