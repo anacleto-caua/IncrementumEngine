@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Vk.hpp"
 #include "Renderer/VkVault.hpp"
 
 constexpr u64 MAX_SUBMITS = 32;
@@ -25,15 +26,15 @@ struct SubmissionPile {
 void Reset(SubmissionPile& pile);
 
 void Begin(SubmissionPile& pile);
+void End(SubmissionPile& pile);
 
 void Command(SubmissionPile& pile, VkCommandBuffer command);
 
 void Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
-
 void Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
 
-void End(SubmissionPile& pile);
+void Wait(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFlags2 stage = 0);
+void Signal(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFlags2 stage = 0);
 
 void SubmitPile(QueueContext& ctx, SubmissionPile& pile, VkFence execution_fence);
-
 void SubmitMultiplePiles(QueueContext& ctx, SubmissionPile* piles, u64 pile_count, VkFence execution_fence);

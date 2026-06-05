@@ -13,6 +13,19 @@ void Begin(SubmissionPile& pile) {
     pile.SignalStart = pile.SignalCount;
 }
 
+void End(SubmissionPile& pile) {
+    u64 command_quantity = pile.CmdCount - pile.CmdStart;
+    u64 wait_semaphores_quantity = pile.WaitCount - pile.WaitStart;
+    u64 signal_semaphores_quantity = pile.SignalCount - pile.SignalStart;
+
+    pile.Submits[pile.SubmitCount++] = {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO_2, nullptr, 0,
+        static_cast<u32>(wait_semaphores_quantity), wait_semaphores_quantity > 0 ? &pile.WaitSemaphores[pile.WaitStart] : nullptr,
+        static_cast<u32>(command_quantity), command_quantity > 0 ? &pile.CommandBuffers[pile.CmdStart] : nullptr,
+        static_cast<u32>(signal_semaphores_quantity), signal_semaphores_quantity > 0 ? &pile.SignalSemaphores[pile.SignalStart] : nullptr
+    };
+}
+
 void Command(SubmissionPile& pile, VkCommandBuffer command) {
     pile.CommandBuffers[pile.CmdCount++] = {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, nullptr,
@@ -34,17 +47,12 @@ void Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineSt
     };
 }
 
-void End(SubmissionPile& pile) {
-    u64 command_quantity = pile.CmdCount - pile.CmdStart;
-    u64 wait_semaphores_quantity = pile.WaitCount - pile.WaitStart;
-    u64 signal_semaphores_quantity = pile.SignalCount - pile.SignalStart;
+void Wait(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFlags2 stage) {
+    Wait(pile, semaphore.Handle, semaphore.LastSignaledValue, stage);
+}
 
-    pile.Submits[pile.SubmitCount++] = {
-        VK_STRUCTURE_TYPE_SUBMIT_INFO_2, nullptr, 0,
-        static_cast<u32>(wait_semaphores_quantity), wait_semaphores_quantity > 0 ? &pile.WaitSemaphores[pile.WaitStart] : nullptr,
-        static_cast<u32>(command_quantity), command_quantity > 0 ? &pile.CommandBuffers[pile.CmdStart] : nullptr,
-        static_cast<u32>(signal_semaphores_quantity), signal_semaphores_quantity > 0 ? &pile.SignalSemaphores[pile.SignalStart] : nullptr
-    };
+void Signal(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFlags2 stage) {
+    Signal(pile, semaphore.Handle, ++semaphore.LastSignaledValue, stage);
 }
 
 void SubmitPile(QueueContext& ctx, SubmissionPile& pile, VkFence execution_fence) {
