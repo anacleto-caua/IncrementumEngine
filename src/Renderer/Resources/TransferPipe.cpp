@@ -135,7 +135,7 @@ namespace TransferPipe {
             switch(package.Type) {
                 case PackageType::BufferUpdate:
                     {
-                        BufferUpdate update_info = package.Data.BufferUpdate;
+                        BufferUpdate& update_info = package.Data.BufferUpdate;
                         vkCmdUpdateBuffer(
                             cmd,
                             Buffer::Get(update_info.DstBuffer)->Buffer,
@@ -147,7 +147,7 @@ namespace TransferPipe {
                     break;
                 case PackageType::BufferUpload:
                     {
-                        BufferUpload upload_info = package.Data.BufferUpload;
+                        BufferUpload& upload_info = package.Data.BufferUpload;
 
                         VkBufferCopy copy_region {};
                         copy_region.srcOffset = upload_info.ReadOffset;
