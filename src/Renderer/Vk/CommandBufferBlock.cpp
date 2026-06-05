@@ -4,10 +4,10 @@
 
 u64 DEFAULT_COMMAND_BUFFER_RESERVE_COUNT = 16;
 
-void Create(CommandBufferBlock& block, QueueContext& ctx) {
+void Create(CommandBufferBlock& block, QueueContext* ctx) {
     VkCommandPoolCreateInfo pool_info {};
     pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    pool_info.queueFamilyIndex = ctx.Index;
+    pool_info.queueFamilyIndex = ctx->Index;
     pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
 
     vkCreateCommandPool(VkVault::Device, &pool_info, nullptr, &block.Pool);

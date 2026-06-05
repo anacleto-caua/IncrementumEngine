@@ -8,7 +8,7 @@ struct CommandBufferBlock {
     u32 UsedCount = 0;
 };
 
-void Create(CommandBufferBlock& block, QueueContext& ctx);
+void Create(CommandBufferBlock& block, QueueContext* ctx);
 void Destroy(CommandBufferBlock& block);
 
 void Reset(CommandBufferBlock& block);
