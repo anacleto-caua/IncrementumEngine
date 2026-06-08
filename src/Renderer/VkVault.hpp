@@ -59,9 +59,6 @@ namespace VkVault {
     VkCommandBuffer SingleTimeCmdBegin(QueueContext& ctx);
     void SingleTimeCmdSubmit(QueueContext& ctx, VkCommandBuffer cmd);
 
-    VkCommandBuffer GetCommand(QueueContext& ctx);
-    void PushPendingCommand(QueueContext& ctx, VkCommandBuffer cmd);
-
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities();
 }
 
