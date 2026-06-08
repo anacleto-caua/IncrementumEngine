@@ -35,7 +35,7 @@ public:
     u64 Write(const void* src, u64 upload_size) {
         assert(upload_size < SIZE && "single queued upload is bigger than staging buffer itself");
         u64 neck_size = static_cast<u64>((MappedHead + SIZE) - Head);
-        u64 write_offset = Head - MappedHead;
+        u64 write_offset = static_cast<u64>(Head - MappedHead);
         if (upload_size <= neck_size) {
             memcpy(Head, src, upload_size);
             Head += upload_size;
