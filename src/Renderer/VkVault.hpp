@@ -27,10 +27,9 @@ struct QueueContext {
     VkQueue Queue = VK_NULL_HANDLE;
 };
 
+// This seem's messy and sub-optimal
 struct QueueResourcePool {
     VkCommandPool MainCmdPool = VK_NULL_HANDLE;
-    std::vector<VkCommandBuffer> PendingCommands = {};
-    std::vector<VkCommandBuffer> FreeCommands = {};
 };
 
 // Vulkan Vault

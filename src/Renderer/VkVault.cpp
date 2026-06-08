@@ -449,7 +449,7 @@ namespace VkVault {
         return IncResult::SUCCESS;
     }
 
-    IncResult CreateQueuesResourcePool() {
+    IncResult CreateQueuesResource() {
         QueueResources.resize(UniqueQueues.size());
 
         // Create the Queues resources
@@ -538,7 +538,7 @@ namespace VkVault {
         PickPresentMode();
         PickQueues();
         CreateLogicalDevice();
-        CreateQueuesResourcePool();
+        CreateQueuesResource();
         CreateVmaAllocator();
         return IncResult::SUCCESS;
     }
@@ -548,25 +548,6 @@ namespace VkVault {
 
         for (QueueResourcePool r :  QueueResources) {
             if (r.MainCmdPool) { vkDestroyCommandPool(Device, r.MainCmdPool, nullptr); }
-
-            // Just deleting pending commands could be rather problematic - I think
-            if (!r.PendingCommands.empty()) {
-                analog::warn("pending command buffer was deleted");
-                vkFreeCommandBuffers(
-                    Device,
-                    r.MainCmdPool,
-                    static_cast<u32>(r.PendingCommands.size()),
-                    r.PendingCommands.data()
-                );
-            }
-            if (!r.FreeCommands.empty()) {
-                vkFreeCommandBuffers(
-                    Device,
-                    r.MainCmdPool,
-                    static_cast<u32>(r.FreeCommands.size()),
-                    r.FreeCommands.data()
-                );
-            }
         }
 
         if (VmaAllocator) { vmaDestroyAllocator(VmaAllocator); }
@@ -610,22 +591,6 @@ namespace VkVault {
         vkQueueWaitIdle(ctx.Queue);
 
         vkFreeCommandBuffers(Device, QueueResources[ctx.ResourceIndex].MainCmdPool, 1, &cmd);
-    }
-
-    VkCommandBuffer GetCommand(QueueContext& ctx) {
-        QueueResourcePool& q = QueueResources[ctx.ResourceIndex];
-        if (q.FreeCommands.empty()) {
-            return SingleTimeCmdBegin(ctx);
-        }
-
-        auto cmd = q.FreeCommands.back();
-        q.FreeCommands.pop_back();
-        return cmd;
-    }
-
-    void PushPendingCommand(QueueContext& ctx, VkCommandBuffer cmd) {
-        vkEndCommandBuffer(cmd);
-        QueueResources[ctx.ResourceIndex].PendingCommands.push_back(cmd);
     }
 
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities() {
