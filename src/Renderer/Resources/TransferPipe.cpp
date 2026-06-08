@@ -132,6 +132,7 @@ namespace TransferPipe {
         Begin(TransferSubmissionPile);
 
         while(!PackageQueue.empty()) {
+            u64 ring_buffer_read_size = 0;
             Package& package = PackageQueue.back();
             TimelineSemaphore& ticket_semaphore = SignalSemaphores[package.TicketToSignal.TargetSemaphore];
 
@@ -163,6 +164,7 @@ namespace TransferPipe {
                 case PackageType::BufferUpload:
                     {
                         BufferUpload& upload_info = package.Data.BufferUpload;
+                        ring_buffer_read_size += package.Size;
 
                         VkCommandBuffer cmd = GetNext(TransferCommandBufferBlock);
                         VkCmdLean::Begin(cmd);
@@ -192,6 +194,7 @@ namespace TransferPipe {
                     {
                         ImageSliceUpdate& slice_info = package.Data.ImageSliceUpdate;
                         Image::Value* target_image = Image::Get(slice_info.DstImage);
+                        ring_buffer_read_size += package.Size;
 
                         TimelineSemaphore& image_sync_semaphore = ImageTransferSemaphores[CurrentSemaphore++];
 
@@ -351,6 +354,7 @@ namespace TransferPipe {
                     assert(false && "unreachable path has been hit");
                     break;
             }
+            StagingBuffer.Read(ring_buffer_read_size);
         }
 
         // Finish the submission pile
