@@ -1,6 +1,7 @@
 #pragma once
 
-#include "ResourceManager.hpp"
+#include "Image.hpp"
+#include "Buffer.hpp"
 
 namespace TransferPipe {
     struct Ticket;
@@ -22,5 +23,7 @@ namespace TransferPipe {
      */
     void Frame();
 
-    Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type = TransferType::Normal);
+    Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType type = TransferType::Normal);
+    Ticket QueueBufferUpload(Buffer::Id dst, u64 write_offset, const void* src, u64 size, TransferType type = TransferType::Normal);
+    Ticket QueueImageSliceUpload(Image::Id dst, u32 target_layer, const void* src, u64 size, TransferType type = TransferType::Normal);
 }
