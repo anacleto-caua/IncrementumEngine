@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include "Renderer/VkVault.hpp"
 
 namespace PipelineDefaults {
     inline constexpr VkPipelineVertexInputStateCreateInfo DefaultPipelineVertexInputStateCreateInfo = {
@@ -70,18 +70,20 @@ namespace PipelineDefaults {
         .flags = 0,
         .logicOpEnable = VK_FALSE,
         .logicOp = VK_LOGIC_OP_COPY,
-        .attachmentCount = 0,
-        .pAttachments = nullptr,
+        .attachmentCount = VkVault::ColorBlendAttachmentState.size(),
+        .pAttachments = VkVault::ColorBlendAttachmentState.data(),
         .blendConstants = {0.0f, 0.0f, 0.0f, 0.0f}
     };
 
+    inline constexpr VkViewport DummyViewport = {0.0f, 0.0f, 100.0f, 100.0f, 0.0f, 1.0f};
+    inline constexpr VkRect2D DummyScissor = {{0, 0}, {100, 100}};
     inline constexpr VkPipelineViewportStateCreateInfo DefaultPipelineViewportStateCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
         .viewportCount = 1,
-        .pViewports = nullptr, // Required field
+        .pViewports = &DummyViewport ,  // Required field
         .scissorCount = 1,
-        .pScissors = nullptr   // Required field
+        .pScissors = &DummyScissor      // Required field
     };
 }
