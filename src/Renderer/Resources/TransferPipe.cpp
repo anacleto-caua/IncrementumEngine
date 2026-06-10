@@ -356,6 +356,10 @@ namespace TransferPipe {
         End(TransferSubmissionPile);
     }
 
+    void Flush() {
+        assert(false && "unimplemented method");
+    }
+
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type) {
         assert(Type == TransferType::Normal && "transfer type yet unsupported");
         assert(size < BUFFER_UPDATE_SIZE_LIMIT && "buffer update queued is bigger than self imposed limit");
