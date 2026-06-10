@@ -8,127 +8,124 @@
 #include "Utils/GlmDefaults.hpp"
 #include "Engine/Core/Input.hpp"
 
-namespace Camera {
-    Camera3D CreateCamera3D(f32 Aspect, f32 Fov, glm::mat4* MVP) {
-        Camera3D cam;
-        cam.FocalLength = 1.0f / tan(glm::radians(Fov) / 2.0f);
-        cam.Position = vec3::ZERO;
-        cam.LookDir = vec3::FORWARD;
-        cam.Model = glm::mat4(1.0f);
-        cam.Projection = glm::perspective(glm::radians(Fov), Aspect, 0.1f, 1000.0f);
-        cam.Projection[1][1] *= -1.0f; // Vulkan Y-flip
-        cam.ModelViewProjection = MVP;
-        return cam;
+Camera3D CreateCamera3D(f32 Aspect, f32 Fov) {
+    Camera3D cam;
+    cam.FocalLength = 1.0f / tan(glm::radians(Fov) / 2.0f);
+    cam.Position = vec3::ZERO;
+    cam.LookDir = vec3::FORWARD;
+    cam.Model = glm::mat4(1.0f);
+    cam.Projection = glm::perspective(glm::radians(Fov), Aspect, 0.1f, 1000.0f);
+    cam.Projection[1][1] *= -1.0f; // Vulkan Y-flip
+    cam.ModelViewProjection = 0;
+    RefreshMVP(cam);
+    return cam;
+}
+
+void RefreshMVP(Camera3D &Camera) {
+    Camera.ModelViewProjection = Camera.Projection * Camera.View * Camera.Model;
+}
+
+void Resize(Camera3D &Camera, f32 NewAspect) {
+    Camera.Projection[0][0] = Camera.FocalLength / NewAspect;
+    RefreshMVP(Camera);
+}
+
+void Move(Camera3D &Camera) {
+    Camera.View = glm::lookAt(Camera.Position, Camera.Position+Camera.LookDir, vec3::UP);
+    RefreshMVP(Camera);
+}
+
+namespace FlyBy {
+    static constexpr f32 SPEED = 20;
+    static constexpr f32 RUNNING_MULT = 3;
+
+    static constexpr f32 PITCH_SENSIBILITY = 10;
+    static constexpr f32 YAW_SENSIBILITY = 15;
+
+    static constexpr f32 PITCH_CLAMP_MIN = -89;
+    static constexpr f32 PITCH_CLAMP_MAX = +89;
+
+    static constexpr f32 YAW_CLAMP_MIN = 0;
+    static constexpr f32 YAW_CLAMP_MAX = 360;
+
+    glm::vec3 FrameMovement = vec3::ZERO;
+
+    f32 Yaw = 0;
+    f32 Pitch = 45;
+
+    bool IsRunning = false;
+
+    Camera3D* Camera;
+
+    void ApplyRotation() {
+        Camera->LookDir.x = glm::cos(glm::radians(Yaw)) * glm::cos(glm::radians(Pitch));
+        Camera->LookDir.y = glm::sin(glm::radians(Pitch));
+        Camera->LookDir.z = glm::sin(glm::radians(Yaw)) * glm::cos(glm::radians(Pitch));
+        Camera->LookDir = glm::normalize(Camera->LookDir);
     }
 
-    void RefreshMVP(Camera3D &Camera) {
-        if (Camera.ModelViewProjection != nullptr) {
-            *Camera.ModelViewProjection = Camera.Projection * Camera.View * Camera.Model;
+    void Create(Camera3D &bCamera) {
+        Camera = &bCamera;
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Forward, [](void){ FrameMovement+=vec3::FORWARD; });
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Backward, [](void){ FrameMovement-=vec3::FORWARD; });
+
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Right, [](void){ FrameMovement+=vec3::RIGHT; });
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Left, [](void){ FrameMovement-=vec3::RIGHT; });
+
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Up, [](void){ FrameMovement+=vec3::UP; });
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Down, [](void){ FrameMovement-=vec3::UP; });
+
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Shift, Input::ActionType::Press, [](void){ IsRunning = true; });
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Shift, Input::ActionType::Release, [](void){ IsRunning = false; });
+        Update(0);
+        ApplyRotation();
+    }
+
+    void Update(f32 DeltaTime) {
+        bool IsDirty = false;
+
+        if (FrameMovement != vec3::ZERO) {
+            FrameMovement = glm::normalize(FrameMovement);
+
+            glm::vec3 LocalFwd = Camera->LookDir;
+            LocalFwd = glm::normalize(LocalFwd);
+
+            glm::vec3 LocalRight = glm::normalize(glm::cross(vec3::UP, LocalFwd));
+
+            glm::vec3 AllignedMovement =
+                (LocalRight * FrameMovement.x) +
+                (LocalFwd * FrameMovement.z) +
+                (vec3::UP * FrameMovement.y);
+            AllignedMovement = glm::normalize(AllignedMovement);
+
+            Camera->Position += AllignedMovement * SPEED * DeltaTime * ( IsRunning ? RUNNING_MULT : 1 );
+            FrameMovement = vec3::ZERO;
+            IsDirty = true;
         }
-    }
 
-    void Resize(Camera3D &Camera, f32 NewAspect) {
-        Camera.Projection[0][0] = Camera.FocalLength / NewAspect;
-        RefreshMVP(Camera);
-    }
+        if (Input::Mouse::XDelta != 0 || Input::Mouse::YDelta != 0) {
+            Pitch += Input::Mouse::YDelta * PITCH_SENSIBILITY * DeltaTime;
+            Yaw -= Input::Mouse::XDelta * YAW_SENSIBILITY * DeltaTime;
 
-    void Move(Camera3D &Camera) {
-        Camera.View = glm::lookAt(Camera.Position, Camera.Position+Camera.LookDir, vec3::UP);
-        RefreshMVP(Camera);
-    }
+            if (Pitch < PITCH_CLAMP_MIN) {
+                Pitch = PITCH_CLAMP_MIN;
+            } else if (Pitch > PITCH_CLAMP_MAX) {
+                Pitch = PITCH_CLAMP_MAX;
+            }
 
-    namespace FlyBy {
-        static constexpr f32 SPEED = 20;
-        static constexpr f32 RUNNING_MULT = 3;
+            // It's more a wrap but well...
+            if (Yaw < YAW_CLAMP_MIN) {
+                Yaw = YAW_CLAMP_MAX;
+            } else if (Yaw > YAW_CLAMP_MAX) {
+                Yaw = YAW_CLAMP_MIN;
+            }
 
-        static constexpr f32 PITCH_SENSIBILITY = 10;
-        static constexpr f32 YAW_SENSIBILITY = 15;
-
-        static constexpr f32 PITCH_CLAMP_MIN = -89;
-        static constexpr f32 PITCH_CLAMP_MAX = +89;
-
-        static constexpr f32 YAW_CLAMP_MIN = 0;
-        static constexpr f32 YAW_CLAMP_MAX = 360;
-
-        glm::vec3 FrameMovement = vec3::ZERO;
-
-        f32 Yaw = 0;
-        f32 Pitch = 45;
-
-        bool IsRunning = false;
-
-        Camera3D* Camera;
-
-        void ApplyRotation() {
-            Camera->LookDir.x = glm::cos(glm::radians(Yaw)) * glm::cos(glm::radians(Pitch));
-            Camera->LookDir.y = glm::sin(glm::radians(Pitch));
-            Camera->LookDir.z = glm::sin(glm::radians(Yaw)) * glm::cos(glm::radians(Pitch));
-            Camera->LookDir = glm::normalize(Camera->LookDir);
-        }
-
-        void Create(Camera3D &bCamera) {
-            Camera = &bCamera;
-            Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Forward, [](void){ FrameMovement+=vec3::FORWARD; });
-            Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Backward, [](void){ FrameMovement-=vec3::FORWARD; });
-
-            Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Right, [](void){ FrameMovement+=vec3::RIGHT; });
-            Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Left, [](void){ FrameMovement-=vec3::RIGHT; });
-
-            Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Up, [](void){ FrameMovement+=vec3::UP; });
-            Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Down, [](void){ FrameMovement-=vec3::UP; });
-
-            Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Shift, Input::ActionType::Press, [](void){ IsRunning = true; });
-            Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Shift, Input::ActionType::Release, [](void){ IsRunning = false; });
-            Update(0);
             ApplyRotation();
+            IsDirty = true;
         }
 
-        void Update(f32 DeltaTime) {
-            bool IsDirty = false;
-
-            if (FrameMovement != vec3::ZERO) {
-                FrameMovement = glm::normalize(FrameMovement);
-
-                glm::vec3 LocalFwd = Camera->LookDir;
-                LocalFwd = glm::normalize(LocalFwd);
-
-                glm::vec3 LocalRight = glm::normalize(glm::cross(vec3::UP, LocalFwd));
-
-                glm::vec3 AllignedMovement =
-                    (LocalRight * FrameMovement.x) +
-                    (LocalFwd * FrameMovement.z) +
-                    (vec3::UP * FrameMovement.y);
-                AllignedMovement = glm::normalize(AllignedMovement);
-
-                Camera->Position += AllignedMovement * SPEED * DeltaTime * ( IsRunning ? RUNNING_MULT : 1 );
-                FrameMovement = vec3::ZERO;
-                IsDirty = true;
-            }
-
-            if (Input::Mouse::XDelta != 0 || Input::Mouse::YDelta != 0) {
-                Pitch += Input::Mouse::YDelta * PITCH_SENSIBILITY * DeltaTime;
-                Yaw -= Input::Mouse::XDelta * YAW_SENSIBILITY * DeltaTime;
-
-                if (Pitch < PITCH_CLAMP_MIN) {
-                    Pitch = PITCH_CLAMP_MIN;
-                } else if (Pitch > PITCH_CLAMP_MAX) {
-                    Pitch = PITCH_CLAMP_MAX;
-                }
-
-                // It's more a wrap but well...
-                if (Yaw < YAW_CLAMP_MIN) {
-                    Yaw = YAW_CLAMP_MAX;
-                } else if (Yaw > YAW_CLAMP_MAX) {
-                    Yaw = YAW_CLAMP_MIN;
-                }
-
-                ApplyRotation();
-                IsDirty = true;
-            }
-
-            if (IsDirty) {
-                Move(*Camera);
-            }
+        if (IsDirty) {
+            Move(*Camera);
         }
     }
 }
