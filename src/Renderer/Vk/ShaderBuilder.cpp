@@ -8,15 +8,15 @@ const char* ENTRY_POINT_NAME = "main";
 VkPipelineShaderStageCreateInfo CreateShaderStage(
     VkShaderStageFlagBits stage,
     std::string filename,
-    std::vector<char> &shader_code
+    std::vector<u32> &shader_code
 ) {
-    u32 shader_size;
-    IO::BinaryRead(filename, shader_code, shader_size);
+    u32 shader_size_in_bytes;
+    IO::BinaryRead(filename, shader_code, shader_size_in_bytes);
 
     VkShaderModuleCreateInfo shader_module_create_info {};
     shader_module_create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    shader_module_create_info.codeSize = shader_size;
-    shader_module_create_info.pCode = reinterpret_cast<const u32*>(shader_code.data());
+    shader_module_create_info.codeSize = shader_size_in_bytes;
+    shader_module_create_info.pCode =shader_code.data();
 
     VkShaderModule shader_module {};
     if (vkCreateShaderModule(VkVault::Device, &shader_module_create_info, nullptr, &shader_module) != VK_SUCCESS) {

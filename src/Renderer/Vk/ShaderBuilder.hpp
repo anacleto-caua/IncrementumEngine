@@ -8,5 +8,5 @@
 VkPipelineShaderStageCreateInfo CreateShaderStage(
     VkShaderStageFlagBits stage,
     std::string filename,
-    std::vector<char> &shader_code
+    std::vector<u32> &shader_code
 );

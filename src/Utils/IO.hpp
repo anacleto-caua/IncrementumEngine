@@ -1,23 +1,26 @@
 #pragma once
 
 #include <vector>
-#include <cstdint>
 #include <fstream>
-#include <stdexcept>
 
 namespace IO {
-    static inline void BinaryRead(const std::string &filename, std::vector<char> &buffer, uint32_t &file_size) {
+    static inline IncResult BinaryRead(const std::string &filename, std::vector<u32> &buffer, u32 &file_size_bytes) {
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
         if (!file.is_open()) {
-            throw std::runtime_error("Failed to open file: " + filename);
+            analog::critical("failed to open file: " + filename);
+            return IncResult::FAIL;
         }
 
-        file_size = (uint32_t)file.tellg();
-        buffer.reserve(file_size);
+        file_size_bytes = (u32)file.tellg();
+
+        u32 vector_size_words = (file_size_bytes + 3) / 4;
+        buffer.resize(vector_size_words);
 
         file.seekg(0);
-        file.read(buffer.data(), file_size);
+        file.read(reinterpret_cast<char*>(buffer.data()), file_size_bytes);
         file.close();
+
+        return IncResult::SUCCESS;
     }
 }
