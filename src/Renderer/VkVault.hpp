@@ -51,7 +51,24 @@ namespace VkVault {
     inline std::vector<QueueResourcePool> QueueResources;
     inline std::vector<QueueContext*> UniqueQueues;
 
-    inline std::array<VkFormat, 1> ColorAttachmentFormats { }; // Will be filled by the SurfaceFormat.format
+    inline constexpr u32 COLOR_ATTACHMENT_FORMAT_COUNT = 1;
+    inline std::array<VkFormat, COLOR_ATTACHMENT_FORMAT_COUNT> ColorAttachmentFormats { }; // Will be filled by the SurfaceFormat.format
+    inline std::array<VkPipelineColorBlendAttachmentState, COLOR_ATTACHMENT_FORMAT_COUNT> ColorBlendAttachmentState = {{
+        {
+            .blendEnable = VK_TRUE,
+            .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+            .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+            .colorBlendOp = VK_BLEND_OP_ADD,
+            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+            .alphaBlendOp = VK_BLEND_OP_ADD,
+            .colorWriteMask =
+                VK_COLOR_COMPONENT_R_BIT |
+                VK_COLOR_COMPONENT_G_BIT |
+                VK_COLOR_COMPONENT_B_BIT |
+                VK_COLOR_COMPONENT_A_BIT
+        }
+    }};
 
     IncResult Create();
     void Destroy();
