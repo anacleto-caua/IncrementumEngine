@@ -5,6 +5,7 @@
 
 #include "VkVault.hpp"
 #include "Passes/ImGuiPass.hpp"
+#include "Passes/TerrainPass.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Renderer/Resources/ResourceManager.hpp"
 
@@ -142,6 +143,7 @@ namespace Renderer {
         };
 
         INC_CHECK(ImGuiPass::Create(), "failed to create imgui context");
+        //INC_CHECK(TerrainPass::Create(), "failed to create terrain pass");
 
         return IncResult::SUCCESS;
     }
@@ -155,6 +157,7 @@ namespace Renderer {
             if (frame.ImageAvailable) { vkDestroySemaphore(VkVault::Device, frame.ImageAvailable, nullptr); }
         }
 
+        //TerrainPass::Destroy();
         ImGuiPass::Destroy();
         Swapchain::Destroy();
         DepthBuffer::Destroy();
