@@ -42,6 +42,6 @@ namespace Engine {
     }
 
     void ResizeEvent(i32 width, i32 height) {
-        analog::info("resize event - w: {} - h: {}", width, height);
+        Renderer::Resize(width, height);
     }
 }
