@@ -4,7 +4,10 @@
 #include "Buffer.hpp"
 
 namespace TransferPipe {
-    struct Ticket;
+    struct Ticket {
+        u32 Value;
+        u32 TargetSemaphore; // Point to one of the members in the SignalSemaphores array
+    };
 
     enum class TransferType {
         Normal,

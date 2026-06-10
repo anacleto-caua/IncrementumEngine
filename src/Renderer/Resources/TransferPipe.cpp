@@ -16,11 +16,6 @@ static constexpr u64 PARALLEL_TRANSFERS_COUNT = 5;
 static constexpr u64 BUFFER_UPDATE_SIZE_LIMIT = 30000;
 
 namespace TransferPipe {
-
-    struct Ticket {
-        u32 Value;
-        u32 TargetSemaphore; // Point to one of the members in the array bellow
-    };
     std::array<TimelineSemaphore, PARALLEL_TRANSFERS_COUNT> SignalSemaphores;
     u32 CurrentSemaphore = 0;
 
