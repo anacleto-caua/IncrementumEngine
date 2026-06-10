@@ -13,7 +13,7 @@ struct Camera3D {
     glm::mat4 ModelViewProjection;
 };
 
-Camera3D CreateCamera3D(f32 Aspect, f32 Fov, glm::mat4 MVP);
+Camera3D CreateCamera3D(f32 Aspect, f32 Fov);
 void RefreshMVP(Camera3D &Camera);
 void Resize(Camera3D &Camera, f32 NewAspect);
 void Move(Camera3D &Camera);
