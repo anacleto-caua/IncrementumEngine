@@ -3,12 +3,13 @@
 #include "Utils/IO.hpp"
 #include "Renderer/VkVault.hpp"
 
+const char* ENTRY_POINT_NAME = "main";
+
 VkPipelineShaderStageCreateInfo CreateShaderStage(
-        VkShaderStageFlagBits stage,
-        std::string filename,
-        std::vector<char> &shader_code
-    )
-{
+    VkShaderStageFlagBits stage,
+    std::string filename,
+    std::vector<char> &shader_code
+) {
     u32 shader_size;
     IO::BinaryRead(filename, shader_code, shader_size);
 
@@ -26,7 +27,7 @@ VkPipelineShaderStageCreateInfo CreateShaderStage(
     shader_stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     shader_stage.stage = stage;
     shader_stage.module = shader_module;
-    shader_stage.pName = "main";
+    shader_stage.pName = ENTRY_POINT_NAME;
 
     return shader_stage;
 }
