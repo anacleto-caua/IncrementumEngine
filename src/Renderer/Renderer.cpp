@@ -9,6 +9,7 @@
 #include "Renderer/Resources/ResourceManager.hpp"
 
 namespace Renderer {
+    // Frame data
     struct FrameData {
         VkCommandPool CmdPool = VK_NULL_HANDLE;
         VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
@@ -370,6 +371,10 @@ namespace Renderer {
         vkDeviceWaitIdle(VkVault::Device);
         Swapchain::Resize(uw, uh);
         DepthBuffer::Resize(uw, uh);
+    }
+
+    void BindCamera(Camera3D* camera) {
+        CurrentCamera = camera;
     }
 
     namespace Swapchain {

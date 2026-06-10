@@ -7,6 +7,8 @@
 #include "TaskScheduler/TaskScheduler.hpp"
 
 namespace Engine {
+    Camera3D MainCamera;
+
     void ResizeEvent(i32 width, i32 height);
 
     IncResult Create() {
@@ -20,6 +22,11 @@ namespace Engine {
             "Couldn't create renderer."
         );
 
+        // Seem's hacky
+        MainCamera = CreateCamera3D(static_cast<f32>(1280)/static_cast<f32>(720), 90);
+        Renderer::BindCamera(&MainCamera);
+        FlyBy::Create(MainCamera);
+
         TaskScheduler::Create();
 
         return IncResult::SUCCESS;
@@ -32,6 +39,9 @@ namespace Engine {
 
             Platform::Update();
             Renderer::Frame();
+
+            // TODO: Add delta time
+            FlyBy::Update(1);
         }
     }
 
