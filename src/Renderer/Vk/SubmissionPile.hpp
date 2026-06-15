@@ -36,5 +36,5 @@ void Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineSt
 void Wait(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFlags2 stage = 0);
 void Signal(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFlags2 stage = 0);
 
-void SubmitPile(QueueContext& ctx, SubmissionPile& pile, VkFence execution_fence);
-void SubmitMultiplePiles(QueueContext& ctx, SubmissionPile* piles, u64 pile_count, VkFence execution_fence);
+void SubmitPile(QueueContext& ctx, SubmissionPile& pile, VkFence execution_fence = VK_NULL_HANDLE);
+void SubmitMultiplePiles(QueueContext& ctx, SubmissionPile* piles, u64 pile_count, VkFence execution_fence = VK_NULL_HANDLE);
