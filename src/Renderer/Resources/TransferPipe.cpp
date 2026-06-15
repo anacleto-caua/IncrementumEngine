@@ -72,7 +72,7 @@ namespace TransferPipe {
 
     RingBuffer<STAGING_BUFFER_SIZE> StagingBuffer;
 
-    void Create() {
+    IncResult Create() {
         StagingBuffer.Create();
 
         for (auto& semaphore : SignalSemaphores) {
@@ -82,12 +82,17 @@ namespace TransferPipe {
             semaphore = CreateTimelineSemaphore();
         }
 
+        Reset(TransferSubmissionPile);
+        Create(TransferCommandBufferBlock, &VkVault::Transfer);
+
         SpecialSubmissionPiles.resize(VkVault::UniqueQueues.size());
         SpecialCommandBufferBlocks.resize(VkVault::UniqueQueues.size());
 
         for (QueueContext* q : VkVault::UniqueQueues) {
+            Reset(SpecialSubmissionPiles[q->ResourceIndex]);
             Create(SpecialCommandBufferBlocks[q->ResourceIndex], q);
         }
+        return IncResult::SUCCESS;
     }
 
     void Destroy() {
@@ -99,6 +104,8 @@ namespace TransferPipe {
         for (auto& semaphore : ImageTransferSemaphores) {
             DestroyTimelineSemaphore(semaphore);
         }
+
+        Destroy(TransferCommandBufferBlock);
 
         for (auto& block : SpecialCommandBufferBlocks) {
             Destroy(block);
@@ -123,6 +130,11 @@ namespace TransferPipe {
         return semaphore.LastInqueriedValue > ticket.Value;
     }
 
+    void WaitOn(Ticket ticket) {
+        WaitOnTimelineSemaphore(SignalSemaphores[ticket.TargetSemaphore], ticket.Value);
+    }
+
+    // This method needs a thing to count how many packages I should enqueue per time.
     void Frame() {
         Begin(TransferSubmissionPile);
 
@@ -198,6 +210,7 @@ namespace TransferPipe {
 
                         SubmissionPile& q1_pile = SpecialSubmissionPiles[target_image->OwnerQueue->ResourceIndex];
                         CommandBufferBlock& q1_block = SpecialCommandBufferBlocks[target_image->OwnerQueue->ResourceIndex];
+                        Begin(q1_pile);
 
                         VkImageSubresourceRange subresource_range {};
                         subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -343,6 +356,7 @@ namespace TransferPipe {
 
                         VkCmdLean::End(cmd_b_q1);
                         Command(q1_pile, cmd_b_q1);
+                        End(q1_pile);
                     }
                     break;
                 default:
@@ -356,8 +370,13 @@ namespace TransferPipe {
         End(TransferSubmissionPile);
     }
 
-    void Flush() {
-        assert(false && "unimplemented method");
+    void FullSubmit() {
+        SubmitPile(VkVault::Transfer, TransferSubmissionPile, VK_NULL_HANDLE);
+        Reset(TransferCommandBufferBlock);
+        for (auto* queue : VkVault::UniqueQueues) {
+            SubmitPile(*queue, SpecialSubmissionPiles[queue->ResourceIndex], VK_NULL_HANDLE);
+            Reset(SpecialCommandBufferBlocks[queue->ResourceIndex]);
+        }
     }
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type) {

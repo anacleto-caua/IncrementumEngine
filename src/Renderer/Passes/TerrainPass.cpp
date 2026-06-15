@@ -65,8 +65,9 @@ namespace TerrainPass {
             std::array<u32, TerrainConfig::Mesh::IndexBufferSize> indices_buffer;
             GenerateIndices(indices_buffer.data());
 
-            TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), TerrainConfig::Mesh::IndexBufferSize);
-            TransferPipe::Flush();
+            TransferPipe::Ticket indices_upload = TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), TerrainConfig::Mesh::IndexBufferSize);
+            TransferPipe::FullSubmit();
+            TransferPipe::WaitOn(indices_upload);
         }
     }
 

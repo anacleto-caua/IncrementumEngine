@@ -15,18 +15,17 @@ namespace TransferPipe {
                         // worse perf wise, use only for data that needs to be available at the current frame
     };
 
-    void Create();
+    IncResult Create();
     void Destroy();
 
     bool IsFinished(Ticket ticket);
+    void WaitOn(Ticket ticket);
 
     /**
-     * Prepares the frames command buffer:
-     * One per Queue Family(Currently only using Graphics and Transfer)
+     * These two methods are poorly defined without any clear usage or future.
      */
     void Frame();
-
-    void Flush();
+    void FullSubmit();
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType type = TransferType::Normal);
     Ticket QueueBufferUpload(Buffer::Id dst, u64 write_offset, const void* src, u64 size, TransferType type = TransferType::Normal);

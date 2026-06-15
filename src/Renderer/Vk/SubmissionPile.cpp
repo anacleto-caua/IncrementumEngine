@@ -56,8 +56,10 @@ void Signal(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFl
 }
 
 void SubmitPile(QueueContext& ctx, SubmissionPile& pile, VkFence execution_fence) {
-    vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence);
-    Reset(pile);
+    if(pile.SubmitCount >= 1) {
+        vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence);
+        Reset(pile);
+    }
 }
 
 void SubmitMultiplePiles(QueueContext& ctx, SubmissionPile* piles, u64 pile_count, VkFence execution_fence) {
