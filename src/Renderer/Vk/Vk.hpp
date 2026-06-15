@@ -14,3 +14,4 @@ void DestroyTimelineSemaphore(TimelineSemaphore& semaphore);
 
 void QueryTimelineSemaphoreValue(TimelineSemaphore& semaphore);
 void SignalTimelineSemaphore(TimelineSemaphore& semaphore, u64 value);
+void WaitOnTimelineSemaphore(TimelineSemaphore& semaphore, u64 wait_value);
