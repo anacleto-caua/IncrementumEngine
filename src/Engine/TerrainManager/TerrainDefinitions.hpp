@@ -58,7 +58,7 @@ namespace TerrainConfig {
         constexpr u64 LayerSizeBytes = PixelsPerLayer * sizeof(u16);
 
         // The actual size of the global Texture2DArray
-        constexpr u64   TotalTextureArraySize = LayerSizeBytes * Streaming::MaxActiveChunks;
+        constexpr u64 TotalTextureArraySize = LayerSizeBytes * Streaming::MaxActiveChunks;
 
         // Instance struct to assembly render batchs for terrain chunks
         struct ChunkInstanceData {
