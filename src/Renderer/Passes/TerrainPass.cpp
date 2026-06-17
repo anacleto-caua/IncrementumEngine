@@ -30,45 +30,8 @@ namespace TerrainPass {
         // Easier access for vkBindIndexBuffer()
         VkBuffer VkBuffer; /////// REMOVE THIS ASP
 
-        void GenerateIndices(u32* IndicesBegin) {
-            u32 TerrainRes = TerrainConfig::Mesh::VerticesPerEdge;
-            for (u32 z = 0; z < TerrainRes - 1; z++) {
-                for (u32 x = 0; x < TerrainRes - 1; x++) {
-                    // Calculate the index of the current vertex and neighbors
-                    u32 topLeft = (z * TerrainRes) + x;
-                    u32 topRight = topLeft + 1;
-                    u32 bottomLeft = ((z + 1) * TerrainRes) + x;
-                    u32 bottomRight = bottomLeft + 1;
-
-                    // Triangle 1 (Top-Left -> Bottom-Left -> Top-Right)
-                    *IndicesBegin++ = topLeft;
-                    *IndicesBegin++ = bottomLeft;
-                    *IndicesBegin++ = topRight;
-
-                    // Triangle 2 (Top-Right -> Bottom-Left -> Bottom-Right)
-                    *IndicesBegin++ = topRight;
-                    *IndicesBegin++ = bottomLeft;
-                    *IndicesBegin++ = bottomRight;
-                }
-            }
-        }
-
-        void Upload() {
-            // Create the actual Plane Mesh index buffer
-            Buffer::CreateInfo IndiceCreateInfo = {
-                .Size = TerrainConfig::Mesh::IndexBufferSize,
-                .Type = Buffer::Type::INDEX,
-            };
-            Indices = Buffer::Add(IndiceCreateInfo);
-            VkBuffer = Buffer::Get(PlaneMesh::Indices)->Buffer;
-
-            std::array<u32, TerrainConfig::Mesh::IndexBufferSize> indices_buffer;
-            GenerateIndices(indices_buffer.data());
-
-            TransferPipe::Ticket indices_upload = TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), TerrainConfig::Mesh::IndexBufferSize);
-            TransferPipe::FullSubmit();
-            TransferPipe::WaitOn(indices_upload);
-        }
+        void GenerateIndices(u32* IndicesBegin);
+        void Upload();
     }
 
     namespace Heightmap {
@@ -399,5 +362,47 @@ namespace TerrainPass {
         );
 
         vkCmdDrawIndexed(cmd, TerrainConfig::Mesh::IndexCount, TerrainConfig::Streaming::MaxActiveChunks, 0, 0, 0);
+    }
+
+    namespace PlaneMesh {
+        void GenerateIndices(u32* IndicesBegin) {
+            u32 TerrainRes = TerrainConfig::Mesh::VerticesPerEdge;
+            for (u32 z = 0; z < TerrainRes - 1; z++) {
+                for (u32 x = 0; x < TerrainRes - 1; x++) {
+                    // Calculate the index of the current vertex and neighbors
+                    u32 topLeft = (z * TerrainRes) + x;
+                    u32 topRight = topLeft + 1;
+                    u32 bottomLeft = ((z + 1) * TerrainRes) + x;
+                    u32 bottomRight = bottomLeft + 1;
+
+                    // Triangle 1 (Top-Left -> Bottom-Left -> Top-Right)
+                    *IndicesBegin++ = topLeft;
+                    *IndicesBegin++ = bottomLeft;
+                    *IndicesBegin++ = topRight;
+
+                    // Triangle 2 (Top-Right -> Bottom-Left -> Bottom-Right)
+                    *IndicesBegin++ = topRight;
+                    *IndicesBegin++ = bottomLeft;
+                    *IndicesBegin++ = bottomRight;
+                }
+            }
+        }
+
+        void Upload() {
+            // Create the actual Plane Mesh index buffer
+            Buffer::CreateInfo IndiceCreateInfo = {
+                .Size = TerrainConfig::Mesh::IndexBufferSize,
+                .Type = Buffer::Type::INDEX,
+            };
+            Indices = Buffer::Add(IndiceCreateInfo);
+            VkBuffer = Buffer::Get(PlaneMesh::Indices)->Buffer;
+
+            std::array<u32, TerrainConfig::Mesh::IndexBufferSize> indices_buffer;
+            GenerateIndices(indices_buffer.data());
+
+            TransferPipe::Ticket indices_upload = TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), TerrainConfig::Mesh::IndexBufferSize);
+            TransferPipe::FullSubmit();
+            TransferPipe::WaitOn(indices_upload);
+        }
     }
 }
