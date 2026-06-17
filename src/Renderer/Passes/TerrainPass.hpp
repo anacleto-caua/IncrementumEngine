@@ -7,5 +7,5 @@
 namespace TerrainPass {
     IncResult Create();
     void Destroy();
-    void Render(VkCommandBuffer cmd);
+    void Render();
 }

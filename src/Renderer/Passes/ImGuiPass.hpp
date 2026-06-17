@@ -2,14 +2,12 @@
 
 #include <imgui_impl_sdl3.h>
 
-#include "Renderer/VkVault.hpp"
-
 namespace ImGuiPass {
     IncResult Create();
 
     void Destroy();
 
-    void Render(VkCommandBuffer cmd);
+    void Render();
 
     void ProcessEvent(SDL_Event event);
 };

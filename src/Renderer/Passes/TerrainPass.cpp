@@ -337,7 +337,9 @@ namespace TerrainPass {
         if (TerrainPipelineLayout) { vkDestroyPipelineLayout(VkVault::Device, TerrainPipelineLayout, nullptr); }
     }
 
-    void Render(VkCommandBuffer cmd) {
+    void Render() {
+        VkCommandBuffer& cmd = Renderer::CurrentFrameContext.DrawCommand;
+
         vkCmdBindIndexBuffer(cmd, PlaneMesh::VkBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         vkCmdPushConstants(

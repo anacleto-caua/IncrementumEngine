@@ -5,6 +5,7 @@
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
 
+#include "Renderer/VkVault.hpp"
 #include "Engine/Core/WindowSDL.hpp"
 
 namespace ImGuiPass {
@@ -64,9 +65,9 @@ namespace ImGuiPass {
         ImGui::DestroyContext();
     }
 
-    void Render(VkCommandBuffer cmd) {
+    void Render() {
         ImGui::Render();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), Renderer::CurrentFrameContext.DrawCommand);
         NewFrame();
     }
 
