@@ -1,10 +1,13 @@
 #include "TerrainPass.hpp"
 
+#include <array>
+
 #include <glm/ext.hpp>
 
 #include "Renderer/VkVault.hpp"
 #include "Renderer/Vk/ShaderBuilder.hpp"
 #include "Renderer/Vk/PipelineDefaults.hpp"
+#include "Renderer/Vk/DescriptorMapping.hpp"
 #include "Renderer/Resources/TransferPipe.hpp"
 #include "Renderer/Resources/ResourceManager.hpp"
 #include "Engine/TerrainManager/TerrainDefinitions.hpp"
@@ -19,9 +22,9 @@ namespace TerrainPass {
     TerrainPushConstants TerrainPushConstants {};
 
     namespace Descriptor {
-        VkDescriptorSetLayout layout = VK_NULL_HANDLE;
-        VkDescriptorSet set = VK_NULL_HANDLE;
-        VkDescriptorPool pool = VK_NULL_HANDLE;
+        VkDescriptorSetLayout Layout = VK_NULL_HANDLE;
+        std::array<VkDescriptorSet, RendererConfig::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
+        VkDescriptorPool Pool = VK_NULL_HANDLE;
     };
 
     namespace PlaneMesh {
@@ -40,9 +43,7 @@ namespace TerrainPass {
         VkSampler Sampler;
     }
 
-    namespace ChunkLinks {
-        Buffer::Id Data;
-    }
+    std::array<Buffer::Id, RendererConfig::MAX_FRAMES_IN_FLIGHT> ChunkDrawListBuffers;
 
     // Terrain pipeline
     VkPipeline TerrainPipeline {};
@@ -52,7 +53,7 @@ namespace TerrainPass {
         {
             VkShaderStageFlags all_shader_stages = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
 
-            // Terrain heightmap
+            // Image for terrain heightmap
             {
                 Image::CreateInfo heightmap_image_create_desc;
                 heightmap_image_create_desc.Width = TerrainConfig::Mesh::VerticesPerEdge;
@@ -89,68 +90,40 @@ namespace TerrainPass {
                 );
             }
 
-            // Chunk to Heightmap linking
+            // Buffer for chunk draw list
             {
                 Buffer::CreateInfo chunk_instance_buffer_create_info = {
                     .Size = TerrainConfig::Streaming::MaxActiveChunks * sizeof(TerrainConfig::Memory::ChunkInstanceData),
                     .Type = Buffer::Type::SSBO,
                 };
 
-                ChunkLinks::Data = Buffer::Add(chunk_instance_buffer_create_info);
+                for (auto& draw_list_buffer : ChunkDrawListBuffers) {
+                    draw_list_buffer = Buffer::Add(chunk_instance_buffer_create_info);
+                }
             }
 
-            // Terrain System Descriptors
+            // Descriptors
             {
-                // Heightmap Texture Sampler descriptor
-                auto heightmap_image_view_value = ImageView::Get(Heightmap::ImageView);
-                VkDescriptorImageInfo heightmap_descriptor_image_info {};
-                heightmap_descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                heightmap_descriptor_image_info.imageView = heightmap_image_view_value->ImageView;
-                heightmap_descriptor_image_info.sampler = Heightmap::Sampler;
-
+                // Unified layout
                 VkDescriptorSetLayoutBinding heightmap_set_layout_binding {};
-                heightmap_set_layout_binding.binding = 0;
+                heightmap_set_layout_binding.binding = DescriptorMap::PerFrame::Binding_HeightmapTexture;
                 heightmap_set_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                 heightmap_set_layout_binding.descriptorCount = 1;
                 heightmap_set_layout_binding.stageFlags = all_shader_stages;
                 heightmap_set_layout_binding.pImmutableSamplers = nullptr;
 
-                VkWriteDescriptorSet heightmap_sampler_write {};
-                heightmap_sampler_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                heightmap_sampler_write.dstBinding = 0;
-                heightmap_sampler_write.dstArrayElement = 0;
-                heightmap_sampler_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                heightmap_sampler_write.descriptorCount = 1;
-                heightmap_sampler_write.pImageInfo = &heightmap_descriptor_image_info;
+                VkDescriptorSetLayoutBinding chunk_draw_list_set_layout_binding {};
+                chunk_draw_list_set_layout_binding.binding = DescriptorMap::PerFrame::Binding_ChunkDrawListSSBO;
+                chunk_draw_list_set_layout_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                chunk_draw_list_set_layout_binding.descriptorCount = 1;
+                chunk_draw_list_set_layout_binding.stageFlags = all_shader_stages;
+                chunk_draw_list_set_layout_binding.pImmutableSamplers = nullptr;
 
-                // Chunk to Heightmap descriptor
-                // TODO: The fact I'm not carrying offsets arround is most definitvelly a bad signal
-                auto chunk_link_buffer_value = Buffer::Get(ChunkLinks::Data);
-                VkDescriptorBufferInfo chunk_instance_descriptor_buffer_info {};
-                chunk_instance_descriptor_buffer_info.buffer = chunk_link_buffer_value->Buffer;
-                chunk_instance_descriptor_buffer_info.offset = 0;
-                chunk_instance_descriptor_buffer_info.range = chunk_link_buffer_value->Size;
-
-                VkDescriptorSetLayoutBinding chunk_instance_renderer_binding {};
-                chunk_instance_renderer_binding.binding = 1;
-                chunk_instance_renderer_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                chunk_instance_renderer_binding.descriptorCount = 1;
-                chunk_instance_renderer_binding.stageFlags = all_shader_stages;
-                chunk_instance_renderer_binding.pImmutableSamplers = nullptr;
-
-                VkWriteDescriptorSet chunk_link_ssbo_write {};
-                chunk_link_ssbo_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                chunk_link_ssbo_write.dstBinding = 1;
-                chunk_link_ssbo_write.dstArrayElement = 0;
-                chunk_link_ssbo_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                chunk_link_ssbo_write.descriptorCount = 1;
-                chunk_link_ssbo_write.pBufferInfo = &chunk_instance_descriptor_buffer_info;
-
-                // Descriptor layout
                 std::array<VkDescriptorSetLayoutBinding, 2> layout_bindings = {
                     heightmap_set_layout_binding,
-                    chunk_instance_renderer_binding
+                    chunk_draw_list_set_layout_binding
                 };
+
                 VkDescriptorSetLayoutCreateInfo descriptor_layout_create_info {
                     .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                     .pNext = nullptr,
@@ -160,23 +133,18 @@ namespace TerrainPass {
                 };
 
                 VK_CHECK(
-                    vkCreateDescriptorSetLayout(
-                        VkVault::Device,
-                        &descriptor_layout_create_info,
-                        nullptr,
-                        &Descriptor::layout
-                    ),
+                    vkCreateDescriptorSetLayout(VkVault::Device, &descriptor_layout_create_info, nullptr, &Descriptor::Layout),
                     "terrain descriptor set layout creation failed"
                 );
 
-                // Descriptor pool
+                // Create the Pool (scaled for MAX_FRAMES_IN_FLIGHT)
                 VkDescriptorPoolSize heightmap_sampler_pool_size = {
                     .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                    .descriptorCount = 1
+                    .descriptorCount = RendererConfig::MAX_FRAMES_IN_FLIGHT
                 };
                 VkDescriptorPoolSize heightmap_ssbo_pool_size = {
                     .type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                    .descriptorCount = 1
+                    .descriptorCount = RendererConfig::MAX_FRAMES_IN_FLIGHT
                 };
                 std::array<VkDescriptorPoolSize, 2> pool_sizes = {
                     heightmap_sampler_pool_size,
@@ -187,35 +155,68 @@ namespace TerrainPass {
                 descriptor_pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
                 descriptor_pool_info.poolSizeCount = static_cast<u32>(pool_sizes.size());
                 descriptor_pool_info.pPoolSizes = pool_sizes.data();
-                descriptor_pool_info.maxSets = 1;
+                descriptor_pool_info.maxSets = RendererConfig::MAX_FRAMES_IN_FLIGHT; // CHANGED
 
                 VK_CHECK(
-                    vkCreateDescriptorPool(VkVault::Device, &descriptor_pool_info, nullptr, &Descriptor::pool),
+                    vkCreateDescriptorPool(VkVault::Device, &descriptor_pool_info, nullptr, &Descriptor::Pool),
                     "descriptor pool creation failed"
                 );
 
-                VkDescriptorSetAllocateInfo descriptor_alloc_info {};
-                descriptor_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-                descriptor_alloc_info.descriptorPool = Descriptor::pool;
-                descriptor_alloc_info.descriptorSetCount = 1;
-                descriptor_alloc_info.pSetLayouts = &Descriptor::layout;
-
-                VK_CHECK(
-                    vkAllocateDescriptorSets(VkVault::Device, &descriptor_alloc_info, &Descriptor::set),
-                    "descriptor set allocation failed"
-                );
-
-                std::array<VkWriteDescriptorSet, 2> terrain_pass_writes = {
-                    heightmap_sampler_write, chunk_link_ssbo_write
+                // Allocate an array of sets
+                std::vector<VkDescriptorSetLayout> layouts(RendererConfig::MAX_FRAMES_IN_FLIGHT, Descriptor::Layout);
+                VkDescriptorSetAllocateInfo descriptor_alloc_info {
+                    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                    .pNext = nullptr,
+                    .descriptorPool = Descriptor::Pool,
+                    .descriptorSetCount = RendererConfig::MAX_FRAMES_IN_FLIGHT,
+                    .pSetLayouts = layouts.data()
                 };
 
-                for (VkWriteDescriptorSet& write : terrain_pass_writes) {
-                    write.dstSet = Descriptor::set;
-                }
+                VK_CHECK(
+                    vkAllocateDescriptorSets(VkVault::Device, &descriptor_alloc_info, Descriptor::Sets.data()),
+                    "descriptor set alloc failed"
+                );
 
-                vkUpdateDescriptorSets(VkVault::Device, static_cast<u32>(terrain_pass_writes.size()), terrain_pass_writes.data(), 0, nullptr);
+                // Loop through each frame in flight and write BOTH bindings
+                auto heightmap_image_view_value = ImageView::Get(Heightmap::ImageView);
+                VkDescriptorImageInfo heightmap_descriptor_image_info {};
+                heightmap_descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                heightmap_descriptor_image_info.imageView = heightmap_image_view_value->ImageView;
+                heightmap_descriptor_image_info.sampler = Heightmap::Sampler;
+
+                for (u32 i = 0; i < RendererConfig::MAX_FRAMES_IN_FLIGHT; ++i) {
+
+                    // Write the Heightmap (Yes it has to be duplicated)
+                    VkWriteDescriptorSet heightmap_write {};
+                    heightmap_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    heightmap_write.dstSet = Descriptor::Sets[i];
+                    heightmap_write.dstBinding = DescriptorMap::PerFrame::Binding_HeightmapTexture;
+                    heightmap_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    heightmap_write.descriptorCount = 1;
+                    heightmap_write.pImageInfo = &heightmap_descriptor_image_info;
+
+                    // Write the Chunk SSBO (trully frame sensitive)
+                    auto chunk_link_buffer_value = Buffer::Get(ChunkDrawListBuffers[i]);
+                    VkDescriptorBufferInfo chunk_buffer_info {};
+                    chunk_buffer_info.buffer = chunk_link_buffer_value->Buffer;
+                    chunk_buffer_info.offset = 0;
+                    chunk_buffer_info.range = chunk_link_buffer_value->Size;
+
+                    VkWriteDescriptorSet chunk_ssbo_write {};
+                    chunk_ssbo_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                    chunk_ssbo_write.dstSet = Descriptor::Sets[i];
+                    chunk_ssbo_write.dstBinding = DescriptorMap::PerFrame::Binding_ChunkDrawListSSBO;
+                    chunk_ssbo_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                    chunk_ssbo_write.descriptorCount = 1;
+                    chunk_ssbo_write.pBufferInfo = &chunk_buffer_info;
+
+                    // Execute both writes for this specific set
+                    std::array<VkWriteDescriptorSet, 2> writes = { heightmap_write, chunk_ssbo_write };
+                    vkUpdateDescriptorSets(VkVault::Device, static_cast<u32>(writes.size()), writes.data(), 0, nullptr);
+                }
             }
 
+            // Pipeline Layout creation
             TerrainPipelineLayout = {};
             VkPushConstantRange terrain_push_constant_ranges = {
                 .stageFlags = all_shader_stages,
@@ -226,7 +227,7 @@ namespace TerrainPass {
             VkPipelineLayoutCreateInfo terrain_pipeline_layout_create_info {};
             terrain_pipeline_layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
             terrain_pipeline_layout_create_info.setLayoutCount = 1;
-            terrain_pipeline_layout_create_info.pSetLayouts = &Descriptor::layout;
+            terrain_pipeline_layout_create_info.pSetLayouts = &Descriptor::Layout;
             terrain_pipeline_layout_create_info.pPushConstantRanges = &terrain_push_constant_ranges;
             terrain_pipeline_layout_create_info.pushConstantRangeCount = 1;
 
@@ -323,15 +324,17 @@ namespace TerrainPass {
     }
 
     void Destroy() {
-        Buffer::Del(ChunkLinks::Data);
+        for (auto& buffer: ChunkDrawListBuffers) {
+            Buffer::Del(buffer);
+        }
 
         Buffer::Del(PlaneMesh::Indices);
 
         if (Heightmap::Sampler) { vkDestroySampler(VkVault::Device, Heightmap::Sampler, nullptr); }
         Image::Del(Heightmap::Image);
 
-        if (Descriptor::pool) { vkDestroyDescriptorPool(VkVault::Device, Descriptor::pool, nullptr); }
-        if (Descriptor::layout) { vkDestroyDescriptorSetLayout(VkVault::Device, Descriptor::layout, nullptr); }
+        if (Descriptor::Pool) { vkDestroyDescriptorPool(VkVault::Device, Descriptor::Pool, nullptr); }
+        if (Descriptor::Layout) { vkDestroyDescriptorSetLayout(VkVault::Device, Descriptor::Layout, nullptr); }
 
         if (TerrainPipeline) { vkDestroyPipeline(VkVault::Device, TerrainPipeline, nullptr); }
         if (TerrainPipelineLayout) { vkDestroyPipelineLayout(VkVault::Device, TerrainPipelineLayout, nullptr); }
@@ -356,9 +359,9 @@ namespace TerrainPass {
             cmd,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
             TerrainPipelineLayout,
-            0, // Probably a bad idea the way I carry this binding value lol TEXTURE_SAMPLER_BINDING,
+            DescriptorMap::PerFrame::SetIndex,
             1,
-            &Descriptor::set,
+            &Descriptor::Sets[Renderer::CurrentFrameContext.FrameInFlightIndex],
             0,
             nullptr
         );

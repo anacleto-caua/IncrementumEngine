@@ -21,7 +21,7 @@ namespace DescriptorMap {
         inline constexpr u32 SetIndex = 1;
 
         inline constexpr u32 Binding_ChunkDrawListSSBO = 0;
-        inline constexpr u32 Binding_HeightmapTexture = 1;
+        inline constexpr u32 Binding_HeightmapTexture = 1; // This isn't per frame but okay...
     }
 
     // ================================================
