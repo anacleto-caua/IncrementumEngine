@@ -9,6 +9,7 @@
 #include "Engine/Core/Window.hpp"
 #include "Renderer/Resources/TransferPipe.hpp"
 #include "Renderer/Resources/ResourceManager.hpp"
+#include "Renderer/Descriptors/DescriptorManager.hpp"
 
 namespace Renderer {
     // Per frame data used to track the frame submission structure
@@ -70,6 +71,7 @@ namespace Renderer {
         INC_CHECK(VkVault::Create(), "vulkan context creation failed");
         INC_CHECK(ResourceManager::Initialize(), "resource manager creation failed");
         INC_CHECK(TransferPipe::Create(), "transfer pipe creation failed");
+        INC_CHECK(DescriptorManager::Create(), "descriptor manager creation failed");
 
         Swapchain::Create();
 
@@ -161,6 +163,7 @@ namespace Renderer {
         ImGuiPass::Destroy();
         Swapchain::Destroy();
         DepthBuffer::Destroy();
+        DescriptorManager::Destroy();
         TransferPipe::Destroy();
         ResourceManager::Shutdown();
         VkVault::Destroy();
