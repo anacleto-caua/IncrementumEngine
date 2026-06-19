@@ -67,7 +67,7 @@ namespace ImGuiPass {
 
     void Render() {
         ImGui::Render();
-        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), Renderer::CurrentFrameContext.DrawCommand);
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), Renderer::FrameContext.DrawCommand);
         NewFrame();
     }
 

@@ -341,7 +341,7 @@ namespace TerrainPass {
     }
 
     void Render() {
-        VkCommandBuffer& cmd = Renderer::CurrentFrameContext.DrawCommand;
+        VkCommandBuffer& cmd = Renderer::FrameContext.DrawCommand;
 
         vkCmdBindIndexBuffer(cmd, PlaneMesh::VkBuffer, 0, VK_INDEX_TYPE_UINT32);
 
@@ -361,7 +361,7 @@ namespace TerrainPass {
             TerrainPipelineLayout,
             DescriptorMap::PerFrame::SetIndex,
             1,
-            &Descriptor::Sets[Renderer::CurrentFrameContext.FrameInFlightIndex],
+            &Descriptor::Sets[Renderer::FrameContext.FrameInFlightIndex],
             0,
             nullptr
         );

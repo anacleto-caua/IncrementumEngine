@@ -96,6 +96,6 @@ namespace Renderer {
         u32 ImageViewIndex = 0;
         VkCommandBuffer DrawCommand = VK_NULL_HANDLE;
     };
-    inline FrameContext CurrentFrameContext;
+    inline FrameContext FrameContext;
 }
 

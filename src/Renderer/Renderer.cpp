@@ -168,8 +168,8 @@ namespace Renderer {
 
     void Frame() {
         // Update context
-        FrameData& target_frame = Frames[CurrentFrameContext.FrameInFlightIndex];
-        CurrentFrameContext.DrawCommand = target_frame.CmdBuffer;
+        FrameData& target_frame = Frames[FrameContext.FrameInFlightIndex];
+        FrameContext.DrawCommand = target_frame.CmdBuffer;
 
         // Rendering
         VkSemaphoreWaitInfo wait_info = {
@@ -188,15 +188,15 @@ namespace Renderer {
             UINT64_MAX,
             target_frame.ImageAvailable,
             VK_NULL_HANDLE,
-            &CurrentFrameContext.ImageViewIndex
+            &FrameContext.ImageViewIndex
         );
         if (result == VK_ERROR_OUT_OF_DATE_KHR) {
             vkDeviceWaitIdle(VkVault::Device);
             return;
         }
 
-        vkResetCommandBuffer(CurrentFrameContext.DrawCommand, 0);
-        vkBeginCommandBuffer(CurrentFrameContext.DrawCommand, &RenderingCmdBeginInfo);
+        vkResetCommandBuffer(FrameContext.DrawCommand, 0);
+        vkBeginCommandBuffer(FrameContext.DrawCommand, &RenderingCmdBeginInfo);
 
         // Has transfers
         bool has_transfers  = false;
@@ -213,7 +213,7 @@ namespace Renderer {
 
             // Command the GPU to pause the graphics pipeline until transfers finish
             vkCmdPipelineBarrier(
-                CurrentFrameContext.DrawCommand,
+                FrameContext.DrawCommand,
                 VK_PIPELINE_STAGE_TRANSFER_BIT,
                 VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
                 0,
@@ -231,7 +231,7 @@ namespace Renderer {
             .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = Swapchain::Images[CurrentFrameContext.ImageViewIndex].Image,
+            .image = Swapchain::Images[FrameContext.ImageViewIndex].Image,
             .subresourceRange {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                 .baseMipLevel = 0,
@@ -243,16 +243,16 @@ namespace Renderer {
         VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         vkCmdPipelineBarrier(
-            CurrentFrameContext.DrawCommand,
+            FrameContext.DrawCommand,
             src_stage, dst_stage,
             0, 0, nullptr, 0, nullptr, 1,
             &rendering_barrier
         );
 
-        ColorAttachment.imageView = Swapchain::Images[CurrentFrameContext.ImageViewIndex].ImageView;
-        vkCmdBeginRendering(CurrentFrameContext.DrawCommand, &RenderingInfo);
-        vkCmdSetViewport(CurrentFrameContext.DrawCommand, 0, 1, &Viewport);
-        vkCmdSetScissor(CurrentFrameContext.DrawCommand, 0, 1, &Scissor);
+        ColorAttachment.imageView = Swapchain::Images[FrameContext.ImageViewIndex].ImageView;
+        vkCmdBeginRendering(FrameContext.DrawCommand, &RenderingInfo);
+        vkCmdSetViewport(FrameContext.DrawCommand, 0, 1, &Viewport);
+        vkCmdSetScissor(FrameContext.DrawCommand, 0, 1, &Scissor);
 
         // Actual frame begins
 
@@ -262,7 +262,7 @@ namespace Renderer {
 
         // Actual frame ends
 
-        vkCmdEndRendering(CurrentFrameContext.DrawCommand);
+        vkCmdEndRendering(FrameContext.DrawCommand);
 
         VkImageMemoryBarrier presenting_barrier = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -273,7 +273,7 @@ namespace Renderer {
             .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = Swapchain::Images[CurrentFrameContext.ImageViewIndex].Image,
+            .image = Swapchain::Images[FrameContext.ImageViewIndex].Image,
             .subresourceRange {
                 .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                 .baseMipLevel = 0,
@@ -285,17 +285,17 @@ namespace Renderer {
         VkPipelineStageFlags src_stage_2 = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         VkPipelineStageFlags dst_stage_2 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
         vkCmdPipelineBarrier(
-            CurrentFrameContext.DrawCommand,
+            FrameContext.DrawCommand,
             src_stage_2, dst_stage_2,
             0, 0, nullptr, 0, nullptr, 1,
             &presenting_barrier
         );
 
-        vkEndCommandBuffer(CurrentFrameContext.DrawCommand);
+        vkEndCommandBuffer(FrameContext.DrawCommand);
 
         VkSemaphore submit_wait_semaphores[] = { target_frame.ImageAvailable };
         VkSemaphore submit_signal_semaphores[] = {
-            Swapchain::Images[CurrentFrameContext.ImageViewIndex].RenderFinished, // Signals Present
+            Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished, // Signals Present
             FrameSemaphore.Handle                                   // Signals the Timeline
         };
 
@@ -323,7 +323,7 @@ namespace Renderer {
             .pWaitSemaphores = submit_wait_semaphores,
             .pWaitDstStageMask = GRAPHICS_PIPELINE_WAIT_STAGES,
             .commandBufferCount = 1,
-            .pCommandBuffers = &CurrentFrameContext.DrawCommand,
+            .pCommandBuffers = &FrameContext.DrawCommand,
             .signalSemaphoreCount = 2,
             .pSignalSemaphores = submit_signal_semaphores
         };
@@ -361,14 +361,14 @@ namespace Renderer {
             VK_NULL_HANDLE
         );
 
-        Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[CurrentFrameContext.ImageViewIndex].RenderFinished;
+        Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished;
         vkQueuePresentKHR(VkVault::Present.Queue, &Swapchain::PresentInfo);
 
         // Save the timeline value so the CPU can wait on it next time!
         target_frame.LastSignaledValue = signal_value;
 
-        CurrentFrameContext.FrameInFlightIndex =
-            (CurrentFrameContext.FrameInFlightIndex + 1) % RendererConfig::MAX_FRAMES_IN_FLIGHT;
+        FrameContext.FrameInFlightIndex =
+            (FrameContext.FrameInFlightIndex + 1) % RendererConfig::MAX_FRAMES_IN_FLIGHT;
     }
 
     void Resize(i32 width, i32 height) {
@@ -436,7 +436,7 @@ namespace Renderer {
             PresentInfo.swapchainCount = 1;
             PresentInfo.pSwapchains = &Swapchain;
             PresentInfo.waitSemaphoreCount = 1;
-            PresentInfo.pImageIndices = &CurrentFrameContext.ImageViewIndex;
+            PresentInfo.pImageIndices = &FrameContext.ImageViewIndex;
 
             return IncResult::SUCCESS;
         }
