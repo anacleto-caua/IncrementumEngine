@@ -10,6 +10,7 @@
 #include "Renderer/Vk/DescriptorMapping.hpp"
 #include "Renderer/Resources/TransferPipe.hpp"
 #include "Renderer/Resources/ResourceManager.hpp"
+#include "Engine/TerrainManager/TerrainManager.hpp"
 #include "Engine/TerrainManager/TerrainDefinitions.hpp"
 
 namespace TerrainPass {
@@ -366,7 +367,7 @@ namespace TerrainPass {
             nullptr
         );
 
-        vkCmdDrawIndexed(cmd, TerrainConfig::Mesh::IndexCount, TerrainConfig::Streaming::MaxActiveChunks, 0, 0, 0);
+        vkCmdDrawIndexed(cmd, TerrainConfig::Mesh::IndexCount, TerrainManager::CurrentllyActiveChunks, 0, 0, 0);
     }
 
     namespace PlaneMesh {

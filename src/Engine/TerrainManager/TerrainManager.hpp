@@ -4,6 +4,8 @@
 
 namespace TerrainManager {
 
+    inline u32 CurrentllyActiveChunks = 0;
+
     // Called by the terrain pass once
     void Init();
 
