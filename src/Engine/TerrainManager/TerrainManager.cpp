@@ -1,26 +1,10 @@
 #include "TerrainManager.hpp"
 
-#include <array>
-
 #include <glm/glm.hpp>
 #include <FastNoiseLite.hpp>
 
-#include "TerrainDefinitions.hpp"
-
 namespace TerrainManager {
     void WriteHeightmap(glm::ivec2 position, u32 target_layer);
-    void FullWriteChunkData();
-
-    using Heightmap = u16[TerrainConfig::Mesh::VerticesPerEdge][TerrainConfig::Mesh::VerticesPerEdge];
-
-    struct HeightmapStatus {
-        glm::ivec2 Position = { 0, 0 };
-        bool Ready = false;
-    };
-
-    std::array<TerrainConfig::Memory::ChunkInstanceData, TerrainConfig::Streaming::MaxActiveChunks> ChunkDrawList;
-    std::array<HeightmapStatus, TerrainConfig::Streaming::MaxActiveChunks> HeightmapStatus;
-    std::array<Heightmap, TerrainConfig::Streaming::MaxActiveChunks> HeightmapData;
 
     FastNoiseLite ContinentalNoise;
     FastNoiseLite MountainNoise;
@@ -41,13 +25,8 @@ namespace TerrainManager {
         DetailNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
         DetailNoise.SetFractalOctaves(4);
         DetailNoise.SetFrequency(0.08f);
-    }
 
-    void RefreshChunks(glm::ivec2 current_player_chunk) {
-        // ...
-    }
-
-    void FullWriteChunkData() {
+        // Kickstart the valid data
         glm::vec3 player_pos = {0, 0, 0};
         glm::ivec2 player_coord;
         player_coord.x = static_cast<i32>(std::floor(player_pos.x/TerrainConfig::Mesh::ChunkScale));
@@ -70,12 +49,16 @@ namespace TerrainManager {
                         .WorldPos = { x, y },
                         .TextureLayer = 0
                     };
-                    coords_counter++;
 
                     WriteHeightmap({x, y}, coords_counter);
+                    coords_counter++;
                 }
             }
         }
+    }
+
+    void RefreshChunks(glm::ivec2 current_player_chunk) {
+        // ...
     }
 
     void WriteHeightmap(glm::ivec2 position, u32 target_layer) {

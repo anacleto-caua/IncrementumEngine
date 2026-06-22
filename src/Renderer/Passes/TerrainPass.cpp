@@ -251,6 +251,35 @@ namespace TerrainPass {
         }
 
         PlaneMesh::Upload();
+        // Write the first valid data
+        TerrainManager::Init();
+
+        TransferPipe::Ticket last_upload;
+        for (auto& buffer : ChunkDrawListBuffers) {
+            // TODO: Move this to the frame structure
+            last_upload =
+                TransferPipe::QueueBufferUpload(
+                    buffer,
+                    0,
+                    TerrainManager::ChunkDrawList.data(),
+                    TerrainManager::ChunkDrawList.size()
+                );
+        }
+
+        for (u32 i = 0; i < TerrainManager::HeightmapData.size(); i++) {
+            last_upload =
+                TransferPipe::QueueImageSliceUpload(
+                    Heightmap::Image,
+                    i,
+                    &TerrainManager::HeightmapData[i],
+                    sizeof(TerrainManager::Heightmap)
+                );
+        }
+
+        TransferPipe::FullSubmit();
+
+        // It's ok to wait only on the last ticket since the system forces order of uploads
+        TransferPipe::WaitOn(last_upload);
 
         // Zeroing terrain push constants
         TerrainPushConstants = {
