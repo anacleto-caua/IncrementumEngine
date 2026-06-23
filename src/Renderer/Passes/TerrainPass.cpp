@@ -29,9 +29,6 @@ namespace TerrainPass {
     namespace PlaneMesh {
         Buffer::Id Indices;
 
-        // Easier access for vkBindIndexBuffer()
-        VkBuffer VkBuffer; /////// REMOVE THIS ASP
-
         void GenerateIndices(u32* IndicesBegin);
         void Upload();
     }
@@ -307,7 +304,7 @@ namespace TerrainPass {
     void Render() {
         VkCommandBuffer& cmd = Renderer::FrameContext.DrawCommand;
 
-        vkCmdBindIndexBuffer(cmd, PlaneMesh::VkBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(cmd, Buffer::Get(PlaneMesh::Indices)->Buffer, 0, VK_INDEX_TYPE_UINT32);
 
         vkCmdPushConstants(
             cmd,
@@ -364,7 +361,6 @@ namespace TerrainPass {
                 .Type = Buffer::Type::INDEX,
             };
             Indices = Buffer::Add(IndiceCreateInfo);
-            VkBuffer = Buffer::Get(PlaneMesh::Indices)->Buffer;
 
             std::array<u32, TerrainConfig::Mesh::IndexBufferSize> indices_buffer;
             GenerateIndices(indices_buffer.data());
