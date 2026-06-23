@@ -47,7 +47,8 @@ namespace TerrainManager {
                 if ((dx * dx) + (dy * dy) <= r_squared) {
                     ChunkDrawList[coords_counter] = {
                         .WorldPos = { x, y },
-                        .TextureLayer = 0
+                        .TextureLayer = 0,
+                        .padding = 0
                     };
 
                     WriteHeightmap({x, y}, coords_counter);

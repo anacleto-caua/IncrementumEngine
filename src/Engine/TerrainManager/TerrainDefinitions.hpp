@@ -64,6 +64,7 @@ namespace TerrainConfig {
         struct ChunkInstanceData {
             glm::ivec2 WorldPos;
             u32 TextureLayer;
+            u32 padding;
         };
 
         // The maximum size of the SSBO you upload to the GPU every frame
