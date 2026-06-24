@@ -3,6 +3,8 @@
 #include <array>
 #include <vector>
 
+#include <glm/mat4x4.hpp>
+
 #include "VkVault.hpp"
 #include "Passes/ImGuiPass.hpp"
 #include "Passes/TerrainPass.hpp"
@@ -22,6 +24,21 @@ namespace Renderer {
 
     TimelineSemaphore FrameSemaphore;
     std::array<FrameData, RendererConfig::MAX_FRAMES_IN_FLIGHT> Frames;
+
+    // Camera UBO Descriptor
+    namespace GlobalDescriptors {
+        VkPipelineLayout BaseLayout = VK_NULL_HANDLE;
+
+        struct CameraUBO {
+            glm::mat4 mvp;
+        };
+        std::array<Buffer::Id, RendererConfig::MAX_FRAMES_IN_FLIGHT> CameraUBOBuffer;
+
+        std::array<VkDescriptorSet, RendererConfig::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
+
+        void Create();
+        void Destroy();
+    }
 
     // Other pipeline data
     VkRect2D Scissor {};
@@ -144,6 +161,10 @@ namespace Renderer {
             .pInheritanceInfo = nullptr
         };
 
+        // Other essential rendering things
+        GlobalDescriptors::Create();
+
+        // Render passes
         INC_CHECK(ImGuiPass::Create(), "failed to create imgui context");
         INC_CHECK(TerrainPass::Create(), "failed to create terrain pass");
 
@@ -161,6 +182,7 @@ namespace Renderer {
 
         TerrainPass::Destroy();
         ImGuiPass::Destroy();
+        GlobalDescriptors::Destroy();
         Swapchain::Destroy();
         DepthBuffer::Destroy();
         DescriptorManager::Destroy();
@@ -201,12 +223,23 @@ namespace Renderer {
         vkResetCommandBuffer(FrameContext.DrawCommand, 0);
         vkBeginCommandBuffer(FrameContext.DrawCommand, &RenderingCmdBeginInfo);
 
-        // Has transfers
-        bool has_transfers  = false;
-        if (has_transfers) {
-            // Record the copies (vkCmdCopyBuffer, vkCmdUpdateBuffer, etc.)
-            // GraphicsTransfer(CurrentFrameContext.DrawCommand);
+        // Frame sensible transfers, will be completed before the begin of the drawing phase
+        {
+            // Camera UBO for descriptor
+            {
+                auto ubo_buffer = Buffer::Get(GlobalDescriptors::CameraUBOBuffer[FrameContext.FrameInFlightIndex]);
+                GlobalDescriptors::CameraUBO ubo_data = { CurrentCamera->ModelViewProjection };
 
+                vkCmdUpdateBuffer(
+                    FrameContext.DrawCommand,
+                    ubo_buffer->Buffer,
+                    0,
+                    sizeof(GlobalDescriptors::CameraUBO),
+                    &ubo_data
+                );
+            }
+
+            // Barriers to hold the drawing back
             VkMemoryBarrier transfer_sync_barrier = {
                 .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
                 .pNext = nullptr,
@@ -214,7 +247,6 @@ namespace Renderer {
                 .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_INDEX_READ_BIT
             };
 
-            // Command the GPU to pause the graphics pipeline until transfers finish
             vkCmdPipelineBarrier(
                 FrameContext.DrawCommand,
                 VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -256,6 +288,18 @@ namespace Renderer {
         vkCmdBeginRendering(FrameContext.DrawCommand, &RenderingInfo);
         vkCmdSetViewport(FrameContext.DrawCommand, 0, 1, &Viewport);
         vkCmdSetScissor(FrameContext.DrawCommand, 0, 1, &Scissor);
+
+        // Bind SET 0 for the entire frame
+        vkCmdBindDescriptorSets(
+            FrameContext.DrawCommand,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            GlobalDescriptors::BaseLayout,
+            0, // firstSet = 0
+            1, // descriptorSetCount = 1
+            &GlobalDescriptors::Sets[FrameContext.FrameInFlightIndex],
+            0,
+            nullptr
+        );
 
         // Actual frame begins
 
@@ -387,6 +431,68 @@ namespace Renderer {
 
     void BindCamera(Camera3D* camera) {
         CurrentCamera = camera;
+    }
+
+    namespace GlobalDescriptors {
+        void Create() {
+            Buffer::CreateInfo create_info = {
+                .Size = sizeof(CameraUBO),
+                .Type = Buffer::Type::UBO
+            };
+            for (Buffer::Id& id : CameraUBOBuffer) {
+                id = Buffer::Add(create_info);
+            }
+
+            DescriptorManager::AllocateSets(
+                DescriptorManager::GlobalLayout,
+                RendererConfig::MAX_FRAMES_IN_FLIGHT,
+                GlobalDescriptors::Sets.data()
+            );
+
+            // Loop through each frame in flight and write both bindings
+            for (u32 i = 0; i < RendererConfig::MAX_FRAMES_IN_FLIGHT; ++i) {
+
+                // Write the camera ubo buffer
+                auto camera_ubo_buffer_value = Buffer::Get(CameraUBOBuffer[i]);
+                VkDescriptorBufferInfo camera_ubo_descriptor_info {};
+                camera_ubo_descriptor_info.buffer = camera_ubo_buffer_value->Buffer;
+                camera_ubo_descriptor_info.offset = 0;
+                camera_ubo_descriptor_info.range = camera_ubo_buffer_value->Size;
+
+                VkWriteDescriptorSet camera_ubo_write {};
+                camera_ubo_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                camera_ubo_write.dstSet = GlobalDescriptors::Sets[i];
+                camera_ubo_write.dstBinding = DescriptorMap::Global::Binding_CameraUBO;
+                camera_ubo_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                camera_ubo_write.descriptorCount = 1;
+                camera_ubo_write.pBufferInfo = &camera_ubo_descriptor_info;
+
+                // Execute writes for Set[i]
+                vkUpdateDescriptorSets(VkVault::Device, 1, &camera_ubo_write, 0, nullptr);
+            }
+
+            VkPipelineLayoutCreateInfo base_layout_info = {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = 0,
+                .setLayoutCount = 1,
+                .pSetLayouts = &DescriptorManager::GlobalLayout,
+                .pushConstantRangeCount = 0,
+                .pPushConstantRanges = nullptr
+            };
+
+            VK_OUT(
+                vkCreatePipelineLayout(VkVault::Device, &base_layout_info, nullptr, &BaseLayout),
+                "global base pipeline layout creation failed"
+            );
+        }
+
+        void Destroy() {
+            for (Buffer::Id& id : CameraUBOBuffer) {
+                Buffer::Del(id);
+            }
+            if (BaseLayout) { vkDestroyPipelineLayout(VkVault::Device, BaseLayout, nullptr); }
+        }
     }
 
     namespace Swapchain {
@@ -609,5 +715,4 @@ namespace Renderer {
             Create(width, height);
         }
     }
-
 }

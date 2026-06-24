@@ -5,13 +5,21 @@
 
 #include "Vk/Vk.hpp"
 
-#define VK_CHECK(expr, ...)                                             \
-    do {                                                                \
-        if ((expr) != VK_SUCCESS) {                                     \
-                analog::error(__VA_ARGS__);                             \
-                return IncResult::FAIL;                                 \
-            }                                                           \
+#define VK_CHECK(expr, ...)                     \
+    do {                                        \
+        if ((expr) != VK_SUCCESS) {             \
+                analog::error(__VA_ARGS__);     \
+                return IncResult::FAIL;         \
+            }                                   \
     } while(0)
+
+#define VK_OUT(expr, ...)                      \
+    do {                                        \
+        if ((expr) != VK_SUCCESS) {             \
+                analog::error(__VA_ARGS__);     \
+        }                                       \
+    } while(0)
+
 
 namespace RendererConfig {
     static constexpr u32 MAX_FRAMES_IN_FLIGHT = 2;
