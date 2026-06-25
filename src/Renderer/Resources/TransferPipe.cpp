@@ -115,10 +115,10 @@ namespace TransferPipe {
     Ticket MakeTicket() {
         TimelineSemaphore& semaphore = SignalSemaphores[CurrentSemaphore];
         Ticket ticket = {
-            .Value = static_cast<u32>(semaphore.LastSignaledValue),
+            .Value = (++semaphore.LastSignaledValue),
             .TargetSemaphore = CurrentSemaphore
         };
-        CurrentSemaphore = ++CurrentSemaphore % PARALLEL_TRANSFERS_COUNT;
+        CurrentSemaphore = (CurrentSemaphore + 1) % PARALLEL_TRANSFERS_COUNT;
         return ticket;
     }
 
@@ -203,7 +203,8 @@ namespace TransferPipe {
                         Image::Value* target_image = Image::Get(slice_info.DstImage);
                         ring_buffer_read_size += package.Size;
 
-                        TimelineSemaphore& image_sync_semaphore = ImageTransferSemaphores[CurrentSemaphore++];
+                        TimelineSemaphore& image_sync_semaphore = ImageTransferSemaphores[CurrentImageTransferSemaphore];
+                    CurrentImageTransferSemaphore = (CurrentImageTransferSemaphore + 1) % PARALLEL_TRANSFERS_COUNT;
 
                         auto queue_1_family_idx = target_image->OwnerQueue->Index;
                         auto queue_2_family_idx = VkVault::Transfer.Index;

@@ -5,7 +5,7 @@
 
 namespace TransferPipe {
     struct Ticket {
-        u32 Value;
+        u64 Value;
         u32 TargetSemaphore; // Point to one of the members in the SignalSemaphores array
     };
 
