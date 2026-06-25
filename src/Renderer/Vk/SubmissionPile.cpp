@@ -47,11 +47,11 @@ void Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineSt
     };
 }
 
-void Wait(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFlags2 stage) {
+void Wait(SubmissionPile& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage) {
     Wait(pile, semaphore.Handle, semaphore.LastSignaledValue, stage);
 }
 
-void Signal(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFlags2 stage) {
+void Signal(SubmissionPile& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage) {
     Signal(pile, semaphore.Handle, ++semaphore.LastSignaledValue, stage);
 }
 

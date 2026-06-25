@@ -33,8 +33,8 @@ void Command(SubmissionPile& pile, VkCommandBuffer command);
 void Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
 void Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
 
-void Wait(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFlags2 stage = 0);
-void Signal(SubmissionPile& pile, TimelineSemaphore semaphore, VkPipelineStageFlags2 stage = 0);
+void Wait(SubmissionPile& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = 0);
+void Signal(SubmissionPile& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = 0);
 
 void SubmitPile(QueueContext& ctx, SubmissionPile& pile, VkFence execution_fence = VK_NULL_HANDLE);
 void SubmitMultiplePiles(QueueContext& ctx, SubmissionPile* piles, u64 pile_count, VkFence execution_fence = VK_NULL_HANDLE);
