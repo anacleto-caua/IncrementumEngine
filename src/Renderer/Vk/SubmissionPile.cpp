@@ -1,6 +1,7 @@
 #include "SubmissionPile.hpp"
 
 #include <array>
+#include <cassert>
 
 void Reset(SubmissionPile& pile) {
     pile.SubmitCount = pile.CmdCount = pile.WaitCount = pile.SignalCount = 0;
@@ -18,33 +19,45 @@ void End(SubmissionPile& pile) {
     u64 wait_semaphores_quantity = pile.WaitCount - pile.WaitStart;
     u64 signal_semaphores_quantity = pile.SignalCount - pile.SignalStart;
 
-    pile.Submits[pile.SubmitCount++] = {
+    assert(pile.SubmitCount < MAX_SUBMITS && "max submission count reached on a pile");
+
+    pile.Submits[pile.SubmitCount] = {
         VK_STRUCTURE_TYPE_SUBMIT_INFO_2, nullptr, 0,
         static_cast<u32>(wait_semaphores_quantity), wait_semaphores_quantity > 0 ? &pile.WaitSemaphores[pile.WaitStart] : nullptr,
         static_cast<u32>(command_quantity), command_quantity > 0 ? &pile.CommandBuffers[pile.CmdStart] : nullptr,
         static_cast<u32>(signal_semaphores_quantity), signal_semaphores_quantity > 0 ? &pile.SignalSemaphores[pile.SignalStart] : nullptr
     };
+    pile.SubmitCount++;
 }
 
 void Command(SubmissionPile& pile, VkCommandBuffer command) {
-    pile.CommandBuffers[pile.CmdCount++] = {
+    assert(pile.CmdCount < MAX_COMMAND_BUFFERS && "max command count reached on a pile");
+
+    pile.CommandBuffers[pile.CmdCount] = {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, nullptr,
         command, 0
     };
+    pile.CmdCount++;
 }
 
 void Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage) {
-    pile.WaitSemaphores[pile.WaitCount++] = {
+    assert(pile.WaitCount < MAX_SEMAPHORES && "max wait semaphores on a pile reached");
+
+    pile.WaitSemaphores[pile.WaitCount] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
         semaphore, value, stage, 0
     };
+    pile.WaitCount++;
 }
 
 void Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage) {
-    pile.SignalSemaphores[pile.SignalCount++] = {
+    assert(pile.SignalCount < MAX_SEMAPHORES && "max signal semaphores count on a pile reached");
+
+    pile.SignalSemaphores[pile.SignalCount] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
         semaphore, value, stage, 0
     };
+    pile.SignalCount++;
 }
 
 void Wait(SubmissionPile& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage) {
