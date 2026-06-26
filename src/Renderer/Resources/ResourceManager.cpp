@@ -71,6 +71,7 @@ namespace Image {
         image.Depth = create_info.Depth;
         image.Format = create_info.Format;
         image.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        image.OwnerQueue = create_info.OwnerQueue;
 
         return ImagePool.Add(image);
     }
@@ -250,33 +251,6 @@ namespace Buffer {
             Destroy(buffer);
             BufferPool.Remove(id);
         }
-    }
-
-    template <typename T, u32 COUNT>
-    Mirror<T, COUNT> AddMirror(Type type) {
-        u64 size = COUNT * sizeof(T);
-        Mirror<T, COUNT> mirror {};
-        mirror.Device = Add(
-            {
-                .Size = size,
-                .Type = type
-            }
-        );
-        mirror.Host = Add(
-            {
-                .Size = COUNT,
-                .Type = Type::STAGING
-            }
-        );
-        mirror.Data = static_cast<T>(Map(Get(mirror.Host)->Allocation));
-
-        return mirror;
-    }
-
-    template <typename T, u32 COUNT>
-    void DelMirror(Mirror<T, COUNT> mirror) {
-        Del(mirror.Device);
-        Del(mirror.Host);
     }
 
     void* Map(const VmaAllocation alloc) {

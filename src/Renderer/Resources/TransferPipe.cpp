@@ -372,12 +372,12 @@ namespace TransferPipe {
     }
 
     void FullSubmit() {
-        SubmitPile(VkVault::Transfer, TransferSubmissionPile, VK_NULL_HANDLE);
-        Reset(TransferCommandBufferBlock);
         for (auto* queue : VkVault::UniqueQueues) {
             SubmitPile(*queue, SpecialSubmissionPiles[queue->ResourceIndex], VK_NULL_HANDLE);
             Reset(SpecialCommandBufferBlocks[queue->ResourceIndex]);
         }
+        SubmitPile(VkVault::Transfer, TransferSubmissionPile, VK_NULL_HANDLE);
+        Reset(TransferCommandBufferBlock);
     }
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type) {

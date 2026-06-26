@@ -1,15 +1,15 @@
 #version 450
 
-struct ChunkHeightmapLink {
-    ivec2 worldPos;
-    uint instanceId;
-    uint packedFlags;
+struct ChunkDrawData {
+    ivec2 WorldPos;
+    uint TextureLayer;
+    uint padding;
 };
 
 layout(set = 1, binding = 1) uniform sampler2DArray heightmapSampler;
 
 layout(std430, set = 1, binding = 0) readonly buffer ChunkBuffer {
-    ChunkHeightmapLink chunks[];
+    ChunkDrawData chunks[];
 } chunkLinkDataBuffer;
 
 layout(location = 0) out vec2 texCoord;
@@ -26,17 +26,10 @@ const float GRID_SCALE = 50.0;
 const float HEIGHT_SCALE = 30.0 * sqrt(GRID_SCALE); // Still doesn't feel like it
 
 void main() {
-    ChunkHeightmapLink currentChunk = chunkLinkDataBuffer.chunks[gl_InstanceIndex];
+    ChunkDrawData currentChunk = chunkLinkDataBuffer.chunks[gl_InstanceIndex];
 
-    bool isActive = bitfieldExtract(currentChunk.packedFlags, 0, 1) == 1;
-    bool isVisible = bitfieldExtract(currentChunk.packedFlags, 1, 1) == 1;
-    if (!isVisible && !isActive) {
-        gl_Position = vec4(0.0/0.0);
-        return;
-    }
-
-    float chunkOffsetX = float(currentChunk.worldPos.x) * GRID_SCALE;
-    float chunkOffsetZ = float(currentChunk.worldPos.y) * GRID_SCALE;
+    float chunkOffsetX = float(currentChunk.WorldPos.x) * GRID_SCALE;
+    float chunkOffsetZ = float(currentChunk.WorldPos.y) * GRID_SCALE;
 
     int xIndex = gl_VertexIndex % RESOLUTION;
     int zIndex = gl_VertexIndex / RESOLUTION;
@@ -53,6 +46,6 @@ void main() {
 
     gl_Position = terrain_push.lookAt * vec4(finalWorldPos, 1.0);
 
-    bool checker = ((currentChunk.worldPos.x + currentChunk.worldPos.y) % 2) == 0;
+    bool checker = ((currentChunk.WorldPos.x + currentChunk.WorldPos.y) % 2) == 0;
     debugColor = checker ? vec3(0.8, 0.2, 0.2) : vec3(0.2, 0.2, 0.8);
 }

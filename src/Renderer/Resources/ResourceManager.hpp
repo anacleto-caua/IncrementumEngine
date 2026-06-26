@@ -18,13 +18,6 @@ namespace Buffer {
     Id Add(CreateInfo create_info);
     void Del(Id id);
 
-    template <typename T, u32 COUNT>
-    Mirror<T, COUNT> AddMirror(Type type);
-
-    // Wanted to call it BreakMirror() so badly
-    template <typename T, u32 COUNT>
-    void DelMirror(Mirror<T, COUNT> mirror);
-
     Value* Get(Id id);
 
     void* Map(const VmaAllocation alloc);
@@ -40,6 +33,7 @@ namespace Image {
         u32 ArrayLayers = 1;
         VkFormat Format = VK_FORMAT_R8G8B8A8_SRGB;
         VkImageUsageFlags Usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        QueueContext* OwnerQueue;
     };
 
     Id Add(CreateInfo create_info);

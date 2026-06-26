@@ -14,7 +14,7 @@ namespace Image {
         u32 ArrayLayers;
         VkFormat Format;
         VkImageLayout Layout;
-        QueueContext* OwnerQueue = &VkVault::Transfer;
+        QueueContext* OwnerQueue;
     };
 
     using Id = asl::Handle<Value>;

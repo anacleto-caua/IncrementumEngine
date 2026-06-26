@@ -5,6 +5,7 @@
 #include <glm/ext.hpp>
 
 #include "Renderer/VkVault.hpp"
+#include "Renderer/Renderer.hpp"
 #include "Renderer/Vk/ShaderBuilder.hpp"
 #include "Renderer/Vk/PipelineDefaults.hpp"
 #include "Renderer/Resources/TransferPipe.hpp"
@@ -17,7 +18,8 @@ namespace TerrainPass {
     // Push constants
     struct TerrainPushConstants {
         glm::mat4 CameraMVP;
-        glm::vec4 PlayerPosition;
+        glm::vec3 PlayerPosition;
+        f32 padding;
     };
 
     TerrainPushConstants TerrainPushConstants {};
@@ -57,6 +59,7 @@ namespace TerrainPass {
                 heightmap_image_create_desc.ArrayLayers = TerrainConfig::Streaming::MaxActiveChunks;
                 heightmap_image_create_desc.Format = TerrainConfig::Memory::HeightmapFormat;
                 heightmap_image_create_desc.Usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+                heightmap_image_create_desc.OwnerQueue = &VkVault::Graphics;
 
                 Heightmap::Image = Image::Add(heightmap_image_create_desc);
                 Image::Value* heightmap_image_value = Image::Get(Heightmap::Image);
@@ -273,15 +276,16 @@ namespace TerrainPass {
                 );
         }
 
-        TransferPipe::FullSubmit();
+        //TransferPipe::FullSubmit();
 
         // It's ok to wait only on the last ticket since the system forces order of uploads
-        TransferPipe::WaitOn(last_upload);
+        //TransferPipe::WaitOn(last_upload);
 
         // Zeroing terrain push constants
         TerrainPushConstants = {
             .CameraMVP = glm::mat4(0),
-            .PlayerPosition = glm::vec4(0)
+            .PlayerPosition = glm::vec3(0),
+            .padding = .0
         };
 
         return IncResult::SUCCESS;
@@ -306,6 +310,8 @@ namespace TerrainPass {
 
         vkCmdBindIndexBuffer(cmd, Buffer::Get(PlaneMesh::Indices)->Buffer, 0, VK_INDEX_TYPE_UINT32);
 
+        TerrainPushConstants.CameraMVP = Renderer::CurrentCamera->ModelViewProjection;
+        TerrainPushConstants.PlayerPosition = Renderer::CurrentCamera->Position;
         vkCmdPushConstants(
             cmd,
             TerrainPipelineLayout,
@@ -362,7 +368,7 @@ namespace TerrainPass {
             };
             Indices = Buffer::Add(IndiceCreateInfo);
 
-            std::array<u32, TerrainConfig::Mesh::IndexBufferSize> indices_buffer;
+            std::vector<u32> indices_buffer(TerrainConfig::Mesh::IndexCount);
             GenerateIndices(indices_buffer.data());
 
             TransferPipe::Ticket indices_upload = TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), TerrainConfig::Mesh::IndexBufferSize);
