@@ -4,9 +4,9 @@
 #include <vector>
 
 #include "RingBuffer.hpp"
-#include "Renderer/Vk/Vk.hpp"
 #include "Renderer/Vk/VkCmdLean.hpp"
 #include "Renderer/Vk/SubmissionPile.hpp"
+#include "Renderer/Vk/TimelineSemaphore.hpp"
 #include "Renderer/Vk/CommandBufferBlock.hpp"
 
 static constexpr u64 STAGING_BUFFER_SIZE = 10 * 1024 * 1024; // 10 MB

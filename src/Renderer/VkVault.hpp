@@ -3,7 +3,7 @@
 #include <array>
 #include <vector>
 
-#include "Vk/Vk.hpp"
+#include "Vk/TimelineSemaphore.hpp"
 
 #define VK_CHECK(expr, ...)                     \
     do {                                        \

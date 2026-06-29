@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Vk.hpp"
 #include "Renderer/VkVault.hpp"
 
 constexpr u64 MAX_SUBMITS = 32;
