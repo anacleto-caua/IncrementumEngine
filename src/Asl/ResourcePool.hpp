@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cassert>
 
 #include "Asl/FreeList.hpp"
 
@@ -29,14 +30,14 @@ template <typename T>
 class ResourcePool {
 private:
     FreeList<T> Data;
-    DArray<uint32_t> Generations; // Parallel array tracking generations
+    std::vector<uint32_t> Generations; // Parallel array tracking generations
 
 public:
     Handle<T> Add(T element) {
         u32 index = static_cast<u32>(Data.Add(element));
 
-        if (index == Generations.Size) {
-            Generations.Push(0);
+        if (index == Generations.size()) {
+            Generations.push_back(0);
         }
 
         Handle<T> h;

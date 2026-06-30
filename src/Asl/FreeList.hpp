@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Asl/DArray.hpp"
+#include <vector>
+#include <cassert>
 
 namespace asl {
 
@@ -12,8 +13,8 @@ private:
         bool Active;
     };
 
-    DArray<Slot> Data;
-    DArray<size_t> FreeIndices;
+    std::vector<Slot> Data;
+    std::vector<size_t> FreeIndices;
 
 public:
     FreeList() = default;
@@ -28,16 +29,16 @@ public:
 
     size_t Add(T element) {
         size_t index;
-        if (FreeIndices.Size > 0) {
-            index = FreeIndices[FreeIndices.Size-1];
-            FreeIndices.Pop();
+        if (FreeIndices.size() > 0) {
+            index = FreeIndices[FreeIndices.size()-1];
+            FreeIndices.pop_back();
             Data[index] = {
                 .Data = element,
                 .Active = true
             };
         } else {
-            index = Data.Size;
-            Data.Push({
+            index = Data.size();
+            Data.push_back({
                 .Data = element,
                 .Active = true
             });
@@ -49,22 +50,22 @@ public:
         assert(Data[index].Active == true && "tried to remove an already invalid index.");
 
         Data[index].Active = false;
-        FreeIndices.Push(index);
+        FreeIndices.push_back(index);
     }
 
     class Iterator {
         private:
-            DArray<Slot>& DataPool;
+            std::vector<Slot>& DataPool;
             size_t Index;
 
             void SkipInactive() {
-                while (Index < DataPool.Size && !DataPool[Index].Active) {
+                while (Index < DataPool.size() && !DataPool[Index].Active) {
                     Index++;
                 }
             }
 
         public:
-            Iterator(DArray<Slot>& data, size_t start_index) : DataPool(data), Index(start_index) {
+            Iterator(std::vector<Slot>& data, size_t start_index) : DataPool(data), Index(start_index) {
                 SkipInactive();
             }
 
@@ -88,7 +89,7 @@ public:
     }
 
     Iterator end() {
-        return Iterator(Data, Data.Size);
+        return Iterator(Data, Data.size());
     }
 
 };

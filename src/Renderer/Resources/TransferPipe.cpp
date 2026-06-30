@@ -2,6 +2,7 @@
 
 #include <queue>
 #include <vector>
+#include <cassert>
 
 #include "RingBuffer.hpp"
 #include "Renderer/Vk/VkCmdLean.hpp"
