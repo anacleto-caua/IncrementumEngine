@@ -32,6 +32,10 @@ private:
     FreeList<T> Data;
     std::vector<uint32_t> Generations; // Parallel array tracking generations
 
+    void VALIDATE_HANDLE(Handle<T> handle) {
+        assert(handle.Generation == Generations[handle.Index] && "tried to access a stale handle.");
+    }
+
 public:
     Handle<T> Add(T element) {
         u32 index = static_cast<u32>(Data.Add(element));
@@ -47,12 +51,12 @@ public:
     }
 
     T& Get(Handle<T> handle) {
-        assert(handle.Generation == Generations[handle.Index] && "tried to access a stale handle.");
+        VALIDATE_HANDLE(handle);
         return Data[handle.Index];
     }
 
     void Remove(Handle<T> handle) {
-        assert(handle.Generation == Generations[handle.Index] && "tried to remove a stale handle.");
+        VALIDATE_HANDLE(handle);
         Generations[handle.Index]++;
         Data.Remove(handle.Index);
     }
