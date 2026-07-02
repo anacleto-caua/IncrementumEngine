@@ -254,10 +254,11 @@ namespace TerrainPass {
         // Write the first valid data
         TerrainManager::Init();
 
-        TransferPipe::Ticket last_upload;
+        analog::error("CODE WILL BREAK, IT'S BROKEN BELLOW THIS POINT");
+        return IncResult::FAIL;
+
         for (auto& buffer : ChunkDrawListBuffers) {
             // TODO: Move this to the frame structure
-            last_upload =
                 TransferPipe::QueueBufferUpload(
                     buffer,
                     0,
@@ -267,7 +268,6 @@ namespace TerrainPass {
         }
 
         for (u32 i = 0; i < TerrainManager::HeightmapData.size(); i++) {
-            last_upload =
                 TransferPipe::QueueImageSliceUpload(
                     Heightmap::Image,
                     i,
@@ -276,10 +276,7 @@ namespace TerrainPass {
                 );
         }
 
-        //TransferPipe::FullSubmit();
-
-        // It's ok to wait only on the last ticket since the system forces order of uploads
-        //TransferPipe::WaitOn(last_upload);
+        TransferPipe::LazySubmit();
 
         // Zeroing terrain push constants
         TerrainPushConstants = {
@@ -369,11 +366,10 @@ namespace TerrainPass {
             Indices = Buffer::Add(IndiceCreateInfo);
 
             std::vector<u32> indices_buffer(TerrainConfig::Mesh::IndexCount);
-            GenerateIndices(indices_buffer.data());
 
-            TransferPipe::Ticket indices_upload = TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), TerrainConfig::Mesh::IndexBufferSize);
-            TransferPipe::FullSubmit();
-            TransferPipe::WaitOn(indices_upload);
+            TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), TerrainConfig::Mesh::IndexBufferSize);
+            TransferPipe::LazySubmit();
+            analog::info("indices submitted!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
         }
     }
 }
