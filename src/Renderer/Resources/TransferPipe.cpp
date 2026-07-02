@@ -17,6 +17,9 @@ static constexpr u64 PARALLEL_TRANSFERS_COUNT = 5;
 static constexpr u64 BUFFER_UPDATE_SIZE_LIMIT = 30000;
 
 namespace TransferPipe {
+    // Just carry a safe copy of the last ticket, used to clean the submissions
+    Ticket LastTicket = { 0, 0 };
+
     std::array<TimelineSemaphore, PARALLEL_TRANSFERS_COUNT> SignalSemaphores;
     u32 CurrentSemaphore = 0;
 
@@ -120,6 +123,7 @@ namespace TransferPipe {
             .TargetSemaphore = CurrentSemaphore
         };
         CurrentSemaphore = (CurrentSemaphore + 1) % PARALLEL_TRANSFERS_COUNT;
+        LastTicket = ticket;
         return ticket;
     }
 
@@ -135,13 +139,14 @@ namespace TransferPipe {
         WaitOnTimelineSemaphore(SignalSemaphores[ticket.TargetSemaphore], ticket.Value);
     }
 
-    // This method needs a thing to count how many packages I should enqueue per time.
-    void Frame() {
+    // Just write all packages, I need a version of this that controls how much it writes
+    void LazyWrite() {
         Begin(TransferSubmissionPile);
 
         while(!PackageQueue.empty()) {
             u64 ring_buffer_read_size = 0;
-            Package& package = PackageQueue.back();
+            Package package = PackageQueue.front();
+            PackageQueue.pop();
             TimelineSemaphore& ticket_semaphore = SignalSemaphores[package.TicketToSignal.TargetSemaphore];
 
             // Tagged union stuff
@@ -372,12 +377,18 @@ namespace TransferPipe {
         End(TransferSubmissionPile);
     }
 
-    void FullSubmit() {
+    void LazySubmit() {
+        LazyWrite();
         for (auto* queue : VkVault::UniqueQueues) {
             SubmitPile(*queue, SpecialSubmissionPiles[queue->ResourceIndex], VK_NULL_HANDLE);
-            Reset(SpecialCommandBufferBlocks[queue->ResourceIndex]);
         }
         SubmitPile(VkVault::Transfer, TransferSubmissionPile, VK_NULL_HANDLE);
+
+        WaitOn(LastTicket); // To safely wipe command buffers
+
+        for (auto* queue : VkVault::UniqueQueues) {
+            Reset(SpecialSubmissionPiles[queue->ResourceIndex]);
+        }
         Reset(TransferCommandBufferBlock);
     }
 

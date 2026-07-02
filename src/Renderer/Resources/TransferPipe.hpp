@@ -22,10 +22,9 @@ namespace TransferPipe {
     void WaitOn(Ticket ticket);
 
     /**
-     * These two methods are poorly defined without any clear usage or future.
+     * This methods is just flushes the entire package queue
      */
-    void Frame();
-    void FullSubmit();
+    void LazySubmit();
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType type = TransferType::Normal);
     Ticket QueueBufferUpload(Buffer::Id dst, u64 write_offset, const void* src, u64 size, TransferType type = TransferType::Normal);
