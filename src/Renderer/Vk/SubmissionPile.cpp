@@ -70,7 +70,7 @@ void Signal(SubmissionPile& pile, TimelineSemaphore& semaphore, VkPipelineStageF
 
 void SubmitPile(QueueContext& ctx, SubmissionPile& pile, VkFence execution_fence) {
     if(pile.SubmitCount >= 1) {
-        vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence);
+        VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence), "pile submission failed");
         Reset(pile);
     }
 }
@@ -90,6 +90,6 @@ void SubmitMultiplePiles(QueueContext& ctx, SubmissionPile* piles, u64 pile_coun
     }
 
     if (total_submits > 0) {
-        vkQueueSubmit2(ctx.Queue, static_cast<u32>(total_submits), global_submits.data(), execution_fence);
+        VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(total_submits), global_submits.data(), execution_fence), "multiple piles submission failed");
     }
 }
