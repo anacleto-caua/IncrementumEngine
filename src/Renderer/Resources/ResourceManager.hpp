@@ -33,7 +33,7 @@ namespace Image {
         u32 ArrayLayers = 1;
         VkFormat Format = VK_FORMAT_R8G8B8A8_SRGB;
         VkImageUsageFlags Usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        QueueContext* OwnerQueue;
+        QueueContext* OwnerQueue = &VkVault::Transfer;
     };
 
     Id Add(CreateInfo create_info);
