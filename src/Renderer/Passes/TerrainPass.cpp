@@ -334,36 +334,36 @@ namespace TerrainPass {
     }
 
     namespace PlaneMesh {
-        void GenerateIndices(u32* IndicesBegin) {
-            u32 TerrainRes = TerrainConfig::Mesh::VerticesPerEdge;
-            for (u32 z = 0; z < TerrainRes - 1; z++) {
-                for (u32 x = 0; x < TerrainRes - 1; x++) {
+        void GenerateIndices(u32* indices_begin) {
+            u32 terrain_res = TerrainConfig::Mesh::VerticesPerEdge;
+            for (u32 z = 0; z < terrain_res - 1; z++) {
+                for (u32 x = 0; x < terrain_res - 1; x++) {
                     // Calculate the index of the current vertex and neighbors
-                    u32 topLeft = (z * TerrainRes) + x;
-                    u32 topRight = topLeft + 1;
-                    u32 bottomLeft = ((z + 1) * TerrainRes) + x;
-                    u32 bottomRight = bottomLeft + 1;
+                    u32 top_left = (z * terrain_res) + x;
+                    u32 top_right = top_left + 1;
+                    u32 bottom_left = ((z + 1) * terrain_res) + x;
+                    u32 bottom_right = bottom_left + 1;
 
                     // Triangle 1 (Top-Left -> Bottom-Left -> Top-Right)
-                    *IndicesBegin++ = topLeft;
-                    *IndicesBegin++ = bottomLeft;
-                    *IndicesBegin++ = topRight;
+                    *indices_begin++ = top_left;
+                    *indices_begin++ = bottom_left;
+                    *indices_begin++ = top_right;
 
                     // Triangle 2 (Top-Right -> Bottom-Left -> Bottom-Right)
-                    *IndicesBegin++ = topRight;
-                    *IndicesBegin++ = bottomLeft;
-                    *IndicesBegin++ = bottomRight;
+                    *indices_begin++ = top_right;
+                    *indices_begin++ = bottom_left;
+                    *indices_begin++ = bottom_right;
                 }
             }
         }
 
         void Upload() {
             // Create the actual Plane Mesh index buffer
-            Buffer::CreateInfo IndiceCreateInfo = {
+            Buffer::CreateInfo indices_buffer_create_info = {
                 .Size = TerrainConfig::Mesh::IndexBufferSize,
                 .Type = Buffer::Type::INDEX,
             };
-            Indices = Buffer::Add(IndiceCreateInfo);
+            Indices = Buffer::Add(indices_buffer_create_info);
 
             std::vector<u32> indices_buffer(TerrainConfig::Mesh::IndexCount);
 
