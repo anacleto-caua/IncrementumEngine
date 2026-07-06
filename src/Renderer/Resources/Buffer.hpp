@@ -22,27 +22,4 @@ namespace Buffer {
     };
 
     using Id = asl::Handle<Value>;
-
-    template <typename T, u32 COUNT>
-    struct Mirror {
-        Id Device;
-        Id Host;
-        T* Data;
-
-        T* begin() {
-            return Data;
-        }
-
-        T* end() {
-            return Data + COUNT;
-        }
-
-        const T* begin() const {
-            return Data;
-        }
-
-        const T* end() const {
-            return Data + COUNT;
-        }
-    };
 }
