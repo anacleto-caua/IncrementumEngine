@@ -1,7 +1,5 @@
 #include "ResourceManager.hpp"
 
-#include <array>
-
 namespace Buffer {
     void Destroy(Value* buffer);
     void DestroyAll();
@@ -45,25 +43,11 @@ namespace Image {
         image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
         image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
         image_create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         image_create_info.usage = create_info.Usage;
         image_create_info.extent.width = create_info.Width;
         image_create_info.extent.height = create_info.Height;
         image_create_info.arrayLayers = create_info.ArrayLayers;
-
-        // Create before so it's kept valid till creation
-        std::array<u32, 2> owners;
-
-        // Every image is owned by the transfer queue by default
-        if ((create_info.OwnerQueue == nullptr) || (create_info.OwnerQueue->Index == VkVault::Transfer.Index)) {
-            image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-            image_create_info.pQueueFamilyIndices = &VkVault::Transfer.Index;
-            image_create_info.queueFamilyIndexCount = 1;
-        } else {
-            owners = { create_info.OwnerQueue->Index, VkVault::Transfer.Index };
-            image_create_info.sharingMode = VK_SHARING_MODE_CONCURRENT;
-            image_create_info.pQueueFamilyIndices = owners.data();
-            image_create_info.queueFamilyIndexCount = owners.size();
-        }
 
         VmaAllocationCreateInfo alloc_create_info {};
         alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO;
