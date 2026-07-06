@@ -3,23 +3,23 @@
 #include <array>
 #include <cassert>
 
-void Reset(SubmissionPile& pile) {
+void Reset(SubmissionPile<>& pile) {
     pile.SubmitCount = pile.CmdCount = pile.WaitCount = pile.SignalCount = 0;
     pile.CmdStart = pile.WaitStart = pile.SignalStart = 0;
 }
 
-void Begin(SubmissionPile& pile) {
+void Begin(SubmissionPile<>& pile) {
     pile.CmdStart = pile.CmdCount;
     pile.WaitStart = pile.WaitCount;
     pile.SignalStart = pile.SignalCount;
 }
 
-void End(SubmissionPile& pile) {
+void End(SubmissionPile<>& pile) {
     u64 command_quantity = pile.CmdCount - pile.CmdStart;
     u64 wait_semaphores_quantity = pile.WaitCount - pile.WaitStart;
     u64 signal_semaphores_quantity = pile.SignalCount - pile.SignalStart;
 
-    assert(pile.SubmitCount < MAX_SUBMITS && "max submission count reached on a pile");
+    assert(pile.SubmitCount < pile.MaxSubmits && "max submission count reached on a pile");
 
     pile.Submits[pile.SubmitCount] = {
         VK_STRUCTURE_TYPE_SUBMIT_INFO_2, nullptr, 0,
@@ -30,8 +30,8 @@ void End(SubmissionPile& pile) {
     pile.SubmitCount++;
 }
 
-void Command(SubmissionPile& pile, VkCommandBuffer command) {
-    assert(pile.CmdCount < MAX_COMMAND_BUFFERS && "max command count reached on a pile");
+void Command(SubmissionPile<>& pile, VkCommandBuffer command) {
+    assert(pile.CmdCount < pile.MaxCommandBuffers && "max command count reached on a pile");
 
     pile.CommandBuffers[pile.CmdCount] = {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, nullptr,
@@ -40,8 +40,8 @@ void Command(SubmissionPile& pile, VkCommandBuffer command) {
     pile.CmdCount++;
 }
 
-void Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage) {
-    assert(pile.WaitCount < MAX_SEMAPHORES && "max wait semaphores on a pile reached");
+void Wait(SubmissionPile<>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage) {
+    assert(pile.WaitCount < pile.MaxWaitSemaphores && "max wait semaphores on a pile reached");
 
     pile.WaitSemaphores[pile.WaitCount] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
@@ -50,8 +50,8 @@ void Wait(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStag
     pile.WaitCount++;
 }
 
-void Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage) {
-    assert(pile.SignalCount < MAX_SEMAPHORES && "max signal semaphores count on a pile reached");
+void Signal(SubmissionPile<>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage) {
+    assert(pile.SignalCount < pile.MaxSignalSemaphores && "max signal semaphores count on a pile reached");
 
     pile.SignalSemaphores[pile.SignalCount] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
@@ -60,27 +60,27 @@ void Signal(SubmissionPile& pile, VkSemaphore semaphore, u64 value, VkPipelineSt
     pile.SignalCount++;
 }
 
-void Wait(SubmissionPile& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage) {
+void Wait(SubmissionPile<>& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage) {
     Wait(pile, semaphore.Handle, semaphore.LastSignaledValue, stage);
 }
 
-void Signal(SubmissionPile& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage) {
+void Signal(SubmissionPile<>& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage) {
     Signal(pile, semaphore.Handle, ++semaphore.LastSignaledValue, stage);
 }
 
-void SubmitPile(QueueContext& ctx, SubmissionPile& pile, VkFence execution_fence) {
+void SubmitPile(QueueContext& ctx, SubmissionPile<>& pile, VkFence execution_fence) {
     if(pile.SubmitCount >= 1) {
         VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence), "pile submission failed");
         Reset(pile);
     }
 }
 
-void SubmitMultiplePiles(QueueContext& ctx, SubmissionPile* piles, u64 pile_count, VkFence execution_fence) {
+void SubmitMultiplePiles(QueueContext& ctx, SubmissionPile<>* piles, u64 pile_count, VkFence execution_fence) {
     std::array<VkSubmitInfo2, 128> global_submits;
     u64 total_submits = 0;
 
     for (u64 i = 0; i < pile_count; i++) {
-        SubmissionPile& pile = piles[i];
+        SubmissionPile<>& pile = piles[i];
 
         for (u64 j = 0; j < pile.SubmitCount; j++) {
             global_submits[total_submits++] = pile.Submits[j];
