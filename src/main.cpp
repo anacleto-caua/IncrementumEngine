@@ -2,7 +2,7 @@
 
 int main() {
     if (Engine::Create() != IncResult::SUCCESS) {
-        analog::info("Couldn't create engine");
+        analog::error("Couldn't create engine");
         return -1;
     }
 
