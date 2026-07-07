@@ -9,6 +9,23 @@
 #include "Renderer/Vk/TimelineSemaphore.hpp"
 #include "Renderer/Vk/CommandBufferBlock.hpp"
 
+// The parameters used for the main transmission pile
+static constexpr u64 NORMAL_PILE_SUBMITS = 32;
+static constexpr u64 NORMAL_PILE_COMMAND_BUFFERS = 64;
+static constexpr u64 NORMAL_PILE_WAIT_SEMAPHORES = 64;
+static constexpr u64 NORMAL_PILE_SIGNAL_SEMAPHORES = 64;
+
+/**
+ * The parameters used for the special transmission piles,
+ * since they're used for image transfer exclusively they have twice the size,
+ * make it easier to check if it's full this will guarantee the normal pile will overflow before and thus will
+ * make it easier to check if it's full
+*/
+static constexpr u64 SPECIAL_PILE_SUBMITS = NORMAL_PILE_SUBMITS * 2;
+static constexpr u64 SPECIAL_PILE_COMMAND_BUFFERS = NORMAL_PILE_COMMAND_BUFFERS * 2;
+static constexpr u64 SPECIAL_PILE_WAIT_SEMAPHORES = NORMAL_PILE_WAIT_SEMAPHORES * 2;
+static constexpr u64 SPECIAL_PILE_SIGNAL_SEMAPHORES = NORMAL_PILE_SIGNAL_SEMAPHORES * 2;
+
 static constexpr u64 STAGING_BUFFER_SIZE = 10 * 1024 * 1024; // 10 MB
 static constexpr u64 PARALLEL_TRANSFERS_COUNT = 5;
 
@@ -66,8 +83,22 @@ namespace TransferPipe {
 
     std::queue<Package> PackageQueue;
 
-    SubmissionPile TransferSubmissionPile;
+    SubmissionPile<
+        NORMAL_PILE_SUBMITS,
+        NORMAL_PILE_COMMAND_BUFFERS,
+        NORMAL_PILE_WAIT_SEMAPHORES,
+        NORMAL_PILE_SIGNAL_SEMAPHORES
+    > TransferSubmissionPile;
     CommandBufferBlock TransferCommandBufferBlock;
+
+    // The resource belows are one per queue, as of now it's just for ImageSliceUpdates
+    std::vector<SubmissionPile<
+        SPECIAL_PILE_SUBMITS,
+        SPECIAL_PILE_COMMAND_BUFFERS,
+        SPECIAL_PILE_WAIT_SEMAPHORES,
+        SPECIAL_PILE_SIGNAL_SEMAPHORES
+    >> SpecialSubmissionPiles;
+    std::vector<CommandBufferBlock> SpecialCommandBufferBlocks;
 
     RingBuffer<STAGING_BUFFER_SIZE> StagingBuffer;
 
@@ -83,6 +114,14 @@ namespace TransferPipe {
 
         Reset(TransferSubmissionPile);
         Create(TransferCommandBufferBlock, &VkVault::Transfer);
+
+        SpecialSubmissionPiles.resize(VkVault::UniqueQueues.size());
+        SpecialCommandBufferBlocks.resize(VkVault::UniqueQueues.size());
+
+        for (QueueContext* q : VkVault::UniqueQueues) {
+            Reset(SpecialSubmissionPiles[q->ResourceIndex]);
+            Create(SpecialCommandBufferBlocks[q->ResourceIndex], q);
+        }
 
         return IncResult::SUCCESS;
     }

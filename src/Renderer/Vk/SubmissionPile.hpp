@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <cassert>
+
 #include "Renderer/VkVault.hpp"
 
 template <
@@ -29,18 +32,85 @@ struct SubmissionPile {
     u64 SignalStart = 0;
 };
 
-void Reset(SubmissionPile<>& pile);
+// Damn I sure love having to repeat myself a lot to use generics :)
 
-void Begin(SubmissionPile<>& pile);
-void End(SubmissionPile<>& pile);
+template <u64 A, u64 B, u64 C, u64 D>
+void Reset(SubmissionPile<A, B, C, D>& pile) {
+    pile.SubmitCount = pile.CmdCount = pile.WaitCount = pile.SignalCount = 0;
+    pile.CmdStart = pile.WaitStart = pile.SignalStart = 0;
+}
 
-void Command(SubmissionPile<>& pile, VkCommandBuffer command);
+template <u64 A, u64 B, u64 C, u64 D>
+void Begin(SubmissionPile<A, B, C, D>& pile) {
+    pile.CmdStart = pile.CmdCount;
+    pile.WaitStart = pile.WaitCount;
+    pile.SignalStart = pile.SignalCount;
+}
 
-void Wait(SubmissionPile<>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
-void Signal(SubmissionPile<>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0);
+template <u64 A, u64 B, u64 C, u64 D>
+void End(SubmissionPile<A, B, C, D>& pile) {
+    u64 command_quantity = pile.CmdCount - pile.CmdStart;
+    u64 wait_semaphores_quantity = pile.WaitCount - pile.WaitStart;
+    u64 signal_semaphores_quantity = pile.SignalCount - pile.SignalStart;
 
-void Wait(SubmissionPile<>& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = 0);
-void Signal(SubmissionPile<>& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = 0);
+    assert(pile.SubmitCount < pile.MaxSubmits && "max submission count reached on a pile");
 
-void SubmitPile(QueueContext& ctx, SubmissionPile<>& pile, VkFence execution_fence = VK_NULL_HANDLE);
-void SubmitMultiplePiles(QueueContext& ctx, SubmissionPile<>* piles, u64 pile_count, VkFence execution_fence = VK_NULL_HANDLE);
+    pile.Submits[pile.SubmitCount] = {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO_2, nullptr, 0,
+        static_cast<u32>(wait_semaphores_quantity), wait_semaphores_quantity > 0 ? &pile.WaitSemaphores[pile.WaitStart] : nullptr,
+        static_cast<u32>(command_quantity), command_quantity > 0 ? &pile.CommandBuffers[pile.CmdStart] : nullptr,
+        static_cast<u32>(signal_semaphores_quantity), signal_semaphores_quantity > 0 ? &pile.SignalSemaphores[pile.SignalStart] : nullptr
+    };
+    pile.SubmitCount++;
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void Command(SubmissionPile<A, B, C, D>& pile, VkCommandBuffer command) {
+    assert(pile.CmdCount < pile.MaxCommandBuffers && "max command count reached on a pile");
+
+    pile.CommandBuffers[pile.CmdCount] = {
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, nullptr,
+        command, 0
+    };
+    pile.CmdCount++;
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void Wait(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0) {
+    assert(pile.WaitCount < pile.MaxWaitSemaphores && "max wait semaphores on a pile reached");
+
+    pile.WaitSemaphores[pile.WaitCount] = {
+        VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+        semaphore, value, stage, 0
+    };
+    pile.WaitCount++;
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void Signal(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0) {
+    assert(pile.SignalCount < pile.MaxSignalSemaphores && "max signal semaphores count on a pile reached");
+
+    pile.SignalSemaphores[pile.SignalCount] = {
+        VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+        semaphore, value, stage, 0
+    };
+    pile.SignalCount++;
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void Wait(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = 0) {
+    Wait(pile, semaphore.Handle, semaphore.LastSignaledValue, stage);
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void Signal(SubmissionPile<A, B, C, D>& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = 0) {
+    Signal(pile, semaphore.Handle, ++semaphore.LastSignaledValue, stage);
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void SubmitPile(QueueContext& ctx, SubmissionPile<A, B, C, D>& pile, VkFence execution_fence = VK_NULL_HANDLE) {
+    if(pile.SubmitCount >= 1) {
+        VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence), "pile submission failed");
+        Reset(pile);
+    }
+}
