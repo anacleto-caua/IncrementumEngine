@@ -104,7 +104,8 @@ void Wait(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& semaphore, 
 
 template <u64 A, u64 B, u64 C, u64 D>
 void Signal(SubmissionPile<A, B, C, D>& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = 0) {
-    Signal(pile, semaphore.Handle, ++semaphore.LastSignaledValue, stage);
+    semaphore.LastSignaledValue += 1;
+    Signal(pile, semaphore.Handle, semaphore.LastSignaledValue, stage);
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
