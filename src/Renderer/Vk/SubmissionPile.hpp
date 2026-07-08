@@ -108,6 +108,26 @@ void Signal(SubmissionPile<A, B, C, D>& pile, TimelineSemaphore& semaphore, VkPi
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
+bool IsFull(SubmissionPile<A, B, C, D> pile) {
+    return (
+        pile.SubmitCount == pile.MaxSubmits ||
+        pile.CmdCount == pile.MaxCommandBuffers ||
+        pile.WaitCount == pile.MaxWaitSemaphores ||
+        pile.SignalCount == pile.MaxSignalSemaphores
+    );
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+bool IsEmpty(SubmissionPile<A, B, C, D> pile) {
+    return (
+        pile.SubmitCount == 0 &&
+        pile.CmdCount == 0 &&
+        pile.WaitCount == 0 &&
+        pile.SignalCount == 0
+    );
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
 void SubmitPile(QueueContext& ctx, SubmissionPile<A, B, C, D>& pile, VkFence execution_fence = VK_NULL_HANDLE) {
     if(pile.SubmitCount >= 1) {
         VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence), "pile submission failed");

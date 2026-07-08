@@ -172,7 +172,7 @@ namespace TransferPipe {
     void LazyWrite() {
         Begin(TransferSubmissionPile);
 
-        while(!PackageQueue.empty()) {
+        while(!PackageQueue.empty() && !IsFull(TransferSubmissionPile)) {
             u64 ring_buffer_read_size = 0;
             Package package = PackageQueue.front();
             PackageQueue.pop();
@@ -424,6 +424,10 @@ namespace TransferPipe {
             Reset(SpecialSubmissionPiles[queue->ResourceIndex]);
         }
         Reset(TransferCommandBufferBlock);
+
+        if (!IsEmpty(TransferSubmissionPile)) {
+            LazySubmit();
+        }
     }
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type) {
