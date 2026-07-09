@@ -8,7 +8,7 @@ namespace IO {
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
         if (!file.is_open()) {
-            analog::critical("failed to open file: " + filename);
+            analog::critical("failed to open file: {} ", filename);
             return IncResult::FAIL;
         }
 

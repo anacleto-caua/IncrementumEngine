@@ -2,8 +2,6 @@
 
 #include <functional>
 
-#include "Types.hpp"
-
 /**
  * Responsible for Window and Input.
  */

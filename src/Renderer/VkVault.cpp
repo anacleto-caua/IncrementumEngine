@@ -2,6 +2,7 @@
 
 #include <array>
 #include <string>
+#include <format>
 #include <cstring>
 
 #include "Engine/Core/Window.hpp"
@@ -48,16 +49,16 @@ namespace VkVault {
 
         switch (msg_severity) {
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-                analog::error(msg);
+                analog::error("{}", msg);
                 break;
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-                analog::warn(msg);
+                analog::warn("{}", msg);
                 break;
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
-                analog::info(msg);
+                analog::info("{}", msg);
                 break;
             case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
-                analog::debug(msg);
+                analog::debug("{}", msg);
                 break;
             default:
                 analog::critical("Unknown Severity Validation Error: {}", msg);
@@ -371,6 +372,22 @@ namespace VkVault {
             }
             same_queue_different_context.clear();
         }
+
+        // out queue info for debug
+        // TODO: make this available at the debug ui since vulkan uses queue indexes
+
+        auto out_queue = [](const char* fancy_name, QueueContext& queue){
+            analog::info("Queue: {}", fancy_name);
+            analog::info(" - Index: {}", queue.Index);
+            analog::info(" - Resource Index: {}", queue.ResourceIndex);
+        };
+
+        analog::info("VkVault creation, queues defined: ");
+        analog::info("Unique queue count: {}", UniqueQueues.size());
+        out_queue("Graphics", Graphics);
+        out_queue("Transfer", Transfer);
+        out_queue("Present", Present);
+        out_queue("Compute", Compute);
 
         return IncResult::SUCCESS;
     }

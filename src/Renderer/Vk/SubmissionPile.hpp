@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <string>
 #include <cassert>
 
 #include "Renderer/VkVault.hpp"
@@ -135,3 +136,61 @@ void SubmitPile(QueueContext& ctx, SubmissionPile<A, B, C, D>& pile, VkFence exe
         Reset(pile);
     }
 }
+
+/*
+template <u64 A, u64 B, u64 C, u64 D>
+std::string FancyOutSubmissionPile(const SubmissionPile<A, B, C, D>& pile) {
+    std::string out = fmt::format(
+        "╭────────────────────────────────────────────────╮\n"
+        "│         Detailed SubmissionPile State          │\n"
+        "├───────────────┬─────────────────┬──────────────┤\n"
+        "│ Resource      │ Usage / Max     │ Batch Start  │\n"
+        "├───────────────┼─────────────────┼──────────────┤\n"
+        "│ Submits       │ {:>5} / {:<5} │      -       │\n"
+        "│ Command Buffs │ {:>5} / {:<5} │ {:>10}   │\n"
+        "│ Wait Semas    │ {:>5} / {:<5} │ {:>10}   │\n"
+        "│ Signal Semas  │ {:>5} / {:<5} │ {:>10}   │\n"
+        "├───────────────┴─────────────────┴──────────────┤\n"
+        "│ Status:  Empty? {:<3}   Full? {:<3}              │\n"
+        "╰────────────────────────────────────────────────╯\n",
+        pile.SubmitCount, pile.MaxSubmits,
+        pile.CmdCount, pile.MaxCommandBuffers, pile.CmdStart,
+        pile.WaitCount, pile.MaxWaitSemaphores, pile.WaitStart,
+        pile.SignalCount, pile.MaxSignalSemaphores, pile.SignalStart,
+        IsEmpty(pile) ? "Yes" : "No",
+        IsFull(pile) ? "Yes" : "No"
+    );
+
+    if (pile.SubmitCount == 0) {
+        out += "\n  [No Submits Recorded]\n";
+        return out;
+    }
+
+    out += "\n=== SUBMISSION TOPOLOGY ===\n";
+
+    for (u32 i = 0; i < pile.SubmitCount; ++i) {
+        const auto& submit = pile.Submits[i];
+        out += fmt::format("▼ Submit [{}]\n", i);
+        out += fmt::format("  ├─ Commands: {}\n", submit.commandBufferInfoCount);
+
+        out += fmt::format("  ├─ Waits: {}\n", submit.waitSemaphoreInfoCount);
+        for (u32 w = 0; w < submit.waitSemaphoreInfoCount; ++w) {
+            const auto& waitInfo = submit.pWaitSemaphoreInfos[w];
+            // Cast to void* so fmt prints the raw Vulkan handle safely
+            out += fmt::format("  │  ├─ Sema: {:p} | Val: {:<4} | Stage: {:#x}\n",
+                               (void*)waitInfo.semaphore, waitInfo.value, waitInfo.stageMask);
+        }
+
+        out += fmt::format("  └─ Signals: {}\n", submit.signalSemaphoreInfoCount);
+        for (u32 s = 0; s < submit.signalSemaphoreInfoCount; ++s) {
+            const auto& sigInfo = submit.pSignalSemaphoreInfos[s];
+            out += fmt::format("     ├─ Sema: {:p} | Val: {:<4} | Stage: {:#x}\n",
+                               (void*)sigInfo.semaphore, sigInfo.value, sigInfo.stageMask);
+        }
+        out += "\n";
+    }
+
+    return out;
+}
+
+*/

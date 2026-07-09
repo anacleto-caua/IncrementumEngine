@@ -145,17 +145,18 @@ target("IncrementumEngine")
     end
 
     -- Pre compiled headers
-    set_pcxxheader("src/Utils/PreCompiledHeaders/root.hpp")
+    set_pcxxheader("src/Utils/PCH/pch.hpp")
 
     -- All libraries
     local lib_includes = {
         "libs",
-        "libs/vma",
-        "libs/glm-1.0.2",
         "libs/fnl",
+        "libs/vma",
         "libs/imgui",
+        "libs/glm-1.0.2",
+        "libs/moodycamel",
         "libs/imgui/backends",
-        "libs/moodycamel"
+        "libs/spdlog-1.17.0/include"
     }
 
     -- Treat third-party libs as system headers to suppress their warnings
