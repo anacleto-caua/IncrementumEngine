@@ -4,7 +4,7 @@
 #include <cassert>
 
 #include "RingBuffer.hpp"
-#include "Renderer/Vk/VkCmdLean.hpp"
+#include "Renderer/Vk/LeanVk.hpp"
 #include "Renderer/Vk/SubmissionPile.hpp"
 #include "Renderer/Vk/TimelineSemaphore.hpp"
 #include "Renderer/Vk/CommandBufferBlock.hpp"
@@ -114,14 +114,14 @@ namespace TransferPipe {
             semaphore = CreateTimelineSemaphore();
         }
 
-        Reset(TransferSubmissionPile);
+        ResetPile(TransferSubmissionPile);
         Create(TransferCommandBufferBlock, &VkVault::Transfer);
 
         SpecialSubmissionPiles.resize(VkVault::UniqueQueues.size());
         SpecialCommandBufferBlocks.resize(VkVault::UniqueQueues.size());
 
         for (QueueContext* q : VkVault::UniqueQueues) {
-            Reset(SpecialSubmissionPiles[q->ResourceIndex]);
+            ResetPile(SpecialSubmissionPiles[q->ResourceIndex]);
             Create(SpecialCommandBufferBlocks[q->ResourceIndex], q);
         }
 
@@ -177,7 +177,7 @@ namespace TransferPipe {
             PackageQueue.pop();
 
             TimelineSemaphore& ticket_semaphore = SignalSemaphores[package.TicketToSignal.TargetSemaphore];
-            Begin(TransferSubmissionPile);
+            BeginPile(TransferSubmissionPile);
 
             switch(package.Type) {
                 case PackageType::BufferUpdate:
@@ -185,7 +185,7 @@ namespace TransferPipe {
                         BufferUpdate& update_info = package.Data.BufferUpdate;
 
                         VkCommandBuffer cmd = GetNext(TransferCommandBufferBlock);
-                        VkCmdLean::Begin(cmd);
+                        LeanVk::BeginCommand(cmd);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
                         Wait(TransferSubmissionPile, ticket_semaphore.Handle, package.TicketToSignal.Value-1);
@@ -199,8 +199,8 @@ namespace TransferPipe {
                             update_info.Src
                         );
 
-                        VkCmdLean::End(cmd);
-                        Command(TransferSubmissionPile, cmd);
+                        LeanVk::EndCommand(cmd);
+                        AddCommandToPile(TransferSubmissionPile, cmd);
                     }
                     break;
                 case PackageType::BufferUpload:
@@ -209,7 +209,7 @@ namespace TransferPipe {
                         ring_buffer_read_size += package.Size;
 
                         VkCommandBuffer cmd = GetNext(TransferCommandBufferBlock);
-                        VkCmdLean::Begin(cmd);
+                        LeanVk::BeginCommand(cmd);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
                         Wait(TransferSubmissionPile, ticket_semaphore.Handle, package.TicketToSignal.Value-1);
@@ -228,8 +228,8 @@ namespace TransferPipe {
                             &copy_region
                         );
 
-                        VkCmdLean::End(cmd);
-                        Command(TransferSubmissionPile, cmd);
+                        LeanVk::EndCommand(cmd);
+                        AddCommandToPile(TransferSubmissionPile, cmd);
                     }
                     break;
                 case PackageType::ImageSliceUpdate:
@@ -255,9 +255,9 @@ namespace TransferPipe {
                         subresource_range.layerCount = 1;
 
                         // 1. Queue 1 releases
-                        Begin(q1_pile);
+                        BeginPile(q1_pile);
                         VkCommandBuffer cmd_a_q1 = GetNext(q1_block);
-                        VkCmdLean::Begin(cmd_a_q1);
+                        LeanVk::BeginCommand(cmd_a_q1);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
                         Wait(q1_pile, ticket_semaphore.Handle, package.TicketToSignal.Value-1);
@@ -284,13 +284,13 @@ namespace TransferPipe {
 
                         vkCmdPipelineBarrier2(cmd_a_q1, &dep_release_1);
 
-                        VkCmdLean::End(cmd_a_q1);
-                        Command(q1_pile, cmd_a_q1);
-                        End(q1_pile);
+                        LeanVk::EndCommand(cmd_a_q1);
+                        AddCommandToPile(q1_pile, cmd_a_q1);
+                        EndPile(q1_pile);
 
                         // 2. Queue 2 - Acquire -> Write -> Release
                         VkCommandBuffer cmd_q2 = GetNext(TransferCommandBufferBlock);
-                        VkCmdLean::Begin(cmd_q2);
+                        LeanVk::BeginCommand(cmd_q2);
 
                         Wait(TransferSubmissionPile, image_sync_semaphore);
                         Signal(TransferSubmissionPile, image_sync_semaphore);
@@ -360,13 +360,13 @@ namespace TransferPipe {
                         dep_release_2.pImageMemoryBarriers = &release_to_q1;
                         vkCmdPipelineBarrier2(cmd_q2, &dep_release_2);
 
-                        VkCmdLean::End(cmd_q2);
-                        Command(TransferSubmissionPile, cmd_q2);
+                        LeanVk::EndCommand(cmd_q2);
+                        AddCommandToPile(TransferSubmissionPile, cmd_q2);
 
                         // 3. Queue 1 - Acquires and Migrate to Layout X
-                        Begin(q1_pile);
+                        BeginPile(q1_pile);
                         VkCommandBuffer cmd_b_q1 = GetNext(q1_block);
-                        VkCmdLean::Begin(cmd_b_q1);
+                        LeanVk::BeginCommand(cmd_b_q1);
 
                         Wait(q1_pile, image_sync_semaphore);
                         Signal(q1_pile, image_sync_semaphore);
@@ -397,9 +397,9 @@ namespace TransferPipe {
                         dep_acquire_1.pImageMemoryBarriers = &acquire_on_q1;
                         vkCmdPipelineBarrier2(cmd_b_q1, &dep_acquire_1);
 
-                        VkCmdLean::End(cmd_b_q1);
-                        Command(q1_pile, cmd_b_q1);
-                        End(q1_pile);
+                        LeanVk::EndCommand(cmd_b_q1);
+                        AddCommandToPile(q1_pile, cmd_b_q1);
+                        EndPile(q1_pile);
                     }
                     break;
                 default:
@@ -408,7 +408,7 @@ namespace TransferPipe {
             }
             StagingBuffer.Read(ring_buffer_read_size);
             // Finish the submission pile
-            End(TransferSubmissionPile);
+            EndPile(TransferSubmissionPile);
         }
     }
 
@@ -431,7 +431,7 @@ namespace TransferPipe {
         WaitOn(LastTicket); // To safely wipe all command buffers, lazy sollution
 
         for (auto* queue : VkVault::UniqueQueues) {
-            Reset(SpecialSubmissionPiles[queue->ResourceIndex]);
+            ResetPile(SpecialSubmissionPiles[queue->ResourceIndex]);
         }
         Reset(TransferCommandBufferBlock);
 

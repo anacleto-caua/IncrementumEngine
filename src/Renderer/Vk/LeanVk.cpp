@@ -1,8 +1,7 @@
-#include "VkCmdLean.hpp"
+#include "LeanVk.hpp"
 
-namespace VkCmdLean {
-
-    void Begin(VkCommandBuffer cmd, VkCommandBufferUsageFlags flags) {
+namespace LeanVk {
+    void BeginCommand(VkCommandBuffer cmd, VkCommandBufferUsageFlags flags) {
         VkCommandBufferBeginInfo begin_info {};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begin_info.flags = flags;
@@ -10,7 +9,7 @@ namespace VkCmdLean {
         vkBeginCommandBuffer(cmd, &begin_info);
     }
 
-    void End(VkCommandBuffer cmd) {
+    void EndCommand(VkCommandBuffer cmd) {
         vkEndCommandBuffer(cmd);
     }
 }

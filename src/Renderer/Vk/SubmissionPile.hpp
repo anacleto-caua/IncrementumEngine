@@ -1,11 +1,9 @@
 #pragma once
 
 #include <array>
-#include <string>
 #include <cassert>
 
 #include "Renderer/VkVault.hpp"
-#include "spdlog/fmt/bundled/base.h"
 
 template <
     u64 MAX_SUBMITS = 32,
@@ -37,20 +35,20 @@ struct SubmissionPile {
 // Damn I sure love having to repeat myself a lot to use generics :)
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Reset(SubmissionPile<A, B, C, D>& pile) {
+void ResetPile(SubmissionPile<A, B, C, D>& pile) {
     pile.SubmitCount = pile.CmdCount = pile.WaitCount = pile.SignalCount = 0;
     pile.CmdStart = pile.WaitStart = pile.SignalStart = 0;
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Begin(SubmissionPile<A, B, C, D>& pile) {
+void BeginPile(SubmissionPile<A, B, C, D>& pile) {
     pile.CmdStart = pile.CmdCount;
     pile.WaitStart = pile.WaitCount;
     pile.SignalStart = pile.SignalCount;
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void End(SubmissionPile<A, B, C, D>& pile) {
+void EndPile(SubmissionPile<A, B, C, D>& pile) {
     u64 command_quantity = pile.CmdCount - pile.CmdStart;
     u64 wait_semaphores_quantity = pile.WaitCount - pile.WaitStart;
     u64 signal_semaphores_quantity = pile.SignalCount - pile.SignalStart;
@@ -63,11 +61,11 @@ void End(SubmissionPile<A, B, C, D>& pile) {
         static_cast<u32>(command_quantity), command_quantity > 0 ? &pile.CommandBuffers[pile.CmdStart] : nullptr,
         static_cast<u32>(signal_semaphores_quantity), signal_semaphores_quantity > 0 ? &pile.SignalSemaphores[pile.SignalStart] : nullptr
     };
-    pile.SubmitCount++;
+        pile.SubmitCount++;
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Command(SubmissionPile<A, B, C, D>& pile, VkCommandBuffer command) {
+void AddCommandToPile(SubmissionPile<A, B, C, D>& pile, VkCommandBuffer command) {
     assert(pile.CmdCount < pile.MaxCommandBuffers && "max command count reached on a pile");
 
     pile.CommandBuffers[pile.CmdCount] = {
@@ -134,7 +132,7 @@ template <u64 A, u64 B, u64 C, u64 D>
 void SubmitPile(QueueContext& ctx, SubmissionPile<A, B, C, D>& pile, VkFence execution_fence = VK_NULL_HANDLE) {
     if(pile.SubmitCount >= 1) {
         VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence), "pile submission failed");
-        Reset(pile);
+        ResetPile(pile);
     }
 }
 
@@ -204,7 +202,7 @@ struct fmt::formatter<SubmissionPile<A, B, C, D>> {
 #include <imgui.h>
 
 template <u64 A, u64 B, u64 C, u64 D>
-void DrawSubmissionPileImGui(const SubmissionPile<A, B, C, D>& pile) {
+void ImGuiSubmissionPile(const SubmissionPile<A, B, C, D>& pile) {
     // Draw the high-level summary table
     if (ImGui::BeginTable("SubmissionPileSummary", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
         ImGui::TableSetupColumn("Resource");
