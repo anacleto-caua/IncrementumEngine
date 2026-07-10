@@ -198,3 +198,92 @@ struct fmt::formatter<SubmissionPile<A, B, C, D>> {
         return ctx.out();
     }
 };
+
+// dear imgui fancy print - not test btw
+#include <imgui.h>
+
+template <u64 A, u64 B, u64 C, u64 D>
+void DrawSubmissionPileImGui(const SubmissionPile<A, B, C, D>& pile) {
+    // Draw the high-level summary table
+    if (ImGui::BeginTable("SubmissionPileSummary", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+        ImGui::TableSetupColumn("Resource");
+        ImGui::TableSetupColumn("Usage / Max");
+        ImGui::TableSetupColumn("Batch Start");
+        ImGui::TableHeadersRow();
+
+        // Submits
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn(); ImGui::Text("Submits");
+        ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)pile.SubmitCount, (u64)pile.MaxSubmits);
+        ImGui::TableNextColumn(); ImGui::Text("-");
+
+        // Command Buffers
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn(); ImGui::Text("Command Buffers");
+        ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)pile.CmdCount, (u64)pile.MaxCommandBuffers);
+        ImGui::TableNextColumn(); ImGui::Text("%llu", (u64)pile.CmdStart);
+
+        // Wait Semaphores
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn(); ImGui::Text("Wait Semaphores");
+        ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)pile.WaitCount, (u64)pile.MaxWaitSemaphores);
+        ImGui::TableNextColumn(); ImGui::Text("%llu", (u64)pile.WaitStart);
+
+        // Signal Semaphores
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn(); ImGui::Text("Signal Semaphores");
+        ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)pile.SignalCount, (u64)pile.MaxSignalSemaphores);
+        ImGui::TableNextColumn(); ImGui::Text("%llu", (u64)pile.SignalStart);
+
+        ImGui::EndTable();
+    }
+
+    ImGui::Spacing();
+    ImGui::Text("Status: Empty? %s   |   Full? %s", IsEmpty(pile) ? "Yes" : "No", IsFull(pile) ? "Yes" : "No");
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Draw the interactive Topology Tree
+    if (pile.SubmitCount == 0) {
+        ImGui::TextDisabled("[No Submits Recorded]");
+        return;
+    }
+
+    ImGui::Text("=== SUBMISSION TOPOLOGY ===");
+
+    for (u32 i = 0; i < pile.SubmitCount; ++i) {
+        const auto& submit = pile.Submits[i];
+
+        // utils for showing semaphores
+        auto bullet_text_semaphore_out = [](const VkSemaphoreSubmitInfo* semaphore_submit_info){
+            ImGui::BulletText("Semaphore: %p | Val: %llu | Stage: 0x%llx",
+              (void*)semaphore_submit_info->semaphore,
+              (u64)semaphore_submit_info->value,
+              (u64)semaphore_submit_info->stageMask);
+        };
+
+        // Ensure unique ID for ImGui tree nodes by using the loop index
+        ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+        if (ImGui::TreeNode((void*)(intptr_t)i, "Submit [%u]", i)) {
+
+            ImGui::BulletText("Commands: %u", submit.commandBufferInfoCount);
+
+            // Collapsible Waits Node
+            if (ImGui::TreeNode((void*)(intptr_t)(i + 10000), "Waits: %u", submit.waitSemaphoreInfoCount)) {
+                for (u32 w = 0; w < submit.waitSemaphoreInfoCount; ++w) {
+                    bullet_text_semaphore_out(submit.pWaitSemaphoreInfos[w]);
+                }
+                ImGui::TreePop();
+            }
+
+            // Collapsible Signals Node
+            if (ImGui::TreeNode((void*)(intptr_t)(i + 20000), "Signals: %u", submit.signalSemaphoreInfoCount)) {
+                for (u32 s = 0; s < submit.signalSemaphoreInfoCount; ++s) {
+                    bullet_text_semaphore_out(submit.pSignalSemaphoreInfos[s]);
+                }
+                ImGui::TreePop();
+            }
+            ImGui::TreePop();
+        }
+    }
+}
