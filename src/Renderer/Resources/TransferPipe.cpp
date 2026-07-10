@@ -170,15 +170,15 @@ namespace TransferPipe {
 
     // Just write all packages, I need a version of this that controls how much it writes
     void LazyWrite() {
-        Begin(TransferSubmissionPile);
 
         while(!PackageQueue.empty() && !IsFull(TransferSubmissionPile)) {
             u64 ring_buffer_read_size = 0;
             Package package = PackageQueue.front();
             PackageQueue.pop();
-            TimelineSemaphore& ticket_semaphore = SignalSemaphores[package.TicketToSignal.TargetSemaphore];
 
-            // Tagged union stuff
+            TimelineSemaphore& ticket_semaphore = SignalSemaphores[package.TicketToSignal.TargetSemaphore];
+            Begin(TransferSubmissionPile);
+
             switch(package.Type) {
                 case PackageType::BufferUpdate:
                     {
@@ -246,7 +246,6 @@ namespace TransferPipe {
 
                         SpecialSubmissionPile& q1_pile = SpecialSubmissionPiles[target_image->OwnerQueue->ResourceIndex];
                         CommandBufferBlock& q1_block = SpecialCommandBufferBlocks[target_image->OwnerQueue->ResourceIndex];
-                        Begin(q1_pile);
 
                         VkImageSubresourceRange subresource_range {};
                         subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -256,6 +255,7 @@ namespace TransferPipe {
                         subresource_range.layerCount = 1;
 
                         // 1. Queue 1 releases
+                        Begin(q1_pile);
                         VkCommandBuffer cmd_a_q1 = GetNext(q1_block);
                         VkCmdLean::Begin(cmd_a_q1);
 
@@ -286,6 +286,7 @@ namespace TransferPipe {
 
                         VkCmdLean::End(cmd_a_q1);
                         Command(q1_pile, cmd_a_q1);
+                        End(q1_pile);
 
                         // 2. Queue 2 - Acquire -> Write -> Release
                         VkCommandBuffer cmd_q2 = GetNext(TransferCommandBufferBlock);
@@ -363,6 +364,7 @@ namespace TransferPipe {
                         Command(TransferSubmissionPile, cmd_q2);
 
                         // 3. Queue 1 - Acquires and Migrate to Layout X
+                        Begin(q1_pile);
                         VkCommandBuffer cmd_b_q1 = GetNext(q1_block);
                         VkCmdLean::Begin(cmd_b_q1);
 
@@ -405,14 +407,22 @@ namespace TransferPipe {
                     break;
             }
             StagingBuffer.Read(ring_buffer_read_size);
+            // Finish the submission pile
+            End(TransferSubmissionPile);
         }
-
-        // Finish the submission pile
-        End(TransferSubmissionPile);
     }
 
     void LazySubmit() {
         LazyWrite();
+
+        /*
+        analog::info("Prepared to submit\n\n\n");
+        analog::info("Transfer Pile:");
+        analog::info("{}", TransferSubmissionPile);
+        analog::info("Graphics Pile:");
+        analog::info("{}", SpecialSubmissionPiles[VkVault::Graphics.ResourceIndex]);
+        */
+
         for (auto* queue : VkVault::UniqueQueues) {
             SubmitPile(*queue, SpecialSubmissionPiles[queue->ResourceIndex], VK_NULL_HANDLE);
         }
