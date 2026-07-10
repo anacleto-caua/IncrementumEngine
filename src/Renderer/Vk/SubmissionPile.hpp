@@ -179,18 +179,19 @@ struct fmt::formatter<SubmissionPile<A, B, C, D>> {
             fmt::format_to(ctx.out(), "v Submit [{}]\n", i);
             fmt::format_to(ctx.out(), "  |- Commands: {}\n", submit.commandBufferInfoCount);
 
+            auto semaphore_out = [&ctx](const VkSemaphoreSubmitInfo& semaphore_submit_info){
+                fmt::format_to(ctx.out(), "  |  |- Semaphore: {:p} | Val: {:<4} | Stage: {:#x}\n",
+                   (void*)semaphore_submit_info.semaphore, semaphore_submit_info.value, semaphore_submit_info.stageMask);
+            };
+
             fmt::format_to(ctx.out(), "  |- Waits: {}\n", submit.waitSemaphoreInfoCount);
             for (u32 w = 0; w < submit.waitSemaphoreInfoCount; ++w) {
-                const auto& waitInfo = submit.pWaitSemaphoreInfos[w];
-                fmt::format_to(ctx.out(), "  |  |- Sema: {:p} | Val: {:<4} | Stage: {:#x}\n",
-                                   (void*)waitInfo.semaphore, waitInfo.value, waitInfo.stageMask);
+                semaphore_out(submit.pWaitSemaphoreInfos[w]);
             }
 
             fmt::format_to(ctx.out(), "  \\- Signals: {}\n", submit.signalSemaphoreInfoCount);
             for (u32 s = 0; s < submit.signalSemaphoreInfoCount; ++s) {
-                const auto& sigInfo = submit.pSignalSemaphoreInfos[s];
-                fmt::format_to(ctx.out(), "     |- Sema: {:p} | Val: {:<4} | Stage: {:#x}\n",
-                                   (void*)sigInfo.semaphore, sigInfo.value, sigInfo.stageMask);
+                semaphore_out(submit.pSignalSemaphoreInfos[s]);
             }
             fmt::format_to(ctx.out(), "\n");
         }
@@ -255,11 +256,11 @@ void DrawSubmissionPileImGui(const SubmissionPile<A, B, C, D>& pile) {
         const auto& submit = pile.Submits[i];
 
         // utils for showing semaphores
-        auto bullet_text_semaphore_out = [](const VkSemaphoreSubmitInfo* semaphore_submit_info){
+        auto bullet_text_semaphore_out = [](const VkSemaphoreSubmitInfo& semaphore_submit_info){
             ImGui::BulletText("Semaphore: %p | Val: %llu | Stage: 0x%llx",
-              (void*)semaphore_submit_info->semaphore,
-              (u64)semaphore_submit_info->value,
-              (u64)semaphore_submit_info->stageMask);
+              (void*)semaphore_submit_info.semaphore,
+              (u64)semaphore_submit_info.value,
+              (u64)semaphore_submit_info.stageMask);
         };
 
         // Ensure unique ID for ImGui tree nodes by using the loop index
