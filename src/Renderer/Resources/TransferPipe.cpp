@@ -99,8 +99,8 @@ namespace TransferPipe {
     CommandBufferBlock TransferCommandBufferBlock;
 
     // The resource belows are one per queue, as of now it's just for ImageSliceUpdates
-    std::vector<SpecialSubmissionPile> SpecialSubmissionPiles;
-    std::vector<CommandBufferBlock> SpecialCommandBufferBlocks;
+    QueueContainer<SpecialSubmissionPile> SpecialSubmissionPiles;
+    QueueContainer<CommandBufferBlock> SpecialCommandBufferBlocks;
 
     RingBuffer<STAGING_BUFFER_SIZE> StagingBuffer;
 
@@ -117,12 +117,14 @@ namespace TransferPipe {
         ResetPile(TransferSubmissionPile);
         Create(TransferCommandBufferBlock, &VkVault::Transfer);
 
-        SpecialSubmissionPiles.resize(VkVault::UniqueQueues.size());
-        SpecialCommandBufferBlocks.resize(VkVault::UniqueQueues.size());
+        SpecialSubmissionPiles.Initialize();
+        for (auto &pile : SpecialSubmissionPiles) {
+            ResetPile(pile);
+        }
 
+        SpecialCommandBufferBlocks.Initialize();
         for (QueueContext* q : VkVault::UniqueQueues) {
-            ResetPile(SpecialSubmissionPiles[q->ResourceIndex]);
-            Create(SpecialCommandBufferBlocks[q->ResourceIndex], q);
+            Create(SpecialCommandBufferBlocks[q], q);
         }
 
         return IncResult::SUCCESS;
@@ -244,8 +246,8 @@ namespace TransferPipe {
                         auto queue_1_family_idx = target_image->OwnerQueue->Index;
                         auto queue_2_family_idx = VkVault::Transfer.Index;
 
-                        SpecialSubmissionPile& q1_pile = SpecialSubmissionPiles[target_image->OwnerQueue->ResourceIndex];
-                        CommandBufferBlock& q1_block = SpecialCommandBufferBlocks[target_image->OwnerQueue->ResourceIndex];
+                        SpecialSubmissionPile& q1_pile = SpecialSubmissionPiles[target_image->OwnerQueue];
+                        CommandBufferBlock& q1_block = SpecialCommandBufferBlocks[target_image->OwnerQueue];
 
                         VkImageSubresourceRange subresource_range {};
                         subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -424,14 +426,14 @@ namespace TransferPipe {
         */
 
         for (auto* queue : VkVault::UniqueQueues) {
-            SubmitPile(*queue, SpecialSubmissionPiles[queue->ResourceIndex], VK_NULL_HANDLE);
+            SubmitPile(*queue, SpecialSubmissionPiles[queue], VK_NULL_HANDLE);
         }
         SubmitPile(VkVault::Transfer, TransferSubmissionPile, VK_NULL_HANDLE);
 
         WaitOn(LastTicket); // To safely wipe all command buffers, lazy sollution
 
         for (auto* queue : VkVault::UniqueQueues) {
-            ResetPile(SpecialSubmissionPiles[queue->ResourceIndex]);
+            ResetPile(SpecialSubmissionPiles[queue]);
         }
         Reset(TransferCommandBufferBlock);
 
