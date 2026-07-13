@@ -41,14 +41,14 @@ void ResetPile(SubmissionPile<A, B, C, D>& pile) {
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void BeginPile(SubmissionPile<A, B, C, D>& pile) {
+void BeginSubmission(SubmissionPile<A, B, C, D>& pile) {
     pile.CmdStart = pile.CmdCount;
     pile.WaitStart = pile.WaitCount;
     pile.SignalStart = pile.SignalCount;
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void EndPile(SubmissionPile<A, B, C, D>& pile) {
+void EndSubmission(SubmissionPile<A, B, C, D>& pile) {
     u64 command_quantity = pile.CmdCount - pile.CmdStart;
     u64 wait_semaphores_quantity = pile.WaitCount - pile.WaitStart;
     u64 signal_semaphores_quantity = pile.SignalCount - pile.SignalStart;

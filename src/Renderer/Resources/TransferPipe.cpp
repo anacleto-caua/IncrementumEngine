@@ -177,7 +177,7 @@ namespace TransferPipe {
             PackageQueue.pop();
 
             TimelineSemaphore& ticket_semaphore = SignalSemaphores[package.TicketToSignal.TargetSemaphore];
-            BeginPile(TransferSubmissionPile);
+            BeginSubmission(TransferSubmissionPile);
 
             switch(package.Type) {
                 case PackageType::BufferUpdate:
@@ -255,7 +255,7 @@ namespace TransferPipe {
                         subresource_range.layerCount = 1;
 
                         // 1. Queue 1 releases
-                        BeginPile(q1_pile);
+                        BeginSubmission(q1_pile);
                         VkCommandBuffer cmd_a_q1 = GetNext(q1_block);
                         LeanVk::BeginCommand(cmd_a_q1);
 
@@ -286,7 +286,7 @@ namespace TransferPipe {
 
                         LeanVk::EndCommand(cmd_a_q1);
                         AddCommandToPile(q1_pile, cmd_a_q1);
-                        EndPile(q1_pile);
+                        EndSubmission(q1_pile);
 
                         // 2. Queue 2 - Acquire -> Write -> Release
                         VkCommandBuffer cmd_q2 = GetNext(TransferCommandBufferBlock);
@@ -364,7 +364,7 @@ namespace TransferPipe {
                         AddCommandToPile(TransferSubmissionPile, cmd_q2);
 
                         // 3. Queue 1 - Acquires and Migrate to Layout X
-                        BeginPile(q1_pile);
+                        BeginSubmission(q1_pile);
                         VkCommandBuffer cmd_b_q1 = GetNext(q1_block);
                         LeanVk::BeginCommand(cmd_b_q1);
 
@@ -399,7 +399,7 @@ namespace TransferPipe {
 
                         LeanVk::EndCommand(cmd_b_q1);
                         AddCommandToPile(q1_pile, cmd_b_q1);
-                        EndPile(q1_pile);
+                        EndSubmission(q1_pile);
                     }
                     break;
                 default:
@@ -408,7 +408,7 @@ namespace TransferPipe {
             }
             StagingBuffer.Read(ring_buffer_read_size);
             // Finish the submission pile
-            EndPile(TransferSubmissionPile);
+            EndSubmission(TransferSubmissionPile);
         }
     }
 
