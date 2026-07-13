@@ -24,7 +24,7 @@ using StandardSubmissionPile = SubmissionPile<
 /**
  * The parameters used for the special transmission piles,
  * since they're used for image transfer exclusively they have twice the size,
- * make it easier to check if it's full this will guarantee the normal pile will overflow before and thus will
+ * this will guarantee the normal pile will overflow before and thus will
  * make it easier to check if it's full
 */
 static constexpr u64 SPECIAL_PILE_SUBMITS = NORMAL_PILE_SUBMITS * 2;
