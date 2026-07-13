@@ -467,7 +467,7 @@ namespace VkVault {
     }
 
     IncResult CreateQueuesResource() {
-        QueueResources.resize(UniqueQueues.size());
+        QueueResources.Initialize();
 
         // Create the Queues resources
         VkCommandPoolCreateInfo cmd_pool_create_info {};
@@ -476,8 +476,8 @@ namespace VkVault {
         for (QueueContext* queue : Queues) {
             vkGetDeviceQueue(Device, queue->Index, 0, &queue->Queue);
 
-            if (QueueResources[queue->ResourceIndex].MainCmdPool == VK_NULL_HANDLE) {
-                auto& r = QueueResources[queue->ResourceIndex];
+            if (QueueResources[queue].MainCmdPool == VK_NULL_HANDLE) {
+                auto& r = QueueResources[queue];
                 cmd_pool_create_info.queueFamilyIndex = queue->Index;
                 VK_CHECK(
                     vkCreateCommandPool(Device, &cmd_pool_create_info, nullptr, &r.MainCmdPool),
@@ -582,7 +582,7 @@ namespace VkVault {
         VkCommandBufferAllocateInfo cmd_buffer_alloc_info {};
         cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        cmd_buffer_alloc_info.commandPool = QueueResources[ctx.ResourceIndex].MainCmdPool;
+        cmd_buffer_alloc_info.commandPool = QueueResources[&ctx].MainCmdPool;
         cmd_buffer_alloc_info.commandBufferCount = 1;
 
         VkCommandBuffer cmd;
@@ -607,7 +607,7 @@ namespace VkVault {
 
         vkQueueWaitIdle(ctx.Queue);
 
-        vkFreeCommandBuffers(Device, QueueResources[ctx.ResourceIndex].MainCmdPool, 1, &cmd);
+        vkFreeCommandBuffers(Device, QueueResources[&ctx].MainCmdPool, 1, &cmd);
     }
 
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities() {
