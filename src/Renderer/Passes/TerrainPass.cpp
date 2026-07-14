@@ -254,9 +254,6 @@ namespace TerrainPass {
         // Write the first valid data
         TerrainManager::Init();
 
-        analog::error("CODE WILL BREAK, IT'S BROKEN BELLOW THIS POINT");
-        return IncResult::FAIL;
-
         for (auto& buffer : ChunkDrawListBuffers) {
             // TODO: Move this to the frame structure
                 TransferPipe::QueueBufferUpload(
@@ -277,6 +274,9 @@ namespace TerrainPass {
         }
 
         TransferPipe::LazySubmit();
+
+        analog::error("CODE WILL BREAK, IT'S BROKEN BELLOW THIS POINT");
+        return IncResult::FAIL;
 
         // Zeroing terrain push constants
         TerrainPushConstants = {

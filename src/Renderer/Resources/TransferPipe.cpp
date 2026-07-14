@@ -27,10 +27,10 @@ using StandardSubmissionPile = SubmissionPile<
  * this will guarantee the normal pile will overflow before and thus will
  * make it easier to check if it's full
 */
-static constexpr u64 SPECIAL_PILE_SUBMITS = NORMAL_PILE_SUBMITS * 2;
-static constexpr u64 SPECIAL_PILE_COMMAND_BUFFERS = NORMAL_PILE_COMMAND_BUFFERS * 2;
-static constexpr u64 SPECIAL_PILE_WAIT_SEMAPHORES = NORMAL_PILE_WAIT_SEMAPHORES * 2;
-static constexpr u64 SPECIAL_PILE_SIGNAL_SEMAPHORES = NORMAL_PILE_SIGNAL_SEMAPHORES * 2;
+static constexpr u64 SPECIAL_PILE_SUBMITS = NORMAL_PILE_SUBMITS * 20;
+static constexpr u64 SPECIAL_PILE_COMMAND_BUFFERS = NORMAL_PILE_COMMAND_BUFFERS * 20;
+static constexpr u64 SPECIAL_PILE_WAIT_SEMAPHORES = NORMAL_PILE_WAIT_SEMAPHORES * 20;
+static constexpr u64 SPECIAL_PILE_SIGNAL_SEMAPHORES = NORMAL_PILE_SIGNAL_SEMAPHORES * 20;
 using SpecialSubmissionPile = SubmissionPile<
         SPECIAL_PILE_SUBMITS,
         SPECIAL_PILE_COMMAND_BUFFERS,
@@ -45,9 +45,6 @@ static constexpr u64 PARALLEL_TRANSFERS_COUNT = 5;
 static constexpr u64 BUFFER_UPDATE_SIZE_LIMIT = 30000;
 
 namespace TransferPipe {
-    // Just carry a safe copy of the last ticket, used to clean the submissions
-    Ticket LastTicket = { 0, 0 };
-
     std::array<TimelineSemaphore, PARALLEL_TRANSFERS_COUNT> SignalSemaphores;
     u32 CurrentSemaphore = 0;
 
@@ -55,11 +52,20 @@ namespace TransferPipe {
     std::array<TimelineSemaphore, PARALLEL_TRANSFERS_COUNT> ImageTransferSemaphores;
     u32 CurrentImageTransferSemaphore = 0;
 
+    // It's the same as a Ticket but I keep types strict
+    struct ImageTicket {
+        u64 Value;
+        u32 TargetSemaphore; // Point to one of the members in the ImageTransferSemaphores array
+    };
+
     // Tagged union to define each type of package
     enum class PackageType {
         BufferUpdate,
         BufferUpload,
-        ImageSliceUpdate,
+        //ImageSliceUpdate,
+        OwnerRelease,
+        TransferAcquireWriteRelease,
+        OwnerAcquire,
     };
 
     struct BufferUpload {
@@ -74,16 +80,33 @@ namespace TransferPipe {
         const void* Src = nullptr;
     };
 
-    struct ImageSliceUpdate {
+    struct OwnerRelease {
+        ImageTicket ImageReleased;
+        Image::Id TargetImage;
+        u32 TargetLayer = 0;
+    };
+
+    struct TransferAcquireWriteRelease {
+        ImageTicket ImageReleased;
+        ImageTicket ImageWriten;
         Image::Id DstImage;
         u32 TargetLayer = 0;
         u64 CopyOffset = 0;
     };
 
+    struct OwnerAcquire {
+        ImageTicket ImageWriten;
+        Image::Id TargetImage;
+        u32 TargetLayer = 0;
+    };
+
     union Data {
         BufferUpdate BufferUpdate;
         BufferUpload BufferUpload;
-        ImageSliceUpdate ImageSliceUpdate;
+        // ImageSliceUpload
+        OwnerRelease OwnerRelease;
+        TransferAcquireWriteRelease TransferAcquireWriteRelease;
+        OwnerAcquire OwnerAcquire;
     };
 
     struct Package {
@@ -93,7 +116,41 @@ namespace TransferPipe {
         Data Data;
     };
 
-    std::queue<Package> PackageQueue;
+    /**
+     * This upload layers thing works disgustling like frames in flight
+     * There are three to encapsulate the (acquire, release, acquire) routine of uploading images
+     */
+    static constexpr u32 UPLOAD_LAYERS_COUNT = 3;
+    /**
+     * An array that constains all the multiple upload layers *ref-1
+     * inside this array there's a queue of Packages
+     *
+     * The upload layers works as follows:
+     *  The transfer system will write normal packages(BufferUpdate and BufferUpload) to the current layer - shown in "CurrentUploadLayer"
+     *  The system will break ImageSliceUpdate packages into 3 packages (Release, Acquire-Upload-Release, Acquire)
+     *  The system will write thoose packages in CurrentUploadLayer, CurrentUploadLayer+1, CurrentUploadLayer+2 (consider wrapping)
+     *  The system will read all packages(this gives a perfect slot to add a upload size limitation or so) from the current upload layer
+     *  After emptying the current layer the system will advance the CurrentUploadLayer step
+     *
+     * Refs:
+     *      1 - This makes so I can break the image update routine(acquire, release, acquire) into multiple of thoose blocks writing
+     *      all of them to this vector and "harvesting" them later, safely knowing which ones have already been submited.
+     *      It may seem weird but I need to submit a release before an acquire, can't just let it waiting.
+     *      - CurrentUploadLayer - tracks this btw.
+     *
+     */
+    std::array<
+        std::queue<Package>,
+        UPLOAD_LAYERS_COUNT
+    > PackageQueues;
+
+    /**
+     * Just carry a safe copy(*) of the last ticket, used to clean the submissions
+     *  * one per upload layer and be carrefull with ther particularities of image trasnfers
+     */
+    std::array<Ticket, UPLOAD_LAYERS_COUNT> TopTickets = {{ { 0, 0 }, { 0, 0 }, { 0, 0 } }};
+
+    u32 CurrentUploadLayer = 0;
 
     StandardSubmissionPile TransferSubmissionPile;
     CommandBufferBlock TransferCommandBufferBlock;
@@ -147,6 +204,25 @@ namespace TransferPipe {
         }
     }
 
+    bool ArePackageQueuesFullyEmptied() {
+        for (auto& packQ : PackageQueues) {
+            if (!packQ.empty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    ImageTicket MakeImageTicket() {
+        TimelineSemaphore& semaphore = ImageTransferSemaphores[CurrentImageTransferSemaphore];
+        ImageTicket ticket = {
+            .Value = (++semaphore.LastSignaledValue),
+            .TargetSemaphore = CurrentImageTransferSemaphore
+        };
+        CurrentImageTransferSemaphore = (CurrentImageTransferSemaphore + 1) % PARALLEL_TRANSFERS_COUNT;
+        return ticket;
+    }
+
     Ticket MakeTicket() {
         TimelineSemaphore& semaphore = SignalSemaphores[CurrentSemaphore];
         Ticket ticket = {
@@ -154,7 +230,20 @@ namespace TransferPipe {
             .TargetSemaphore = CurrentSemaphore
         };
         CurrentSemaphore = (CurrentSemaphore + 1) % PARALLEL_TRANSFERS_COUNT;
-        LastTicket = ticket;
+        TopTickets[CurrentUploadLayer] = ticket;
+        return ticket;
+    }
+
+    Ticket MakeTicketImageUpload() {
+        TimelineSemaphore& semaphore = SignalSemaphores[CurrentSemaphore];
+        Ticket ticket = {
+            .Value = (++semaphore.LastSignaledValue),
+            .TargetSemaphore = CurrentSemaphore
+        };
+        u32 layer_plus_plus = (CurrentUploadLayer + 2) % UPLOAD_LAYERS_COUNT;
+        TopTickets[layer_plus_plus] = ticket;
+
+        CurrentSemaphore = (CurrentSemaphore + 1) % PARALLEL_TRANSFERS_COUNT;
         return ticket;
     }
 
@@ -173,19 +262,19 @@ namespace TransferPipe {
     // Just write all packages, I need a version of this that controls how much it writes
     void LazyWrite() {
 
-        while(!PackageQueue.empty() && !IsFull(TransferSubmissionPile)) {
+        while(!PackageQueues[CurrentUploadLayer].empty() && !IsFull(TransferSubmissionPile)) {
             u64 ring_buffer_read_size = 0;
-            Package package = PackageQueue.front();
-            PackageQueue.pop();
+            Package package = PackageQueues[CurrentUploadLayer].front();
+            PackageQueues[CurrentUploadLayer].pop();
 
             TimelineSemaphore& ticket_semaphore = SignalSemaphores[package.TicketToSignal.TargetSemaphore];
-            BeginSubmission(TransferSubmissionPile);
 
             switch(package.Type) {
                 case PackageType::BufferUpdate:
                     {
                         BufferUpdate& update_info = package.Data.BufferUpdate;
 
+                        BeginSubmission(TransferSubmissionPile);
                         VkCommandBuffer cmd = GetNext(TransferCommandBufferBlock);
                         LeanVk::BeginCommand(cmd);
 
@@ -203,6 +292,7 @@ namespace TransferPipe {
 
                         LeanVk::EndCommand(cmd);
                         AddCommandToPile(TransferSubmissionPile, cmd);
+                        EndSubmission(TransferSubmissionPile);
                     }
                     break;
                 case PackageType::BufferUpload:
@@ -210,6 +300,7 @@ namespace TransferPipe {
                         BufferUpload& upload_info = package.Data.BufferUpload;
                         ring_buffer_read_size += package.Size;
 
+                        BeginSubmission(TransferSubmissionPile);
                         VkCommandBuffer cmd = GetNext(TransferCommandBufferBlock);
                         LeanVk::BeginCommand(cmd);
 
@@ -232,16 +323,15 @@ namespace TransferPipe {
 
                         LeanVk::EndCommand(cmd);
                         AddCommandToPile(TransferSubmissionPile, cmd);
+                        EndSubmission(TransferSubmissionPile);
                     }
                     break;
-                case PackageType::ImageSliceUpdate:
+                case PackageType::OwnerRelease:
                     {
-                        ImageSliceUpdate& slice_info = package.Data.ImageSliceUpdate;
-                        Image::Value* target_image = Image::Get(slice_info.DstImage);
-                        ring_buffer_read_size += package.Size;
-
-                        TimelineSemaphore& image_sync_semaphore = ImageTransferSemaphores[CurrentImageTransferSemaphore];
-                        CurrentImageTransferSemaphore = (CurrentImageTransferSemaphore + 1) % PARALLEL_TRANSFERS_COUNT;
+                        // 1. Queue 1 releases
+                        OwnerRelease& release_info = package.Data.OwnerRelease;
+                        Image::Value* target_image = Image::Get(release_info.TargetImage);
+                        ImageTicket& image_released = release_info.ImageReleased;
 
                         auto queue_1_family_idx = target_image->OwnerQueue->Index;
                         auto queue_2_family_idx = VkVault::Transfer.Index;
@@ -253,18 +343,17 @@ namespace TransferPipe {
                         subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
                         subresource_range.baseMipLevel = 0;
                         subresource_range.levelCount = 1;
-                        subresource_range.baseArrayLayer = slice_info.TargetLayer;
+                        subresource_range.baseArrayLayer = release_info.TargetLayer;
                         subresource_range.layerCount = 1;
 
-                        // 1. Queue 1 releases
                         BeginSubmission(q1_pile);
                         VkCommandBuffer cmd_a_q1 = GetNext(q1_block);
                         LeanVk::BeginCommand(cmd_a_q1);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
                         Wait(q1_pile, ticket_semaphore.Handle, package.TicketToSignal.Value-1);
-                        Wait(q1_pile, image_sync_semaphore);
-                        Signal(q1_pile, image_sync_semaphore);
+                        Wait(q1_pile, ImageTransferSemaphores[image_released.TargetSemaphore], image_released.Value-1);
+                        Signal(q1_pile, ImageTransferSemaphores[image_released.TargetSemaphore], image_released.Value);
 
                         VkImageMemoryBarrier2 release_to_q2 {};
                         release_to_q2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -288,14 +377,36 @@ namespace TransferPipe {
 
                         LeanVk::EndCommand(cmd_a_q1);
                         AddCommandToPile(q1_pile, cmd_a_q1);
-                        EndSubmission(q1_pile);
-
+                        EndSubmission(q1_pile); // I shall consider not using a single command for a image release
+                    }
+                    break;
+                case PackageType::TransferAcquireWriteRelease:
+                    {
                         // 2. Queue 2 - Acquire -> Write -> Release
+                        TransferAcquireWriteRelease& write_info = package.Data.TransferAcquireWriteRelease;
+                        Image::Value* target_image = Image::Get(write_info.DstImage);
+                        ImageTicket& image_released = write_info.ImageReleased;
+                        ImageTicket& image_writen = write_info.ImageWriten;
+
+                        ring_buffer_read_size += package.Size;
+
+                        auto queue_1_family_idx = target_image->OwnerQueue->Index;
+                        auto queue_2_family_idx = VkVault::Transfer.Index;
+
+                        VkImageSubresourceRange subresource_range {};
+                        subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                        subresource_range.baseMipLevel = 0;
+                        subresource_range.levelCount = 1;
+                        subresource_range.baseArrayLayer = write_info.TargetLayer;
+                        subresource_range.layerCount = 1;
+
+                        BeginSubmission(TransferSubmissionPile);
                         VkCommandBuffer cmd_q2 = GetNext(TransferCommandBufferBlock);
                         LeanVk::BeginCommand(cmd_q2);
 
-                        Wait(TransferSubmissionPile, image_sync_semaphore);
-                        Signal(TransferSubmissionPile, image_sync_semaphore);
+                        Wait(TransferSubmissionPile, ImageTransferSemaphores[image_released.TargetSemaphore], image_released.Value);
+                        Wait(TransferSubmissionPile, ImageTransferSemaphores[image_writen.TargetSemaphore], image_writen.Value-1);
+                        Signal(TransferSubmissionPile, ImageTransferSemaphores[image_writen.TargetSemaphore], image_writen.Value);
 
                         VkImageMemoryBarrier2 acquire_on_q2 {};
                         acquire_on_q2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -315,20 +426,15 @@ namespace TransferPipe {
                         dep_acquire_2.imageMemoryBarrierCount = 1;
                         dep_acquire_2.pImageMemoryBarriers = &acquire_on_q2;
                         vkCmdPipelineBarrier2(cmd_q2, &dep_acquire_2);
-                        Wait(
-                            TransferSubmissionPile,
-                            ticket_semaphore.Handle,
-                            package.TicketToSignal.Value-1
-                        );
 
                         // Actually writes to the image
                         VkBufferImageCopy copy_region{};
-                        copy_region.bufferOffset = slice_info.CopyOffset;
+                        copy_region.bufferOffset = write_info.CopyOffset;
                         copy_region.bufferRowLength = 0;   // 0 means tightly packed
                         copy_region.bufferImageHeight = 0; // 0 means tightly packed
                         copy_region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
                         copy_region.imageSubresource.mipLevel = 0;
-                        copy_region.imageSubresource.baseArrayLayer = slice_info.TargetLayer;
+                        copy_region.imageSubresource.baseArrayLayer = write_info.TargetLayer;
                         copy_region.imageSubresource.layerCount = 1;
                         copy_region.imageOffset = {0, 0, 0};
                         copy_region.imageExtent = {target_image->Width, target_image->Height, 1};
@@ -364,14 +470,37 @@ namespace TransferPipe {
 
                         LeanVk::EndCommand(cmd_q2);
                         AddCommandToPile(TransferSubmissionPile, cmd_q2);
-
+                        EndSubmission(TransferSubmissionPile);
+                    }
+                    break;
+                case PackageType::OwnerAcquire:
+                    {
                         // 3. Queue 1 - Acquires and Migrate to Layout X
+                        OwnerAcquire& acquire_info  = package.Data.OwnerAcquire;
+                        Image::Value* target_image = Image::Get(acquire_info.TargetImage);
+
+                        ImageTicket& image_writen = acquire_info.ImageWriten;
+                        Ticket& final_ticket = package.TicketToSignal;
+
+                        auto queue_1_family_idx = target_image->OwnerQueue->Index;
+                        auto queue_2_family_idx = VkVault::Transfer.Index;
+
+                        SpecialSubmissionPile& q1_pile = SpecialSubmissionPiles[target_image->OwnerQueue];
+                        CommandBufferBlock& q1_block = SpecialCommandBufferBlocks[target_image->OwnerQueue];
+
+                        VkImageSubresourceRange subresource_range {};
+                        subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                        subresource_range.baseMipLevel = 0;
+                        subresource_range.levelCount = 1;
+                        subresource_range.baseArrayLayer = acquire_info.TargetLayer;
+                        subresource_range.layerCount = 1;
+
                         BeginSubmission(q1_pile);
                         VkCommandBuffer cmd_b_q1 = GetNext(q1_block);
                         LeanVk::BeginCommand(cmd_b_q1);
 
-                        Wait(q1_pile, image_sync_semaphore);
-                        Signal(q1_pile, image_sync_semaphore);
+                        Wait(q1_pile, ImageTransferSemaphores[image_writen.TargetSemaphore], image_writen.Value);
+                        Signal(q1_pile, SignalSemaphores[final_ticket.TargetSemaphore], final_ticket.Value);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
                         Signal(
@@ -409,8 +538,6 @@ namespace TransferPipe {
                     break;
             }
             StagingBuffer.Read(ring_buffer_read_size);
-            // Finish the submission pile
-            EndSubmission(TransferSubmissionPile);
         }
     }
 
@@ -430,14 +557,22 @@ namespace TransferPipe {
         }
         SubmitPile(VkVault::Transfer, TransferSubmissionPile, VK_NULL_HANDLE);
 
-        WaitOn(LastTicket); // To safely wipe all command buffers, lazy sollution
+        WaitOn(TopTickets[CurrentUploadLayer]); // To safely wipe all command buffers, lazy sollution
 
         for (auto* queue : VkVault::UniqueQueues) {
             ResetPile(SpecialSubmissionPiles[queue]);
         }
         Reset(TransferCommandBufferBlock);
 
-        if (!IsEmpty(TransferSubmissionPile)) {
+        /**
+         * Step the layers only if the lazy write ended because of the current layer being emptied
+         * it could be that the submission pile got full before that.
+         */
+        if (PackageQueues[CurrentUploadLayer].empty()){
+            CurrentUploadLayer = (CurrentUploadLayer + 1) % UPLOAD_LAYERS_COUNT;
+        }
+
+        if (!IsEmpty(TransferSubmissionPile) || !ArePackageQueuesFullyEmptied()) {
             LazySubmit();
         }
     }
@@ -455,7 +590,7 @@ namespace TransferPipe {
         // --- RingBuffer.Write(src, size);
 
         auto ticket = MakeTicket();
-        PackageQueue.push(
+        PackageQueues[CurrentUploadLayer].push(
             {
                 .Type = PackageType::BufferUpdate,
                 .Size = size,
@@ -478,7 +613,7 @@ namespace TransferPipe {
 
         auto ticket = MakeTicket();
         u64 read_offset = StagingBuffer.Write(src, size);
-        PackageQueue.push(
+        PackageQueues[CurrentUploadLayer].push(
             {
                 .Type = PackageType::BufferUpload,
                 .Size = size,
@@ -490,7 +625,8 @@ namespace TransferPipe {
                         .DstBuffer = dst
                     }
                 }
-            });
+            }
+        );
 
         return ticket;
     }
@@ -498,21 +634,62 @@ namespace TransferPipe {
     Ticket QueueImageSliceUpload(Image::Id dst, u32 target_layer, const void* src, u64 size, TransferType type) {
         assert(type == TransferType::Normal && "transfer type yet unsupported");
 
-        auto ticket = MakeTicket();
+        auto ticket = MakeTicketImageUpload();
         u64 read_offset = StagingBuffer.Write(src, size);
-        PackageQueue.push(
+
+        ImageTicket image_released_ticket = MakeImageTicket();
+        ImageTicket image_writen_ticket = MakeImageTicket();
+
+        u32 layer = CurrentUploadLayer;
+        u32 layer_plus = (CurrentUploadLayer + 1) % UPLOAD_LAYERS_COUNT;
+        u32 layer_plus_plus = (CurrentUploadLayer + 2) % UPLOAD_LAYERS_COUNT;
+
+        PackageQueues[layer].push(
             {
-                .Type = PackageType::ImageSliceUpdate,
+                .Type = PackageType::OwnerRelease,
+                .Size = size,               // unused
+                .TicketToSignal = ticket,
+                .Data = {
+                    .OwnerRelease = {
+                        .ImageReleased = image_released_ticket,
+                        .TargetImage = dst,
+                        .TargetLayer = target_layer
+                    }
+                }
+            }
+        );
+
+        PackageQueues[layer_plus].push(
+            {
+                .Type = PackageType::TransferAcquireWriteRelease,
                 .Size = size,
                 .TicketToSignal = ticket,
                 .Data = {
-                    .ImageSliceUpdate = {
+                    .TransferAcquireWriteRelease = {
+                        .ImageReleased = image_released_ticket,
+                        .ImageWriten = image_writen_ticket,
                         .DstImage = dst,
                         .TargetLayer = target_layer,
                         .CopyOffset = read_offset
                     }
                 }
-            });
+            }
+        );
+
+        PackageQueues[layer_plus_plus].push(
+            {
+                .Type = PackageType::OwnerAcquire,
+                .Size = size,               // unused
+                .TicketToSignal = ticket,
+                .Data = {
+                    .OwnerAcquire = {
+                        .ImageWriten = image_writen_ticket,
+                        .TargetImage = dst,
+                        .TargetLayer = target_layer
+                    }
+                }
+            }
+        );
 
         return ticket;
     }
