@@ -352,8 +352,8 @@ namespace TransferPipe {
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
                         Wait(q1_pile, ticket_semaphore.Handle, package.TicketToSignal.Value-1);
-                        Wait(q1_pile, ImageTransferSemaphores[image_released.TargetSemaphore], image_released.Value-1);
-                        Signal(q1_pile, ImageTransferSemaphores[image_released.TargetSemaphore], image_released.Value);
+                        Wait(q1_pile, ImageTransferSemaphores[image_released.TargetSemaphore].Handle, image_released.Value-1);
+                        Signal(q1_pile, ImageTransferSemaphores[image_released.TargetSemaphore].Handle, image_released.Value);
 
                         VkImageMemoryBarrier2 release_to_q2 {};
                         release_to_q2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -404,9 +404,9 @@ namespace TransferPipe {
                         VkCommandBuffer cmd_q2 = GetNext(TransferCommandBufferBlock);
                         LeanVk::BeginCommand(cmd_q2);
 
-                        Wait(TransferSubmissionPile, ImageTransferSemaphores[image_released.TargetSemaphore], image_released.Value);
-                        Wait(TransferSubmissionPile, ImageTransferSemaphores[image_writen.TargetSemaphore], image_writen.Value-1);
-                        Signal(TransferSubmissionPile, ImageTransferSemaphores[image_writen.TargetSemaphore], image_writen.Value);
+                        Wait(TransferSubmissionPile, ImageTransferSemaphores[image_released.TargetSemaphore].Handle, image_released.Value);
+                        Wait(TransferSubmissionPile, ImageTransferSemaphores[image_writen.TargetSemaphore].Handle, image_writen.Value-1);
+                        Signal(TransferSubmissionPile, ImageTransferSemaphores[image_writen.TargetSemaphore].Handle, image_writen.Value);
 
                         VkImageMemoryBarrier2 acquire_on_q2 {};
                         acquire_on_q2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -499,8 +499,8 @@ namespace TransferPipe {
                         VkCommandBuffer cmd_b_q1 = GetNext(q1_block);
                         LeanVk::BeginCommand(cmd_b_q1);
 
-                        Wait(q1_pile, ImageTransferSemaphores[image_writen.TargetSemaphore], image_writen.Value);
-                        Signal(q1_pile, SignalSemaphores[final_ticket.TargetSemaphore], final_ticket.Value);
+                        Wait(q1_pile, ImageTransferSemaphores[image_writen.TargetSemaphore].Handle, image_writen.Value);
+                        Signal(q1_pile, SignalSemaphores[final_ticket.TargetSemaphore].Handle, final_ticket.Value);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
                         Signal(
@@ -562,7 +562,8 @@ namespace TransferPipe {
         for (auto* queue : VkVault::UniqueQueues) {
             ResetPile(SpecialSubmissionPiles[queue]);
         }
-        Reset(TransferCommandBufferBlock);
+        // TODO:CRITICAL: I have no idea on how I should track commands to reset for now
+        // Reset(TransferCommandBufferBlock);
 
         /**
          * Step the layers only if the lazy write ended because of the current layer being emptied
@@ -572,7 +573,7 @@ namespace TransferPipe {
             CurrentUploadLayer = (CurrentUploadLayer + 1) % UPLOAD_LAYERS_COUNT;
         }
 
-        if (!IsEmpty(TransferSubmissionPile) || !ArePackageQueuesFullyEmptied()) {
+        if (!ArePackageQueuesFullyEmptied()) {
             LazySubmit();
         }
     }
