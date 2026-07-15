@@ -17,10 +17,10 @@ struct SubmissionPile {
     static constexpr u64 MaxWaitSemaphores = MAX_WAIT_SEMAPHORES;
     static constexpr u64 MaxSignalSemaphores = MAX_SIGNAL_SEMAPHORES;
 
-    std::array<VkSubmitInfo2, MAX_SUBMITS> Submits;
-    std::array<VkCommandBufferSubmitInfo, MAX_COMMAND_BUFFERS> CommandBuffers;
-    std::array<VkSemaphoreSubmitInfo, MAX_WAIT_SEMAPHORES> WaitSemaphores;
-    std::array<VkSemaphoreSubmitInfo, MAX_SIGNAL_SEMAPHORES> SignalSemaphores;
+    std::array<VkSubmitInfo2, MAX_SUBMITS> Submits = {{}};
+    std::array<VkCommandBufferSubmitInfo, MAX_COMMAND_BUFFERS> CommandBuffers = {{}};
+    std::array<VkSemaphoreSubmitInfo, MAX_WAIT_SEMAPHORES> WaitSemaphores = {{}};
+    std::array<VkSemaphoreSubmitInfo, MAX_SIGNAL_SEMAPHORES> SignalSemaphores = {{}};
 
     u64 SubmitCount = 0;
     u64 CmdCount = 0;
@@ -30,6 +30,15 @@ struct SubmissionPile {
     u64 CmdStart = 0;
     u64 WaitStart = 0;
     u64 SignalStart = 0;
+
+    /*
+     * It's cool having this but it breaks my special submission vector in TransferPipe
+    SubmissionPile() = default;
+    SubmissionPile(const SubmissionPile&) = delete;
+    SubmissionPile& operator=(const SubmissionPile&) = delete;
+    SubmissionPile(SubmissionPile&&) = delete;
+    SubmissionPile& operator=(SubmissionPile&&) = delete;
+    */
 };
 
 // Damn I sure love having to repeat myself a lot to use generics :)
@@ -76,9 +85,8 @@ void AddCommandToPile(SubmissionPile<A, B, C, D>& pile, VkCommandBuffer command)
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Wait(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0) {
+void Wait(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     assert(pile.WaitCount < pile.MaxWaitSemaphores && "max wait semaphores on a pile reached");
-
     pile.WaitSemaphores[pile.WaitCount] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
         semaphore, value, stage, 0
@@ -87,9 +95,8 @@ void Wait(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, Vk
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Signal(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = 0) {
+void Signal(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     assert(pile.SignalCount < pile.MaxSignalSemaphores && "max signal semaphores count on a pile reached");
-
     pile.SignalSemaphores[pile.SignalCount] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
         semaphore, value, stage, 0
@@ -98,18 +105,18 @@ void Signal(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, 
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Wait(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = 0) {
+void Wait(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     Wait(pile, semaphore.Handle, semaphore.LastSignaledValue, stage);
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Signal(SubmissionPile<A, B, C, D>& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = 0) {
+void Signal(SubmissionPile<A, B, C, D>& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     semaphore.LastSignaledValue += 1;
     Signal(pile, semaphore.Handle, semaphore.LastSignaledValue, stage);
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-bool IsFull(SubmissionPile<A, B, C, D> pile) {
+bool IsFull(SubmissionPile<A, B, C, D>& pile) {
     return (
         pile.SubmitCount == pile.MaxSubmits ||
         pile.CmdCount == pile.MaxCommandBuffers ||
@@ -119,7 +126,7 @@ bool IsFull(SubmissionPile<A, B, C, D> pile) {
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-bool IsEmpty(SubmissionPile<A, B, C, D> pile) {
+bool IsEmpty(SubmissionPile<A, B, C, D>& pile) {
     return (
         pile.SubmitCount == 0 &&
         pile.CmdCount == 0 &&
@@ -130,7 +137,7 @@ bool IsEmpty(SubmissionPile<A, B, C, D> pile) {
 
 template <u64 A, u64 B, u64 C, u64 D>
 void SubmitPile(QueueContext& ctx, SubmissionPile<A, B, C, D>& pile, VkFence execution_fence = VK_NULL_HANDLE) {
-    if(pile.SubmitCount >= 1) {
+    if(pile.SubmitCount > 0) {
         VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence), "pile submission failed");
         ResetPile(pile);
     }
