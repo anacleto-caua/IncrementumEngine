@@ -502,13 +502,6 @@ namespace TransferPipe {
                         Wait(q1_pile, ImageTransferSemaphores[image_writen.TargetSemaphore].Handle, image_writen.Value);
                         Signal(q1_pile, SignalSemaphores[final_ticket.TargetSemaphore].Handle, final_ticket.Value);
 
-                        // Guarantee submission order (on this one semaphore) and make tickets valid
-                        Signal(
-                            q1_pile,
-                            ticket_semaphore.Handle,
-                            package.TicketToSignal.Value
-                        );
-
                         VkImageMemoryBarrier2 acquire_on_q1 {};
                         acquire_on_q1.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
                         acquire_on_q1.srcStageMask = VK_PIPELINE_STAGE_2_NONE; // Required for acquire
