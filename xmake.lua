@@ -119,6 +119,9 @@ target("IncrementumEngine")
         set_strip("none")
         set_optimize("none")
 
+        -- Explicitly set the Debug C-Runtime
+        set_runtimes("MDd")
+
         -- Buffer overflow protection
         add_cxflags("-fstack-protector-strong")
         -- Accurate call stacks when a sanitizer crashes
@@ -139,6 +142,9 @@ target("IncrementumEngine")
         set_symbols("debug")
         set_optimize("fastest")
         set_strip("none")
+
+        -- Explicitly set the Release C-Runtime to match CMake's RelWithDebInfo
+        set_runtimes("MD")
 
         -- Crucial for AMD μProf to unwind Clang call stacks accurately
         add_cxflags("-fno-omit-frame-pointer", {force = true})
@@ -190,7 +196,20 @@ target("IncrementumEngine")
 
         add_syslinks("vulkan-1")
 
-        add_syslinks("user32", "gdi32", "shell32")
+        add_syslinks(
+            "user32",
+            "gdi32",
+            "shell32",
+            "winmm",
+            "advapi32",
+            "ole32",
+            "oleaut32",
+            "setupapi",
+            "version",
+            "uuid",
+            "imm32",
+            "cfgmgr32"
+        )
 
     elseif is_plat("linux") then
         add_syslinks("vulkan")

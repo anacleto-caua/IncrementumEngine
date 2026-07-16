@@ -146,6 +146,7 @@ namespace VkVault {
         };
 
         // Validation layers
+#ifndef NDEBUG // for some reason using contexpr instead of preprocessor will break on releasedbg builds
         if constexpr (EnableValidadtionLayers_) {
             all_instance_extensions.insert(
                 all_instance_extensions.end(),
@@ -155,6 +156,7 @@ namespace VkVault {
             instance_create_info.enabledLayerCount = static_cast<u32>(VALIDATION_LAYERS.size());
             instance_create_info.ppEnabledLayerNames = VALIDATION_LAYERS.data();
         }
+#endif
 
         instance_create_info.enabledExtensionCount = static_cast<u32>(all_instance_extensions.size());
         instance_create_info.ppEnabledExtensionNames = all_instance_extensions.data();
@@ -540,9 +542,11 @@ namespace VkVault {
     IncResult Create() {
         CreateInstance();
 
+#ifndef NDEBUG
         if constexpr (EnableValidadtionLayers_) {
             _SetupDebugMessenger();
         }
+#endif
 
         PickPhysicalDevice();
 
@@ -571,9 +575,11 @@ namespace VkVault {
         if (Device) { vkDestroyDevice(Device, nullptr); }
         if (Surface) { vkDestroySurfaceKHR(Instance, Surface, nullptr); }
 
+#ifndef NDEBUG
         if constexpr (EnableValidadtionLayers_) {
             _DestroyDebugUtilsMessengerEXT();
         }
+#endif
 
         if (Instance) { vkDestroyInstance(Instance, nullptr); }
     }
