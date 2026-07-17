@@ -20,7 +20,7 @@ using f64 = double;
 #define INC_CHECK(expr, ...)                            \
     do {                                                \
         if ((expr) != IncResult::SUCCESS) {             \
-            analog::error(__VA_ARGS__);                 \
+            analog::critical(__VA_ARGS__);              \
             return IncResult::FAIL;                     \
         }                                               \
     } while(0)
