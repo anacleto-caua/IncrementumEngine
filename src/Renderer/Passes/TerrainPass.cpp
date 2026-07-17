@@ -180,33 +180,43 @@ namespace TerrainPass {
             );
 
             // Finally creating the terrain VkPipeline itself
-            std::vector<VkDynamicState> dynamic_states {};
-            dynamic_states = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+            std::array<VkDynamicState, 2> dynamic_states = {{ VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR}};
 
             VkPipelineDynamicStateCreateInfo dynamic_state_create_info {};
             dynamic_state_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+            dynamic_state_create_info.pNext = nullptr;
             dynamic_state_create_info.dynamicStateCount = static_cast<u32>(dynamic_states.size());
             dynamic_state_create_info.pDynamicStates = dynamic_states.data();
 
             VkPipelineRenderingCreateInfo rendering_create_info {};
             rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+            rendering_create_info.pNext = nullptr;
             rendering_create_info.colorAttachmentCount = static_cast<u32>(VkVault::ColorAttachmentFormats.size());
             rendering_create_info.pColorAttachmentFormats = VkVault::ColorAttachmentFormats.data();
             rendering_create_info.depthAttachmentFormat = RendererConfig::DepthBuffer::Format;
             rendering_create_info.stencilAttachmentFormat = RendererConfig::DepthBuffer::Format;
 
+            auto vertex_input_state = PipelineDefaults::DefaultPipelineVertexInputStateCreateInfo();
+            auto input_assembly_state = PipelineDefaults::DefaultPipelineInputAssemblyStateCreateInfo();
+            auto viewport_state = PipelineDefaults::DefaultPipelineViewportStateCreateInfo();
+            auto rasterization_state = PipelineDefaults::DefaultPipelineRasterizationStateCreateInfo();
+            auto multisample_state = PipelineDefaults::DefaultPipelineMultisampleStateCreateInfo();
+            auto depth_stencil_state = PipelineDefaults::DefaultPipelineDepthStencilStateCreateInfo();
+            auto colorblend_state = PipelineDefaults::DefaultPipelineColorBlendStateCreateInfo();
+
             VkGraphicsPipelineCreateInfo terrain_pipeline_create_info {};
             terrain_pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-            terrain_pipeline_create_info.pVertexInputState = &PipelineDefaults::DefaultPipelineVertexInputStateCreateInfo;
-            terrain_pipeline_create_info.pInputAssemblyState = &PipelineDefaults::DefaultPipelineInputAssemblyStateCreateInfo;
-            terrain_pipeline_create_info.pViewportState = &PipelineDefaults::DefaultPipelineViewportStateCreateInfo;
-            terrain_pipeline_create_info.pRasterizationState = &PipelineDefaults::DefaultPipelineRasterizationStateCreateInfo;
-            terrain_pipeline_create_info.pMultisampleState = &PipelineDefaults::DefaultPipelineMultisampleStateCreateInfo;
-            terrain_pipeline_create_info.pDepthStencilState = &PipelineDefaults::DefaultPipelineDepthStencilStateCreateInfo;
-            terrain_pipeline_create_info.pColorBlendState = &PipelineDefaults::DefaultPipelineColorBlendStateCreateInfo;
+            terrain_pipeline_create_info.pVertexInputState = &vertex_input_state;
+            terrain_pipeline_create_info.pInputAssemblyState = &input_assembly_state;
+            terrain_pipeline_create_info.pViewportState = &viewport_state;
+            terrain_pipeline_create_info.pRasterizationState = &rasterization_state;
+            terrain_pipeline_create_info.pMultisampleState = &multisample_state;
+            terrain_pipeline_create_info.pDepthStencilState = &depth_stencil_state;
+            terrain_pipeline_create_info.pColorBlendState = &colorblend_state;
             terrain_pipeline_create_info.pDynamicState = &dynamic_state_create_info;
             terrain_pipeline_create_info.layout = TerrainPipelineLayout;
             terrain_pipeline_create_info.basePipelineIndex = -1;
+
             terrain_pipeline_create_info.pNext = &rendering_create_info;
 
             // Add shaders
