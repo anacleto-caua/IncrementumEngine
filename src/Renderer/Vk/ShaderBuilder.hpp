@@ -5,8 +5,9 @@
 
 #include <vulkan/vulkan.h>
 
-VkPipelineShaderStageCreateInfo CreateShaderStage(
+IncResult CreateShaderStage(
     VkShaderStageFlagBits stage,
     std::string filename,
-    std::vector<u32> &shader_code
+    std::vector<u32> &shader_code,
+    VkPipelineShaderStageCreateInfo& shader_stage
 );

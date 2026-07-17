@@ -224,20 +224,30 @@ namespace TerrainPass {
             std::vector<u32> shader_buffer;
             shader_buffer.reserve(4096);
 
-            shader_stages.push_back(
+            VkPipelineShaderStageCreateInfo vert_shader;
+            INC_CHECK(
                 CreateShaderStage(
                     VK_SHADER_STAGE_VERTEX_BIT,
                     "shaders/terrain.vert.spv",
-                    shader_buffer
-                )
+                    shader_buffer,
+                    vert_shader
+                ),
+                "vertex shader creation failed"
             );
-            shader_stages.push_back(
+
+            VkPipelineShaderStageCreateInfo frag_shader;
+            INC_CHECK(
                 CreateShaderStage(
                     VK_SHADER_STAGE_FRAGMENT_BIT,
                     "shaders/terrain.frag.spv",
-                    shader_buffer
-                )
+                    shader_buffer,
+                    frag_shader
+                ),
+                "fragment shader creation failed"
             );
+
+            shader_stages.push_back(vert_shader);
+            shader_stages.push_back(frag_shader);
 
             terrain_pipeline_create_info.stageCount = static_cast<u32>(shader_stages.size());
             terrain_pipeline_create_info.pStages = shader_stages.data();
