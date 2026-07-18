@@ -35,11 +35,13 @@ enum class IncResult {
 
 namespace analog {
     /**
-     * Implemented in ./logger.cpp
      * Make sure to call this function at the start of the program
      */
-    void init();
-
+    inline void init() {
+        spdlog::set_pattern("%^[%l]%$ %v");
+        spdlog::set_level(spdlog::level::debug);
+        spdlog::flush_on(spdlog::level::err);
+    }
     // Debug level
     template <typename... Args>
     inline void debug(spdlog::format_string_t<Args...> fmt, Args&&... args) {
