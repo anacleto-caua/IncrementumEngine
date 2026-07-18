@@ -1,7 +1,7 @@
 #include "ShaderBuilder.hpp"
 
-#include "Utils/IO.hpp"
 #include "Renderer/VkVault.hpp"
+#include "Engine/Core/FileIO.hpp"
 
 const char* ENTRY_POINT_NAME = "main";
 
@@ -13,7 +13,7 @@ IncResult CreateShaderStage(
 ) {
     u32 shader_size_in_bytes;
     INC_CHECK(
-        IO::BinaryRead(filename, shader_code, shader_size_in_bytes),
+        FileIO::BinaryRead(filename, shader_code, shader_size_in_bytes),
         "shader from file: {} - couldn't be read", filename
     );
 

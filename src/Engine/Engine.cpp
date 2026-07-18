@@ -5,6 +5,7 @@
 #include <imgui.h>
 
 #include "Renderer/Renderer.hpp"
+#include "Engine/Core/FileIO.hpp"
 #include "Engine/Core/Platform.hpp"
 #include "Engine/Utils/ImGuiUtils.hpp"
 #include "TaskScheduler/TaskScheduler.hpp"
@@ -26,12 +27,14 @@ namespace Engine {
     IncResult Create() {
         INC_CHECK(
             Platform::Initialize(WIDTH, HEIGHT, ENGINE_NAME.data(), Engine::ResizeEvent),
-            "Couldn't create platform layer."
+            "couldn't create platform layer."
         );
+
+        FileIO::Initialize();
 
         INC_CHECK(
             Renderer::Create(),
-            "Couldn't create renderer."
+            "couldn't create renderer."
         );
 
         // Seem's hacky
