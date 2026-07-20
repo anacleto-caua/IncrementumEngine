@@ -19,6 +19,7 @@ IncResult CreateShaderStage(
 
     VkShaderModuleCreateInfo shader_module_create_info {};
     shader_module_create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    shader_module_create_info.pNext = nullptr;
     shader_module_create_info.codeSize = shader_size_in_bytes;
     shader_module_create_info.pCode =shader_code.data();
 
