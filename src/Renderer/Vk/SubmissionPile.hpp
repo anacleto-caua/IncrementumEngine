@@ -116,7 +116,7 @@ void Signal(SubmissionPile<A, B, C, D>& pile, TimelineSemaphore& semaphore, VkPi
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-bool IsFull(SubmissionPile<A, B, C, D>& pile) {
+bool IsFull(const SubmissionPile<A, B, C, D>& pile) {
     return (
         pile.SubmitCount == pile.MaxSubmits ||
         pile.CmdCount == pile.MaxCommandBuffers ||
@@ -126,7 +126,7 @@ bool IsFull(SubmissionPile<A, B, C, D>& pile) {
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-bool IsEmpty(SubmissionPile<A, B, C, D>& pile) {
+bool IsEmpty(const SubmissionPile<A, B, C, D>& pile) {
     return (
         pile.SubmitCount == 0 &&
         pile.CmdCount == 0 &&
