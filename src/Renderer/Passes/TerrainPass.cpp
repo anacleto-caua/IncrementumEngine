@@ -278,7 +278,7 @@ namespace TerrainPass {
                     buffer,
                     0,
                     TerrainManager::ChunkDrawList.data(),
-                    TerrainManager::ChunkDrawList.size()
+                    TerrainManager::ChunkDrawList.size() * sizeof(TerrainConfig::Memory::ChunkInstanceData)
                 );
         }
 
