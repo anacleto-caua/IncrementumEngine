@@ -293,9 +293,6 @@ namespace TerrainPass {
 
         TransferPipe::LazySubmit();
 
-        analog::error("CODE WILL BREAK, IT'S BROKEN BELLOW THIS POINT");
-        return IncResult::FAIL;
-
         // Zeroing terrain push constants
         TerrainPushConstants = {
             .CameraMVP = glm::mat4(0),
