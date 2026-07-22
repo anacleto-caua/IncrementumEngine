@@ -1,11 +1,12 @@
 #pragma once
 
 #include <vector>
+#include <limits>
 #include <cassert>
 
 namespace asl {
 
-template <typename T>
+template <typename T, typename IndexingType = size_t>
 class FreeList {
 private:
     struct Slot {
@@ -14,7 +15,7 @@ private:
     };
 
     std::vector<Slot> Data;
-    std::vector<size_t> FreeIndices;
+    std::vector<IndexingType> FreeIndices;
 
 public:
     FreeList() = default;
@@ -23,12 +24,12 @@ public:
     FreeList(const FreeList&) = delete;
     FreeList& operator=(const FreeList&) = delete;
 
-    T& operator[](size_t index) {
+    T& operator[](IndexingType index) {
         return Data[index].Data;
     }
 
-    size_t Add(T element) {
-        size_t index;
+    IndexingType Add(T element) {
+        IndexingType index;
         if (FreeIndices.size() > 0) {
             index = FreeIndices[FreeIndices.size()-1];
             FreeIndices.pop_back();
@@ -37,7 +38,9 @@ public:
                 .Active = true
             };
         } else {
-            index = Data.size();
+            assert(Data.size() <= std::numeric_limits<IndexingType>::max() && "tried to add more elements than limited by the chosen IndexingType.");
+            index = static_cast<IndexingType>(Data.size());
+
             Data.push_back({
                 .Data = element,
                 .Active = true
@@ -46,7 +49,7 @@ public:
         return index;
     }
 
-    void Remove(size_t index) {
+    void Remove(IndexingType index) {
         assert(Data[index].Active == true && "tried to remove an already invalid index.");
 
         Data[index].Active = false;
@@ -56,7 +59,7 @@ public:
     class Iterator {
         private:
             std::vector<Slot>& DataPool;
-            size_t Index;
+            IndexingType Index;
 
             void SkipInactive() {
                 while (Index < DataPool.size() && !DataPool[Index].Active) {
@@ -65,7 +68,7 @@ public:
             }
 
         public:
-            Iterator(std::vector<Slot>& data, size_t start_index) : DataPool(data), Index(start_index) {
+            Iterator(std::vector<Slot>& data, IndexingType start_index) : DataPool(data), Index(start_index) {
                 SkipInactive();
             }
 
