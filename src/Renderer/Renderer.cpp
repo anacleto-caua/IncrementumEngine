@@ -196,16 +196,7 @@ namespace Renderer {
         FrameData& target_frame = Frames[FrameContext.FrameInFlightIndex];
         FrameContext.DrawCommand = target_frame.CmdBuffer;
 
-        // Rendering
-        VkSemaphoreWaitInfo wait_info = {
-            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .semaphoreCount = 1,
-            .pSemaphores = &FrameSemaphore.Handle,
-            .pValues = &target_frame.LastSignaledValue
-        };
-        vkWaitSemaphores(VkVault::Device, &wait_info, UINT64_MAX);
+        WaitOnTimelineSemaphore(FrameSemaphore, target_frame.LastSignaledValue);
 
         VkResult result = vkAcquireNextImageKHR(
             VkVault::Device,
@@ -340,14 +331,16 @@ namespace Renderer {
 
         vkEndCommandBuffer(FrameContext.DrawCommand);
 
+        TimelineSemaphoreValue* frame_semaphore_value = GetTimelineSemaphoreValue(FrameSemaphore);
+
         VkSemaphore submit_wait_semaphores[] = { target_frame.ImageAvailable };
         VkSemaphore submit_signal_semaphores[] = {
             Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished, // Signals Present
-            FrameSemaphore.Handle                                   // Signals the Timeline
+            frame_semaphore_value->Semaphore                                   // Signals the Timeline
         };
 
         // Map the timeline values (1-to-1 with the signal array above)
-        u64 signal_value = ++FrameSemaphore.LastSignaledValue;
+        u64 signal_value = ++frame_semaphore_value->LastSignaledValue;
         u64 signal_values[] = {
             0,             // Ignored by the driver for the binary RenderFinished semaphore
             signal_value   // Applied to the timeline Graphics semaphore

@@ -3,15 +3,21 @@
 #include <vulkan/vulkan.h>
 #include <vma/vk_mem_alloc.h>
 
-struct TimelineSemaphore {
+struct TimelineSemaphoreValue {
     u64 LastSignaledValue = 0;
     u64 LastInqueriedValue = 0;
-    VkSemaphore Handle = VK_NULL_HANDLE;
+    VkSemaphore Semaphore = VK_NULL_HANDLE;
+};
+
+struct TimelineSemaphore {
+    u16 Index;
 };
 
 TimelineSemaphore CreateTimelineSemaphore();
-void DestroyTimelineSemaphore(TimelineSemaphore& semaphore);
+void DestroyTimelineSemaphore(TimelineSemaphore semaphore);
 
-void QueryTimelineSemaphoreValue(TimelineSemaphore& semaphore);
-void SignalTimelineSemaphore(TimelineSemaphore& semaphore, u64 value);
-void WaitOnTimelineSemaphore(TimelineSemaphore& semaphore, u64 wait_value);
+TimelineSemaphoreValue* GetTimelineSemaphoreValue(TimelineSemaphore id);
+
+void QueryTimelineSemaphoreValue(TimelineSemaphore semaphore);
+void SignalTimelineSemaphore(TimelineSemaphore semaphore, u64 signal_value);
+void WaitOnTimelineSemaphore(TimelineSemaphore semaphore, u64 wait_value);

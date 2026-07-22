@@ -106,13 +106,15 @@ void Signal(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, 
 
 template <u64 A, u64 B, u64 C, u64 D>
 void Wait(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    Wait(pile, semaphore.Handle, semaphore.LastSignaledValue, stage);
+    TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
+    Wait(pile, semaphore_value->Semaphore, semaphore_value->LastSignaledValue, stage);
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
 void Signal(SubmissionPile<A, B, C, D>& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    semaphore.LastSignaledValue += 1;
-    Signal(pile, semaphore.Handle, semaphore.LastSignaledValue, stage);
+    TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
+    semaphore_value->LastSignaledValue += 1;
+    Signal(pile, semaphore_value->Semaphore, semaphore_value->LastSignaledValue, stage);
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
