@@ -84,6 +84,28 @@ namespace FlyBy {
     void Update(f32 DeltaTime) {
         bool IsDirty = false;
 
+        {
+            using namespace Input::Keyboard;
+
+            if (IsKeyDown(Key::Forward)) {
+                FrameMovement.z = 1;
+            } else if (IsKeyDown(Key::Backward)) {
+                FrameMovement.z = -1;
+            }
+
+            if (IsKeyDown(Key::Right)) {
+                FrameMovement.x = 1;
+            } else if (IsKeyDown(Key::Left)) {
+                FrameMovement.x = -1;
+            }
+
+            if (IsKeyDown(Key::Up)) {
+                FrameMovement.y = 1;
+            } else if (IsKeyDown(Key::Down)) {
+                FrameMovement.y = -1;
+            }
+        }
+
         if (FrameMovement != vec3::ZERO) {
             FrameMovement = glm::normalize(FrameMovement);
 

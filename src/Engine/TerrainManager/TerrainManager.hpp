@@ -9,7 +9,7 @@
 namespace TerrainManager {
 
     using Heightmap = u16[TerrainConfig::Mesh::VerticesPerEdge][TerrainConfig::Mesh::VerticesPerEdge];
-    inline u32 CurrentllyActiveChunks = 10;
+    inline u32 CurrentllyActiveChunks = TerrainConfig::Streaming::MaxActiveChunks;
 
     struct HeightmapStatus {
         glm::ivec2 Position = { 0, 0 };

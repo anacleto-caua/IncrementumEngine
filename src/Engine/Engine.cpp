@@ -39,6 +39,8 @@ namespace Engine {
 
         // Seem's hacky
         MainCamera = CreateCamera3D(static_cast<f32>(WIDTH)/static_cast<f32>(HEIGHT), FOV);
+        MainCamera.Position = { -10, 15, -10 };
+        RefreshMVP(MainCamera);
         Renderer::BindCamera(&MainCamera);
         FlyBy::Create(MainCamera);
 
