@@ -39,8 +39,8 @@ namespace FlyBy {
     static constexpr f32 SPEED = 20;
     static constexpr f32 RUNNING_MULT = 3;
 
-    static constexpr f32 PITCH_SENSIBILITY = 10;
-    static constexpr f32 YAW_SENSIBILITY = 15;
+    static constexpr f32 PITCH_SENSIBILITY = .1f;
+    static constexpr f32 YAW_SENSIBILITY = .1f;
 
     static constexpr f32 PITCH_CLAMP_MIN = -89;
     static constexpr f32 PITCH_CLAMP_MAX = +89;
@@ -126,8 +126,8 @@ namespace FlyBy {
         }
 
         if (Input::Mouse::XDelta != 0 || Input::Mouse::YDelta != 0) {
-            Pitch += Input::Mouse::YDelta * PITCH_SENSIBILITY * DeltaTime;
-            Yaw -= Input::Mouse::XDelta * YAW_SENSIBILITY * DeltaTime;
+            Pitch -= Input::Mouse::YDelta * PITCH_SENSIBILITY;
+            Yaw -= Input::Mouse::XDelta * YAW_SENSIBILITY;
 
             if (Pitch < PITCH_CLAMP_MIN) {
                 Pitch = PITCH_CLAMP_MIN;
@@ -137,9 +137,9 @@ namespace FlyBy {
 
             // It's more a wrap but well...
             if (Yaw < YAW_CLAMP_MIN) {
-                Yaw = YAW_CLAMP_MAX;
+                Yaw += YAW_CLAMP_MAX;
             } else if (Yaw > YAW_CLAMP_MAX) {
-                Yaw = YAW_CLAMP_MIN;
+                Yaw -= YAW_CLAMP_MIN;
             }
 
             ApplyRotation();
