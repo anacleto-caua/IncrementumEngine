@@ -55,14 +55,17 @@ namespace Platform {
             ImGuiPass::ProcessEvent(event); // Kinda janky dependency, but well...
         }
 
-        float x, y;
+        f32 x, y;
         SDL_GetMouseState(&x, &y);
-
-        Input::Mouse::XDelta = x - Input::Mouse::XPos;
-        Input::Mouse::YDelta = y - Input::Mouse::YPos;
-
         Input::Mouse::XPos = x;
         Input::Mouse::YPos = y;
+
+        // Get the raw, unbounded relative movement directly from SDL
+        f32 x_delta, y_delta;
+        SDL_GetRelativeMouseState(&x_delta, &y_delta);
+
+        Input::Mouse::XDelta = x_delta;
+        Input::Mouse::YDelta = y_delta;
     }
 
     void Shutdown() {
