@@ -197,26 +197,9 @@ namespace TransferPipe {
     }
 
     Ticket MakeTicket() {
-        TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(SignalSemaphores[CurrentSemaphore]);
-        Ticket ticket = {
-            .Value = (++semaphore_value->LastSignaledValue),
-            .TargetSemaphore = CurrentSemaphore
-        };
+        Ticket ticket = CreateTicket(SignalSemaphores[CurrentSemaphore]);
         CurrentSemaphore = (CurrentSemaphore + 1) % PARALLEL_TRANSFERS_COUNT;
         return ticket;
-    }
-
-    bool IsFinished(Ticket ticket) {
-        TimelineSemaphore& semaphore = SignalSemaphores[ticket.TargetSemaphore];
-        TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
-        if (semaphore_value->LastInqueriedValue < ticket.Value) {
-            QueryTimelineSemaphoreValue(semaphore);
-        }
-        return semaphore_value->LastInqueriedValue > ticket.Value;
-    }
-
-    void WaitOn(Ticket ticket) {
-        WaitOnTimelineSemaphore(SignalSemaphores[ticket.TargetSemaphore], ticket.Value);
     }
 
     // Just write all packages, I need a version of this that controls how much it writes
@@ -228,8 +211,7 @@ namespace TransferPipe {
             PackageQueues[CurrentUploadLayer].pop();
             TopTicket = package.TicketToSignal;
 
-            TimelineSemaphore& ticket_semaphore = SignalSemaphores[package.TicketToSignal.TargetSemaphore];
-            TimelineSemaphoreValue* ticket_semaphore_value = GetTimelineSemaphoreValue(ticket_semaphore);
+            TimelineSemaphore& ticket_semaphore = package.TicketToSignal.TargetSemaphore;
 
             switch(package.Type) {
                 case PackageType::BufferUpdate:
@@ -241,8 +223,7 @@ namespace TransferPipe {
                         LeanVk::BeginCommand(cmd);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
-                        Wait(TransferSubmissionPile, ticket_semaphore_value->Semaphore, package.TicketToSignal.Value-1);
-                        Signal(TransferSubmissionPile, ticket_semaphore_value->Semaphore, package.TicketToSignal.Value);
+                        WaitAndSignalTicket(TransferSubmissionPile, package.TicketToSignal);
 
                         vkCmdUpdateBuffer(
                             cmd,
@@ -267,8 +248,7 @@ namespace TransferPipe {
                         LeanVk::BeginCommand(cmd);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
-                        Wait(TransferSubmissionPile, ticket_semaphore_value->Semaphore, package.TicketToSignal.Value-1);
-                        Signal(TransferSubmissionPile, ticket_semaphore_value->Semaphore, package.TicketToSignal.Value);
+                        WaitAndSignalTicket(TransferSubmissionPile, package.TicketToSignal);
 
                         VkBufferCopy copy_region {};
                         copy_region.srcOffset = upload_info.ReadOffset;
@@ -295,7 +275,6 @@ namespace TransferPipe {
                         Image::Value* target_image = Image::Get(release_info.TargetImage);
 
                         Ticket& image_released = release_info.ImageReleased;
-                        TimelineSemaphoreValue* image_release_value = GetTimelineSemaphoreValue(SignalSemaphores[image_released.TargetSemaphore]);
 
                         auto queue_1_family_idx = target_image->OwnerQueue->Index;
                         auto queue_2_family_idx = VkVault::Transfer.Index;
@@ -315,9 +294,8 @@ namespace TransferPipe {
                         LeanVk::BeginCommand(cmd_a_q1);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
-                        Wait(q1_pile, ticket_semaphore_value->Semaphore, package.TicketToSignal.Value-1);
-                        Wait(q1_pile, image_release_value->Semaphore, image_released.Value-1);
-                        Signal(q1_pile, image_release_value->Semaphore, image_released.Value);
+                        WaitPrepareForTicket(q1_pile, package.TicketToSignal);
+                        WaitAndSignalTicket(q1_pile, image_released);
 
                         VkImageMemoryBarrier2 release_to_q2 {};
                         release_to_q2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -351,10 +329,8 @@ namespace TransferPipe {
                         Image::Value* target_image = Image::Get(write_info.DstImage);
 
                         Ticket& image_released = write_info.ImageReleased;
-                        TimelineSemaphoreValue* image_release_value = GetTimelineSemaphoreValue(SignalSemaphores[image_released.TargetSemaphore]);
 
                         Ticket& image_writen = write_info.ImageWriten;
-                        TimelineSemaphoreValue* image_writen_value = GetTimelineSemaphoreValue(SignalSemaphores[image_writen.TargetSemaphore]);
 
                         ring_buffer_read_size += package.Size;
 
@@ -372,9 +348,8 @@ namespace TransferPipe {
                         VkCommandBuffer cmd_q2 = GetNext(TransferCommandBufferBlock);
                         LeanVk::BeginCommand(cmd_q2);
 
-                        Wait(TransferSubmissionPile, image_release_value->Semaphore, image_released.Value);
-                        Wait(TransferSubmissionPile, image_writen_value->Semaphore, image_writen.Value-1);
-                        Signal(TransferSubmissionPile, image_writen_value->Semaphore, image_writen.Value);
+                        WaitForTicket(TransferSubmissionPile, image_released);
+                        WaitAndSignalTicket(TransferSubmissionPile, image_writen);
 
                         VkImageMemoryBarrier2 acquire_on_q2 {};
                         acquire_on_q2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -448,10 +423,8 @@ namespace TransferPipe {
                         Image::Value* target_image = Image::Get(acquire_info.TargetImage);
 
                         Ticket& image_writen = acquire_info.ImageWriten;
-                        TimelineSemaphoreValue* image_writen_value = GetTimelineSemaphoreValue(SignalSemaphores[image_writen.TargetSemaphore]);
 
                         Ticket& final_ticket = package.TicketToSignal;
-                        TimelineSemaphoreValue* final_ticket_value = GetTimelineSemaphoreValue(SignalSemaphores[final_ticket.TargetSemaphore]);
 
                         auto queue_1_family_idx = target_image->OwnerQueue->Index;
                         auto queue_2_family_idx = VkVault::Transfer.Index;
@@ -470,8 +443,8 @@ namespace TransferPipe {
                         VkCommandBuffer cmd_b_q1 = GetNext(q1_block);
                         LeanVk::BeginCommand(cmd_b_q1);
 
-                        Wait(q1_pile, image_writen_value->Semaphore, image_writen.Value);
-                        Signal(q1_pile, final_ticket_value->Semaphore, final_ticket.Value);
+                        WaitForTicket(q1_pile, image_writen);
+                        SignalTicket(q1_pile, final_ticket);
 
                         VkImageMemoryBarrier2 acquire_on_q1 {};
                         acquire_on_q1.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;

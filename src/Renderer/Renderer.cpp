@@ -340,7 +340,7 @@ namespace Renderer {
         };
 
         // Map the timeline values (1-to-1 with the signal array above)
-        u64 signal_value = ++frame_semaphore_value->LastSignaledValue;
+        u64 signal_value = ++frame_semaphore_value->LastPromissedValue;
         u64 signal_values[] = {
             0,             // Ignored by the driver for the binary RenderFinished semaphore
             signal_value   // Applied to the timeline Graphics semaphore

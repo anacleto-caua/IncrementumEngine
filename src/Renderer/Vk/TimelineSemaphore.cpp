@@ -7,7 +7,7 @@ asl::FreeList<TimelineSemaphoreValue, u16> SemaphoresData;
 
 TimelineSemaphore CreateTimelineSemaphore() {
     TimelineSemaphoreValue semaphore_value = {};
-    semaphore_value.LastSignaledValue = 0;
+    semaphore_value.LastPromissedValue = 0;
 
     VkSemaphoreTypeCreateInfo semaphore_type_create_info = {};
     semaphore_type_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
@@ -56,7 +56,6 @@ void SignalTimelineSemaphore(TimelineSemaphore semaphore, u64 signal_value) {
     };
     vkSignalSemaphore(VkVault::Device, &signal_info);
 
-    value->LastSignaledValue = signal_value;
     value->LastInqueriedValue = signal_value;
 }
 
@@ -73,4 +72,25 @@ void WaitOnTimelineSemaphore(TimelineSemaphore semaphore, u64 wait_value) {
 
     vkWaitSemaphores(VkVault::Device, &wait_info, UINT64_MAX);
     value->LastInqueriedValue = wait_value;
+}
+
+Ticket CreateTicket(TimelineSemaphore semaphore) {
+    TimelineSemaphoreValue* value = GetTimelineSemaphoreValue(semaphore);
+    return {
+        .Value = ++value->LastPromissedValue,
+        .TargetSemaphore = semaphore
+    };
+}
+
+bool IsFinished(Ticket ticket) {
+    TimelineSemaphore& semaphore = ticket.TargetSemaphore;
+    TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
+    if (semaphore_value->LastInqueriedValue < ticket.Value) {
+        QueryTimelineSemaphoreValue(semaphore);
+    }
+    return semaphore_value->LastInqueriedValue >= ticket.Value;
+}
+
+void WaitOn(Ticket ticket) {
+    WaitOnTimelineSemaphore(ticket.TargetSemaphore, ticket.Value);
 }

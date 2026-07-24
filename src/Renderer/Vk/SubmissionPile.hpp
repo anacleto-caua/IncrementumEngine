@@ -85,7 +85,7 @@ void AddCommandToPile(SubmissionPile<A, B, C, D>& pile, VkCommandBuffer command)
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Wait(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+void WaitSemaphore(SubmissionPile<A, B, C, D>& pile, const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     assert(pile.WaitCount < pile.MaxWaitSemaphores && "max wait semaphores on a pile reached");
     pile.WaitSemaphores[pile.WaitCount] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
@@ -95,7 +95,7 @@ void Wait(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, Vk
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Signal(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+void SignalSemaphore(SubmissionPile<A, B, C, D>& pile, const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     assert(pile.SignalCount < pile.MaxSignalSemaphores && "max signal semaphores count on a pile reached");
     pile.SignalSemaphores[pile.SignalCount] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
@@ -105,16 +105,36 @@ void Signal(SubmissionPile<A, B, C, D>& pile, VkSemaphore semaphore, u64 value, 
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Wait(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+void WaitTimeline(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
-    Wait(pile, semaphore_value->Semaphore, semaphore_value->LastSignaledValue, stage);
+    WaitSemaphore(pile, semaphore_value->Semaphore, value, stage);
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void Signal(SubmissionPile<A, B, C, D>& pile, TimelineSemaphore& semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+void SignalTimeline(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
-    semaphore_value->LastSignaledValue += 1;
-    Signal(pile, semaphore_value->Semaphore, semaphore_value->LastSignaledValue, stage);
+    SignalSemaphore(pile, semaphore_value->Semaphore, value, stage);
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void WaitPrepareForTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    WaitTimeline(pile, ticket.TargetSemaphore, ticket.Value-1, stage);
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void WaitForTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    WaitTimeline(pile, ticket.TargetSemaphore, ticket.Value, stage);
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void SignalTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    SignalTimeline(pile, ticket.TargetSemaphore, ticket.Value, stage);
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void WaitAndSignalTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    WaitPrepareForTicket(pile, ticket, stage); // Guarantee all previously required work has been done
+    SignalTicket(pile, ticket, stage);
 }
 
 template <u64 A, u64 B, u64 C, u64 D>

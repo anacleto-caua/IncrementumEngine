@@ -9,10 +9,6 @@
 #include "Buffer.hpp"
 
 namespace TransferPipe {
-    struct Ticket {
-        u64 Value;
-        u32 TargetSemaphore; // Point to one of the members in the SignalSemaphores array
-    };
 
     enum class TransferType {
         Normal,
@@ -22,10 +18,6 @@ namespace TransferPipe {
 
     IncResult Create();
     void Destroy();
-
-    bool IsFinished(Ticket ticket);
-    void WaitOn(Ticket ticket);
-
     /**
      * This methods just flushes the entire package queue
      */
