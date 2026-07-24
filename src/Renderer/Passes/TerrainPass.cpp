@@ -2,6 +2,7 @@
 
 #include <array>
 
+#include <imgui.h>
 #include <glm/ext.hpp>
 
 #include "Renderer/VkVault.hpp"
@@ -39,6 +40,10 @@ namespace TerrainPass {
         Image::Id Image;
         ImageView::Id ImageView;
         VkSampler Sampler;
+    }
+
+    namespace DebugUI {
+        void OutTerrainData();
     }
 
     std::array<Buffer::Id, RendererConfig::MAX_FRAMES_IN_FLIGHT> ChunkDrawListBuffers;
@@ -316,6 +321,8 @@ namespace TerrainPass {
     }
 
     void Render() {
+        DebugUI::OutTerrainData();
+
         VkCommandBuffer& cmd = Renderer::FrameContext.DrawCommand;
 
         vkCmdBindIndexBuffer(cmd, Buffer::Get(PlaneMesh::Indices)->Buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -384,6 +391,66 @@ namespace TerrainPass {
 
             TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), TerrainConfig::Mesh::IndexBufferSize);
             TransferPipe::LazySubmit();
+        }
+    }
+
+    namespace DebugUI {
+        void OutTerrainData() {
+            using namespace TerrainManager;
+
+            if (ImGui::CollapsingHeader("Terrain Draw Data", ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Text("Active Chunks: %u / %u", CurrentllyActiveChunks, TerrainConfig::Streaming::MaxActiveChunks);
+                ImGui::Separator();
+
+                // Iterate only up to the currently active chunks to save UI performance
+                for (u32 i = 0; i < CurrentllyActiveChunks; ++i)
+                {
+                    // Create a unique tree node for each chunk using its index as the ID
+                    if (ImGui::TreeNode((void*)(intptr_t)i, "Chunk [%u]", i))
+                    {
+                        // Draw Data
+                        if (ImGui::TreeNode("Instance Draw Data"))
+                        {
+                            const auto& draw_data = ChunkDrawList[i];
+                            ImGui::Text("World Pos:     (%d, %d)", draw_data.WorldPos.x, draw_data.WorldPos.y);
+                            ImGui::Text("Texture Layer: %u", draw_data.TextureLayer);
+                            ImGui::TextDisabled("Padding:       %u", draw_data.padding); // Disabled text color for padding
+                            ImGui::TreePop();
+                        }
+
+                        // Heightmap Streaming Status
+                        if (ImGui::TreeNode("Heightmap Status")) {
+
+                            const auto& status = HeightmapStatus[i];
+
+                            ImGui::Text("Position: (%d, %d)", status.Position.x, status.Position.y);
+
+                            if (status.Ready) {
+                                ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "Ready: True");
+                            } else {
+                                ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "Ready: False");
+                            }
+                            ImGui::TreePop();
+                        }
+
+                        // Heightmap Data Preview
+                        if (ImGui::TreeNode("Heightmap Preview")) {
+                            const u32 edge = TerrainConfig::Mesh::VerticesPerEdge;
+                            ImGui::Text("Grid Size: %u x %u", edge, edge);
+
+                            // Show a quick sample of the corners to verify data is loaded
+                            ImGui::BulletText("Top-Left [0][0]:     %u", HeightmapData[i][0][0]);
+                            ImGui::BulletText("Top-Right [0][N]:    %u", HeightmapData[i][0][edge - 1]);
+                            ImGui::BulletText("Bot-Left [N][0]:     %u", HeightmapData[i][edge - 1][0]);
+                            ImGui::BulletText("Bot-Right [N][N]:    %u", HeightmapData[i][edge - 1][edge - 1]);
+
+                            ImGui::TreePop();
+                        }
+
+                        ImGui::TreePop(); // End Chunk [i]
+                    }
+                }
+            }
         }
     }
 }
