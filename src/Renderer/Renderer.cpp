@@ -294,9 +294,9 @@ namespace Renderer {
 
         // Actual frame begins
 
-        ImGuiPass::Render();
-
         TerrainPass::Render();
+
+        ImGuiPass::Render();
 
         // Actual frame ends
 
