@@ -64,7 +64,7 @@ namespace TaskScheduler {
 
     void Create() {
         // Leave one thread for the main thread to avoid OS overhead
-        NumThreads = std::thread::hardware_concurrency() - 1;
+        NumThreads = static_cast<u8>(std::thread::hardware_concurrency() - 1);
         if (NumThreads == 0) NumThreads = 1; // lol
 
         WorkerContexts.resize(NumThreads);

@@ -56,7 +56,7 @@ public:
             // - Worse perf from non-contiguous memory
             // - Terribly messy with images and their different pixel sizes
 
-            u64 pre_tail = static_cast<u64>(Tail - MappedHead);
+            [[maybe_unused]] u64 pre_tail = static_cast<u64>(Tail - MappedHead);
             // This could be easy memcpy'ed to growing pool but I aim to catch bad usage for now,
             // the heftier sollution can come in later
             assert(pre_tail > aligned_size && "can't fit whole data from the head on, staging buffer is cluttered");

@@ -32,7 +32,7 @@ private:
     FreeList<T> Data;
     std::vector<uint32_t> Generations; // Parallel array tracking generations
 
-    void VALIDATE_HANDLE(Handle<T> handle) {
+    void VALIDATE_HANDLE([[maybe_unused]] Handle<T> handle) {
         assert(handle.Generation == Generations[handle.Index] && "tried to access a stale handle.");
     }
 

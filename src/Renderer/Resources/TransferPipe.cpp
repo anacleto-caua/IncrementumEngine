@@ -42,7 +42,7 @@ static constexpr u64 STAGING_BUFFER_SIZE = 10 * 1024 * 1024; // 10 MB
 static constexpr u64 PARALLEL_TRANSFERS_COUNT = 15;
 
 // Supposed to be harsher than the Vulkan limit of 65536 bytes to avoid bad usage
-static constexpr u64 BUFFER_UPDATE_SIZE_LIMIT = 30000;
+[[maybe_unused]] static constexpr u64 BUFFER_UPDATE_SIZE_LIMIT = 30000;
 
 namespace TransferPipe {
     std::array<TimelineSemaphore, PARALLEL_TRANSFERS_COUNT> SignalSemaphores;
@@ -136,8 +136,9 @@ namespace TransferPipe {
 
     /**
      * Just carry the last ticket, at the time it's written at LazyWrite
+     * there isn't a safe initiliazed value for a Ticket, so be mindfull
      */
-    Ticket TopTicket = { 0, 0 };
+    Ticket TopTicket;
 
     u32 CurrentUploadLayer = 0;
 
@@ -210,8 +211,6 @@ namespace TransferPipe {
             Package package = PackageQueues[CurrentUploadLayer].front();
             PackageQueues[CurrentUploadLayer].pop();
             TopTicket = package.TicketToSignal;
-
-            TimelineSemaphore& ticket_semaphore = package.TicketToSignal.TargetSemaphore;
 
             switch(package.Type) {
                 case PackageType::BufferUpdate:
@@ -329,7 +328,6 @@ namespace TransferPipe {
                         Image::Value* target_image = Image::Get(write_info.DstImage);
 
                         Ticket& image_released = write_info.ImageReleased;
-
                         Ticket& image_writen = write_info.ImageWriten;
 
                         ring_buffer_read_size += package.Size;
@@ -423,7 +421,6 @@ namespace TransferPipe {
                         Image::Value* target_image = Image::Get(acquire_info.TargetImage);
 
                         Ticket& image_writen = acquire_info.ImageWriten;
-
                         Ticket& final_ticket = package.TicketToSignal;
 
                         auto queue_1_family_idx = target_image->OwnerQueue->Index;

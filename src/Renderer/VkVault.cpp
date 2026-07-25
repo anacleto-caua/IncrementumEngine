@@ -1,17 +1,9 @@
 #include "VkVault.hpp"
 
 #include <array>
-#include <string>
-#include <format>
 #include <cstring>
 
 #include "Engine/Core/Window.hpp"
-
-#ifdef NDEBUG
-    constexpr bool EnableValidadtionLayers_ = false;
-#else
-    constexpr bool EnableValidadtionLayers_ = true;
-#endif
 
 namespace VkVault {
     static constexpr std::array<const char*, 5> DEVICE_EXTENSIONS = {
@@ -25,6 +17,9 @@ namespace VkVault {
     };
 
 #ifndef NDEBUG
+    #include <string>
+    #include <format>
+
     VkDebugUtilsMessengerEXT DebugMessenger_;
 
     static constexpr std::array<const char*, 1> VALIDATION_LAYERS = { "VK_LAYER_KHRONOS_validation" };
@@ -146,16 +141,14 @@ namespace VkVault {
         };
 
         // Validation layers
-#ifndef NDEBUG // for some reason using contexpr instead of preprocessor will break on releasedbg builds
-        if constexpr (EnableValidadtionLayers_) {
-            all_instance_extensions.insert(
-                all_instance_extensions.end(),
-                VALIDATION_LAYERS_EXTENSION.begin(),
-                VALIDATION_LAYERS_EXTENSION.end()
-            );
-            instance_create_info.enabledLayerCount = static_cast<u32>(VALIDATION_LAYERS.size());
-            instance_create_info.ppEnabledLayerNames = VALIDATION_LAYERS.data();
-        }
+#ifndef NDEBUG
+        all_instance_extensions.insert(
+            all_instance_extensions.end(),
+            VALIDATION_LAYERS_EXTENSION.begin(),
+            VALIDATION_LAYERS_EXTENSION.end()
+        );
+        instance_create_info.enabledLayerCount = static_cast<u32>(VALIDATION_LAYERS.size());
+        instance_create_info.ppEnabledLayerNames = VALIDATION_LAYERS.data();
 #endif
 
         instance_create_info.enabledExtensionCount = static_cast<u32>(all_instance_extensions.size());
@@ -543,9 +536,7 @@ namespace VkVault {
         CreateInstance();
 
 #ifndef NDEBUG
-        if constexpr (EnableValidadtionLayers_) {
-            _SetupDebugMessenger();
-        }
+        _SetupDebugMessenger();
 #endif
 
         PickPhysicalDevice();
@@ -576,9 +567,7 @@ namespace VkVault {
         if (Surface) { vkDestroySurfaceKHR(Instance, Surface, nullptr); }
 
 #ifndef NDEBUG
-        if constexpr (EnableValidadtionLayers_) {
-            _DestroyDebugUtilsMessengerEXT();
-        }
+        _DestroyDebugUtilsMessengerEXT();
 #endif
 
         if (Instance) { vkDestroyInstance(Instance, nullptr); }

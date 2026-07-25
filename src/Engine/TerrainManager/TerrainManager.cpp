@@ -58,7 +58,7 @@ namespace TerrainManager {
         }
     }
 
-    void RefreshChunks(glm::ivec2 current_player_chunk) {
+    void RefreshChunks([[maybe_unused]] glm::ivec2 current_player_chunk) {
         // ...
     }
 
