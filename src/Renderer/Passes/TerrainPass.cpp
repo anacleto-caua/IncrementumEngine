@@ -296,6 +296,8 @@ namespace TerrainPass {
                 );
         }
 
+        TransferPipe::LazySubmit();
+
         // Zeroing terrain push constants
         TerrainPushConstants = {
             .CameraMVP = glm::mat4(0),
