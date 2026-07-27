@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Renderer/VkVault.hpp"
-#include "Asl/ResourcePool.hpp"
+#include "Core/ResourcePool.hpp"
 
 namespace Buffer {
     enum class Type {
@@ -21,5 +21,5 @@ namespace Buffer {
         Type Type;
     };
 
-    using Id = asl::Handle<Value>;
+    using Id = Handle<Value>;
 }

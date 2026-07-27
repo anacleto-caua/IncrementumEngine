@@ -1,9 +1,9 @@
 #include "TimelineSemaphore.hpp"
 
-#include "Asl/FreeList.hpp"
+#include "Core/FreeList.hpp"
 #include "Renderer/VkVault.hpp"
 
-asl::FreeList<TimelineSemaphoreValue, u16> SemaphoresData;
+FreeList<TimelineSemaphoreValue, u16> SemaphoresData;
 
 TimelineSemaphore CreateTimelineSemaphore() {
     TimelineSemaphoreValue semaphore_value = {};

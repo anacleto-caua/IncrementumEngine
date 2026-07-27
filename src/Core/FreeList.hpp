@@ -1,12 +1,9 @@
 #pragma once
 
 #include <vector>
-#include <limits>
 #include <cassert>
 
-namespace asl {
-
-template <typename T, typename IndexingType = size_t>
+template <typename T, typename IndexingType = u64>
 class FreeList {
 private:
     struct Slot {
@@ -96,5 +93,3 @@ public:
     }
 
 };
-
-}

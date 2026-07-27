@@ -3,14 +3,12 @@
 #include <cstdint>
 #include <cassert>
 
-#include "Asl/FreeList.hpp"
-
-namespace asl {
+#include "Core/FreeList.hpp"
 
 template <typename T>
 struct Handle {
-    uint32_t Index = UINT32_MAX;
-    uint32_t Generation = 0;
+    u32 Index = UINT32_MAX;
+    u32 Generation = 0;
 
     // Hmmm...
     bool IsValid() const {
@@ -30,7 +28,7 @@ template <typename T>
 class ResourcePool {
 private:
     FreeList<T> Data;
-    std::vector<uint32_t> Generations; // Parallel array tracking generations
+    std::vector<u32> Generations; // Parallel array tracking generations
 
     void VALIDATE_HANDLE([[maybe_unused]] Handle<T> handle) {
         assert(handle.Generation == Generations[handle.Index] && "tried to access a stale handle.");
@@ -71,4 +69,3 @@ public:
         return Data.end();
     }
 };
-}

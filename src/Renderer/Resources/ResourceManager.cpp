@@ -29,7 +29,7 @@ namespace ResourceManager {
 }
 
 namespace Image {
-    asl::ResourcePool<Value> ImagePool;
+    ResourcePool<Value> ImagePool;
 
     Id Add(CreateInfo create_info) {
         Value image {};
@@ -98,7 +98,7 @@ namespace Image {
 }
 
 namespace ImageView {
-    asl::ResourcePool<Value> ViewPool;
+    ResourcePool<Value> ViewPool;
 
     Id Add(VkImageViewCreateInfo create_info) {
         Value image_view {};
@@ -166,7 +166,7 @@ namespace ImageView {
 }
 
 namespace Buffer {
-    asl::ResourcePool<Value> BufferPool;
+    ResourcePool<Value> BufferPool;
 
     Value* Get(Id id) {
         return &BufferPool.Get(id);
