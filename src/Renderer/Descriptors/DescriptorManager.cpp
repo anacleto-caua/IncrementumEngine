@@ -1,13 +1,14 @@
 #include "DescriptorManager.hpp"
 
 #include "Renderer/VkVault.hpp"
+#include "Renderer/Renderer_Internal.hpp"
 
 // TODO: I don't really like thoose wonky approximations
-constexpr u32 MAX_SETS = RendererConfig::MAX_FRAMES_IN_FLIGHT * 50;
+constexpr u32 MAX_SETS = Renderer::MAX_FRAMES_IN_FLIGHT * 50;
 
-constexpr u32 MAX_UBOS = RendererConfig::MAX_FRAMES_IN_FLIGHT * 10;
-constexpr u32 MAX_SAMPLERS = RendererConfig::MAX_FRAMES_IN_FLIGHT * 10;
-constexpr u32 MAX_SSBOS = RendererConfig::MAX_FRAMES_IN_FLIGHT * 10;
+constexpr u32 MAX_UBOS = Renderer::MAX_FRAMES_IN_FLIGHT * 10;
+constexpr u32 MAX_SAMPLERS = Renderer::MAX_FRAMES_IN_FLIGHT * 10;
+constexpr u32 MAX_SSBOS = Renderer::MAX_FRAMES_IN_FLIGHT * 10;
 
 constexpr VkShaderStageFlags ALL_SHADER_STAGES = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 

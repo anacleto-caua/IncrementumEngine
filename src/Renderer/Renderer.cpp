@@ -1,4 +1,5 @@
 #include "Renderer.hpp"
+#include "Renderer_Internal.hpp"
 
 #include <array>
 #include <vector>
@@ -23,7 +24,7 @@ namespace Renderer {
     };
 
     TimelineSemaphore FrameSemaphore;
-    std::array<FrameData, RendererConfig::MAX_FRAMES_IN_FLIGHT> Frames;
+    std::array<FrameData, Renderer::MAX_FRAMES_IN_FLIGHT> Frames;
 
     // Camera UBO Descriptor
     namespace GlobalDescriptors {
@@ -32,9 +33,9 @@ namespace Renderer {
         struct CameraUBO {
             glm::mat4 mvp;
         };
-        std::array<Buffer::Id, RendererConfig::MAX_FRAMES_IN_FLIGHT> CameraUBOBuffer;
+        std::array<Buffer::Id, Renderer::MAX_FRAMES_IN_FLIGHT> CameraUBOBuffer;
 
-        std::array<VkDescriptorSet, RendererConfig::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
+        std::array<VkDescriptorSet, Renderer::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
 
         void Create();
         void Destroy();
@@ -408,7 +409,7 @@ namespace Renderer {
         target_frame.LastSignaledValue = signal_value;
 
         FrameContext.FrameInFlightIndex =
-            (FrameContext.FrameInFlightIndex + 1) % RendererConfig::MAX_FRAMES_IN_FLIGHT;
+            (FrameContext.FrameInFlightIndex + 1) % Renderer::MAX_FRAMES_IN_FLIGHT;
     }
 
     void Resize(i32 width, i32 height) {
@@ -438,12 +439,12 @@ namespace Renderer {
 
             DescriptorManager::AllocateSets(
                 DescriptorManager::GlobalLayout,
-                RendererConfig::MAX_FRAMES_IN_FLIGHT,
+                Renderer::MAX_FRAMES_IN_FLIGHT,
                 GlobalDescriptors::Sets.data()
             );
 
             // Loop through each frame in flight and write both bindings
-            for (u32 i = 0; i < RendererConfig::MAX_FRAMES_IN_FLIGHT; ++i) {
+            for (u32 i = 0; i < Renderer::MAX_FRAMES_IN_FLIGHT; ++i) {
 
                 // Write the camera ubo buffer
                 auto camera_ubo_buffer_value = Buffer::Get(CameraUBOBuffer[i]);
@@ -656,12 +657,12 @@ namespace Renderer {
             Image::CreateInfo image_create_info {};
             image_create_info.Width = width;
             image_create_info.Height = height;
-            image_create_info.Format = RendererConfig::DepthBuffer::Format;
+            image_create_info.Format = Renderer::DepthBuffer::Format;
             image_create_info.Usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
             Image = Image::Add(image_create_info);
             Image::Value* depth_image_value = Image::Get(DepthBuffer::Image);
-            depth_image_value->Format = RendererConfig::DepthBuffer::Format;
+            depth_image_value->Format = Renderer::DepthBuffer::Format;
 
             // Despite having a creation format the image still starts as a _UNDEFINED, so transit it a first time
             VkCommandBuffer cmd = VkVault::SingleTimeCmdBegin(VkVault::Graphics);

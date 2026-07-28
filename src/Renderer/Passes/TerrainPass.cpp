@@ -7,6 +7,7 @@
 
 #include "Renderer/VkVault.hpp"
 #include "Renderer/Renderer.hpp"
+#include "Renderer/Renderer_Internal.hpp"
 #include "Renderer/Vk/ShaderBuilder.hpp"
 #include "Renderer/Vk/PipelineDefaults.hpp"
 #include "Renderer/Resources/TransferPipe.hpp"
@@ -26,7 +27,7 @@ namespace TerrainPass {
     TerrainPushConstants TerrainPushConstants {};
 
     namespace Descriptor {
-        std::array<VkDescriptorSet, RendererConfig::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
+        std::array<VkDescriptorSet, Renderer::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
     };
 
     namespace PlaneMesh {
@@ -46,7 +47,7 @@ namespace TerrainPass {
         void OutTerrainData();
     }
 
-    std::array<Buffer::Id, RendererConfig::MAX_FRAMES_IN_FLIGHT> ChunkDrawListBuffers;
+    std::array<Buffer::Id, Renderer::MAX_FRAMES_IN_FLIGHT> ChunkDrawListBuffers;
 
     // Terrain pipeline
     VkPipeline TerrainPipeline {};
@@ -110,7 +111,7 @@ namespace TerrainPass {
             // Allocate the array of Terrain Sets (Set 1)
             DescriptorManager::AllocateSets(
                 DescriptorManager::PerFrameLayout,
-                RendererConfig::MAX_FRAMES_IN_FLIGHT,
+                Renderer::MAX_FRAMES_IN_FLIGHT,
                 Descriptor::Sets.data()
             );
 
@@ -121,7 +122,7 @@ namespace TerrainPass {
             heightmap_descriptor_image_info.sampler = Heightmap::Sampler;
 
             // Loop through each frame in flight and write both bindings
-            for (u32 i = 0; i < RendererConfig::MAX_FRAMES_IN_FLIGHT; ++i) {
+            for (u32 i = 0; i < Renderer::MAX_FRAMES_IN_FLIGHT; ++i) {
 
                 // Write the Heightmap (Duplicated per set)
                 VkWriteDescriptorSet heightmap_write {};
@@ -197,8 +198,8 @@ namespace TerrainPass {
         rendering_create_info.pNext = nullptr;
         rendering_create_info.colorAttachmentCount = static_cast<u32>(VkVault::ColorAttachmentFormats.size());
         rendering_create_info.pColorAttachmentFormats = VkVault::ColorAttachmentFormats.data();
-        rendering_create_info.depthAttachmentFormat = RendererConfig::DepthBuffer::Format;
-        rendering_create_info.stencilAttachmentFormat = RendererConfig::DepthBuffer::Format;
+        rendering_create_info.depthAttachmentFormat = Renderer::DepthBuffer::Format;
+        rendering_create_info.stencilAttachmentFormat = Renderer::DepthBuffer::Format;
 
         auto vertex_input_state = PipelineDefaults::DefaultPipelineVertexInputStateCreateInfo();
         auto input_assembly_state = PipelineDefaults::DefaultPipelineInputAssemblyStateCreateInfo();

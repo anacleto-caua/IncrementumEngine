@@ -7,6 +7,7 @@
 
 #include "Renderer/VkVault.hpp"
 #include "Engine/Core/WindowSDL.hpp"
+#include "Renderer/Renderer_Internal.hpp"
 
 namespace ImGuiPass {
     void NewFrame() {
@@ -31,8 +32,8 @@ namespace ImGuiPass {
             .viewMask = {},
             .colorAttachmentCount = VkVault::ColorAttachmentFormats.size(),
             .pColorAttachmentFormats = VkVault::ColorAttachmentFormats.data(),
-            .depthAttachmentFormat = RendererConfig::DepthBuffer::Format,
-            .stencilAttachmentFormat = RendererConfig::DepthBuffer::Format
+            .depthAttachmentFormat = Renderer::DepthBuffer::Format,
+            .stencilAttachmentFormat = Renderer::DepthBuffer::Format
         };
 
         ImGui_ImplVulkan_PipelineInfo pipeline_info {};
