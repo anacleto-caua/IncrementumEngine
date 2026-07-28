@@ -1,8 +1,3 @@
-/**
- * This system still holds a critical error where if I queue a image upload and multiple
- * bufferupload's or bufferupdate's after the image slice upload will hold a ticket in a different upload layer
- * menwhile some buffer updates on the current upload layer will be stuck on thoose tickets by the same semaphore.
- */
 #pragma once
 
 #include "Image.hpp"
