@@ -1,20 +1,17 @@
 #include "Camera.hpp"
 
 #include <imgui.h>
-#include <glm/trigonometric.hpp>
-#include <glm/ext/matrix_transform.hpp>
-#include <glm/ext/matrix_clip_space.hpp>
 
-#include "Utils/GlmDefaults.hpp"
+#include "Core/Math.hpp"
 #include "Engine/Core/Input.hpp"
 
 Camera3D CreateCamera3D(f32 Aspect, f32 Fov) {
     Camera3D cam;
-    cam.FocalLength = 1.0f / tan(glm::radians(Fov) / 2.0f);
+    cam.FocalLength = 1.0f / tan(math::radians(Fov) / 2.0f);
     cam.Position = vec3::ZERO;
     cam.LookDir = vec3::FORWARD;
-    cam.Model = glm::mat4(1.0f);
-    cam.Projection = glm::perspective(glm::radians(Fov), Aspect, 0.1f, 1000.0f);
+    cam.Model = mat4(1.0f);
+    cam.Projection = math::perspective(math::radians(Fov), Aspect, 0.1f, 1000.0f);
     cam.Projection[1][1] *= -1.0f; // Vulkan Y-flip
     cam.ModelViewProjection = 0;
     RefreshMVP(cam);
@@ -31,7 +28,7 @@ void Resize(Camera3D &Camera, f32 NewAspect) {
 }
 
 void Move(Camera3D &Camera) {
-    Camera.View = glm::lookAt(Camera.Position, Camera.Position+Camera.LookDir, vec3::UP);
+    Camera.View = lookAt(Camera.Position, Camera.Position+Camera.LookDir, vec3::UP);
     RefreshMVP(Camera);
 }
 
@@ -48,7 +45,7 @@ namespace FlyBy {
     static constexpr f32 YAW_CLAMP_MIN = 0;
     static constexpr f32 YAW_CLAMP_MAX = 360;
 
-    glm::vec3 FrameMovement = vec3::ZERO;
+    vec3 FrameMovement = vec3::ZERO;
 
     f32 Yaw = 0;
     f32 Pitch = 45;
@@ -58,10 +55,10 @@ namespace FlyBy {
     Camera3D* Camera;
 
     void ApplyRotation() {
-        Camera->LookDir.x = glm::cos(glm::radians(Yaw)) * glm::cos(glm::radians(Pitch));
-        Camera->LookDir.y = glm::sin(glm::radians(Pitch));
-        Camera->LookDir.z = glm::sin(glm::radians(Yaw)) * glm::cos(glm::radians(Pitch));
-        Camera->LookDir = glm::normalize(Camera->LookDir);
+        Camera->LookDir.x = cos(math::radians(Yaw)) * cos(math::radians(Pitch));
+        Camera->LookDir.y = sin(math::radians(Pitch));
+        Camera->LookDir.z = sin(math::radians(Yaw)) * cos(math::radians(Pitch));
+        Camera->LookDir = normalize(Camera->LookDir);
     }
 
     void Create(Camera3D &bCamera) {
@@ -107,18 +104,18 @@ namespace FlyBy {
         }
 
         if (FrameMovement != vec3::ZERO) {
-            FrameMovement = glm::normalize(FrameMovement);
+            FrameMovement = normalize(FrameMovement);
 
-            glm::vec3 LocalFwd = Camera->LookDir;
-            LocalFwd = glm::normalize(LocalFwd);
+            vec3 LocalFwd = Camera->LookDir;
+            LocalFwd = normalize(LocalFwd);
 
-            glm::vec3 LocalRight = glm::normalize(glm::cross(vec3::UP, LocalFwd));
+            vec3 LocalRight = normalize(cross(vec3::UP, LocalFwd));
 
-            glm::vec3 AllignedMovement =
+            vec3 AllignedMovement =
                 (LocalRight * FrameMovement.x) +
                 (LocalFwd * FrameMovement.z) +
                 (vec3::UP * FrameMovement.y);
-            AllignedMovement = glm::normalize(AllignedMovement);
+            AllignedMovement = normalize(AllignedMovement);
 
             Camera->Position += AllignedMovement * SPEED * DeltaTime * ( IsRunning ? RUNNING_MULT : 1 );
             FrameMovement = vec3::ZERO;

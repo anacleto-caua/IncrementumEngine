@@ -4,8 +4,6 @@
 #include <array>
 #include <vector>
 
-#include <glm/mat4x4.hpp>
-
 #include "VkVault.hpp"
 #include "Passes/ImGuiPass.hpp"
 #include "Passes/TerrainPass.hpp"
@@ -31,7 +29,7 @@ namespace Renderer {
         VkPipelineLayout BaseLayout = VK_NULL_HANDLE;
 
         struct CameraUBO {
-            glm::mat4 mvp;
+            mat4 mvp;
         };
         std::array<Buffer::Id, Renderer::MAX_FRAMES_IN_FLIGHT> CameraUBOBuffer;
 

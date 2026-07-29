@@ -1,7 +1,8 @@
 #pragma once
 
 #include <vulkan/vulkan.h> // Used for the HeightmapFormat
-#include <glm/ext/vector_int2.hpp>
+
+#include "Core/Math.hpp"
 
 /**
  * A lot of variables here should match something at the terrain shaders
@@ -62,7 +63,7 @@ namespace TerrainConfig {
 
         // Instance struct to assembly render batchs for terrain chunks
         struct ChunkInstanceData {
-            glm::ivec2 WorldPos;
+            ivec2 WorldPos;
             u32 TextureLayer;
             u32 padding;
         };

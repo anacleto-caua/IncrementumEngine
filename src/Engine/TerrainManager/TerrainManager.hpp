@@ -2,8 +2,7 @@
 
 #include <array>
 
-#include <glm/fwd.hpp>
-
+#include "Core/Math.hpp"
 #include "TerrainDefinitions.hpp"
 
 namespace TerrainManager {
@@ -12,7 +11,7 @@ namespace TerrainManager {
     inline u32 CurrentllyActiveChunks = TerrainConfig::Streaming::MaxActiveChunks;
 
     struct HeightmapStatus {
-        glm::ivec2 Position = { 0, 0 };
+        ivec2 Position = { 0, 0 };
         bool Ready = false;
     };
 
@@ -24,5 +23,5 @@ namespace TerrainManager {
     void Init();
 
     // Called every time the current_player_chunk changes
-    void RefreshChunks(glm::ivec2 current_player_chunk);
+    void RefreshChunks(ivec2 current_player_chunk);
 }

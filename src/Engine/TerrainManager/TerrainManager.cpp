@@ -1,10 +1,9 @@
 #include "TerrainManager.hpp"
 
-#include <glm/glm.hpp>
 #include <FastNoiseLite.hpp>
 
 namespace TerrainManager {
-    void WriteHeightmap(glm::ivec2 position, u32 target_layer);
+    void WriteHeightmap(ivec2 position, u32 target_layer);
 
     FastNoiseLite ContinentalNoise;
     FastNoiseLite MountainNoise;
@@ -27,8 +26,8 @@ namespace TerrainManager {
         DetailNoise.SetFrequency(0.08f);
 
         // Kickstart the valid data
-        glm::vec3 player_pos = {0, 0, 0};
-        glm::ivec2 player_coord;
+        vec3 player_pos = {0, 0, 0};
+        ivec2 player_coord;
         player_coord.x = static_cast<i32>(std::floor(player_pos.x/TerrainConfig::Mesh::ChunkScale));
         player_coord.y = static_cast<i32>(std::floor(player_pos.y/TerrainConfig::Mesh::ChunkScale));
 
@@ -58,11 +57,11 @@ namespace TerrainManager {
         }
     }
 
-    void RefreshChunks([[maybe_unused]] glm::ivec2 current_player_chunk) {
+    void RefreshChunks([[maybe_unused]] ivec2 current_player_chunk) {
         // ...
     }
 
-    void WriteHeightmap(glm::ivec2 position, u32 target_layer) {
+    void WriteHeightmap(ivec2 position, u32 target_layer) {
         i32 terrain_res = TerrainConfig::Mesh::VerticesPerEdge;
 
         f32 global_x, global_z;

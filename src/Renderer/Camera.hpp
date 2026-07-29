@@ -1,16 +1,15 @@
 #pragma once
 
-#include <glm/vec3.hpp>
-#include <glm/mat4x4.hpp>
+#include "Core/Math.hpp"
 
 struct Camera3D {
     f32 FocalLength;
-    glm::vec3 Position;
-    glm::vec3 LookDir;
-    glm::mat4 Model;
-    glm::mat4 View;
-    glm::mat4 Projection;
-    glm::mat4 ModelViewProjection;
+    vec3 Position;
+    vec3 LookDir;
+    mat4 Model;
+    mat4 View;
+    mat4 Projection;
+    mat4 ModelViewProjection;
 };
 
 Camera3D CreateCamera3D(f32 Aspect, f32 Fov);
