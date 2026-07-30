@@ -2,8 +2,8 @@
 
 namespace Engine {
     IncResult Create();
+    void Destroy();
 
     void Run();
 
-    void Destroy();
 }

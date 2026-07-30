@@ -1,12 +1,11 @@
 #include "Engine.hpp"
 
-#include <chrono>
-
 #include <imgui.h>
 
 #include "Renderer/Renderer.hpp"
 #include "Engine/Core/FileIO.hpp"
 #include "Engine/Core/Platform.hpp"
+#include "Engine/Core/FrameTimer.hpp"
 #include "Engine/Utils/ImGuiUtils.hpp"
 #include "TaskScheduler/TaskScheduler.hpp"
 
@@ -50,12 +49,9 @@ namespace Engine {
     }
 
     void Run() {
-        auto last_frame_time = std::chrono::high_resolution_clock::now();
+        FrameTimer timer(TARGET_FPS);
         while(!Platform::ShouldClose()) {
-            auto frame_begin = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<float> raw_delta_time = frame_begin - last_frame_time;
-            float delta_time = raw_delta_time.count();
-            last_frame_time = frame_begin;
+            f32 delta_time = timer.Tick();
 
             // Actual frame starts
             ImGuiUtils::OutFps(delta_time);
@@ -66,21 +62,7 @@ namespace Engine {
             FlyBy::Update(delta_time);
             // Actual frame ends
 
-            auto frame_end = std::chrono::high_resolution_clock::now();
-            auto frame_elapsed_time = frame_end - frame_begin;
-
-            if (frame_elapsed_time < TARGET_FRAME_TIME) {
-                auto time_to_sleep = TARGET_FRAME_TIME - frame_elapsed_time;
-
-                if (time_to_sleep > std::chrono::milliseconds(2)) {
-                    std::this_thread::sleep_for(time_to_sleep - std::chrono::milliseconds(1));
-                }
-
-                // Spin-lock busy wait
-                while (std::chrono::high_resolution_clock::now() - frame_begin < TARGET_FRAME_TIME) {
-                    std::this_thread::yield();
-                }
-            }
+            timer.Sleep();
         }
     }
 
