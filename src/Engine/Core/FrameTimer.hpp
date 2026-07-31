@@ -5,7 +5,7 @@
 
 class FrameTimer {
 private:
-    static constexpr f32 DEFAULT_TARGET_FPS = 60;
+    static constexpr u32 DEFAULT_TARGET_FPS = 60;
 
     using TimePoint = std::chrono::time_point<std::chrono::high_resolution_clock>;
     TimePoint last_frame_time;
@@ -18,8 +18,8 @@ private:
     }
 
 public:
-    FrameTimer(f32 target_fps) {
-        SetTargetFPS(target_fps);
+    FrameTimer(u32 target_fps = DEFAULT_TARGET_FPS) {
+        SetTargetFPS(static_cast<f32>(target_fps));
         last_frame_time = std::chrono::high_resolution_clock::now();
     }
 

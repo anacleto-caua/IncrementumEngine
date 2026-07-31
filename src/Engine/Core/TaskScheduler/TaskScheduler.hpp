@@ -1,6 +1,6 @@
 #pragma once
 
-#include "TaskScheduler/Definitions.hpp"
+#include "Definitions.hpp"
 
 namespace TaskScheduler {
     void Create();

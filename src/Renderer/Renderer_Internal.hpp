@@ -19,12 +19,12 @@ namespace Renderer {
 
     // Per frame data that is shared between multiple runtime dependencies of the renderer
     // only for "frame()" functions for multiple passes as of now
-    struct FrameContext {
+    struct RenderFrameData {
         u32 FrameInFlightIndex = 0;
         u32 ImageViewIndex = 0;
         VkCommandBuffer DrawCommand = VK_NULL_HANDLE;
     };
-    inline FrameContext FrameContext;
+    inline RenderFrameData FrameContext;
 }
 
 
