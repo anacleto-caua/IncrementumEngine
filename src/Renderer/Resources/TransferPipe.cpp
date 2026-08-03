@@ -136,7 +136,14 @@ namespace TransferPipe {
 
     /**
      * Just carry the last ticket, at the time it's written at LazyWrite
-     * there isn't a safe initiliazed value for a Ticket, so be mindfull
+     * there is a safe initiliazed value for a Ticket in this internal system, it's
+     *  {
+     *      .Value = 0,
+     *      .TargetSemaphore = [
+     *          any of the internal system semaphores index,
+     *          techinically any valid semaphore, but prefer using one of the internals
+     *          ]
+     *  };
      */
     Ticket TopTicket;
 
