@@ -12,7 +12,13 @@
 #include "Renderer/Resources/ResourceManager.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
 
+#include "Renderer/Vk/LeanVk.hpp"
+#include "Renderer/Vk/SubmissionPile.hpp"
+#include "Renderer/Vk/TimelineSemaphore.hpp"
+
 namespace Renderer {
+    SubmissionPile SubmissionPile;
+
     // Per frame data used to track the frame submission structure
     struct FrameData {
         VkCommandPool CmdPool = VK_NULL_HANDLE;
@@ -46,8 +52,6 @@ namespace Renderer {
     VkRenderingAttachmentInfo DepthAttachment {};
     VkRenderingInfo RenderingInfo {};
 
-    VkCommandBufferBeginInfo RenderingCmdBeginInfo {};
-
     namespace Swapchain {
         struct SwapchainImage {
             VkImage Image = VK_NULL_HANDLE;
@@ -79,10 +83,6 @@ namespace Renderer {
         void Resize(u32 width, u32 height);
     }
 
-    static constexpr VkPipelineStageFlags GRAPHICS_PIPELINE_WAIT_STAGES[] = {
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-    };
-
     IncResult Create() {
         INC_CHECK(VkVault::Create(), "vulkan context creation failed");
         INC_CHECK(ResourceManager::Initialize(), "resource manager creation failed");
@@ -105,6 +105,8 @@ namespace Renderer {
         cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         cmd_buffer_alloc_info.commandPool = VK_NULL_HANDLE;
         cmd_buffer_alloc_info.commandBufferCount = 1;
+
+        ResetPile(SubmissionPile);
 
         FrameSemaphore = CreateTimelineSemaphore();
         for (FrameData &frame : Frames) {
@@ -152,13 +154,6 @@ namespace Renderer {
         RenderingInfo.colorAttachmentCount = 1;
         RenderingInfo.pColorAttachments = &ColorAttachment;
         RenderingInfo.pDepthAttachment = &DepthAttachment;
-
-        RenderingCmdBeginInfo = {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            .pInheritanceInfo = nullptr
-        };
 
         // Other essential rendering things
         GlobalDescriptors::Create();
@@ -210,8 +205,8 @@ namespace Renderer {
             return;
         }
 
-        vkResetCommandBuffer(FrameContext.DrawCommand, 0);
-        vkBeginCommandBuffer(FrameContext.DrawCommand, &RenderingCmdBeginInfo);
+        LeanVk::ResetCommand(FrameContext.DrawCommand);
+        LeanVk::BeginCommand(FrameContext.DrawCommand);
 
         // Frame sensible transfers, will be completed before the begin of the drawing phase
         {
@@ -328,77 +323,25 @@ namespace Renderer {
             &presenting_barrier
         );
 
-        vkEndCommandBuffer(FrameContext.DrawCommand);
+        LeanVk::EndCommand(FrameContext.DrawCommand);
 
+        // Submission structure
+        BeginSubmission(SubmissionPile);
+
+        AddCommandToPile(SubmissionPile, FrameContext.DrawCommand);
+
+        WaitBinarySemaphore(SubmissionPile, target_frame.ImageAvailable, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+        SignalBinarySemaphore(SubmissionPile, Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished);
+
+        // Hm, seems to be a bad data accesing pattern
         TimelineSemaphoreValue* frame_semaphore_value = GetTimelineSemaphoreValue(FrameSemaphore);
-
-        VkSemaphore submit_wait_semaphores[] = { target_frame.ImageAvailable };
-        VkSemaphore submit_signal_semaphores[] = {
-            Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished, // Signals Present
-            frame_semaphore_value->Semaphore                                   // Signals the Timeline
-        };
-
-        // Map the timeline values (1-to-1 with the signal array above)
         u64 signal_value = ++frame_semaphore_value->LastPromissedValue;
-        u64 signal_values[] = {
-            0,             // Ignored by the driver for the binary RenderFinished semaphore
-            signal_value   // Applied to the timeline Graphics semaphore
-        };
+        SignalTimeline(SubmissionPile, FrameSemaphore, signal_value);
 
-        VkTimelineSemaphoreSubmitInfo timeline_semaphore_submit_info = {
-            .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
-            .pNext = nullptr,
-            .waitSemaphoreValueCount = 0, // We're only waiting on a binary semaphore, so 0 is fine
-            .pWaitSemaphoreValues = nullptr,
-            .signalSemaphoreValueCount = 2,
-            .pSignalSemaphoreValues = signal_values
-        };
-
-        // Assemble the Submit Info
-        VkSubmitInfo render_cmd_submit_info = {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            .pNext = &timeline_semaphore_submit_info,
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = submit_wait_semaphores,
-            .pWaitDstStageMask = GRAPHICS_PIPELINE_WAIT_STAGES,
-            .commandBufferCount = 1,
-            .pCommandBuffers = &FrameContext.DrawCommand,
-            .signalSemaphoreCount = 2,
-            .pSignalSemaphores = submit_signal_semaphores
-        };
-
-        u32 frame_submission_count = 1;
-        VkSubmitInfo utils_cmd_submit_info = {};
-        VkSubmitInfo frame_submit[] = { render_cmd_submit_info, utils_cmd_submit_info };
-
-        // Utility commands, image format transfers and acquire/release non frame dependant operations
-        bool has_utils = false;
-        if (has_utils) {
-            frame_submission_count = 2;
-            // Fetch this later
-            VkCommandBuffer utils_cmd = VK_NULL_HANDLE;
-            VkSemaphore external_signal_semaphore = VK_NULL_HANDLE;
-
-            utils_cmd_submit_info = {
-                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                .pNext = nullptr, // Add timeline info here
-                .waitSemaphoreCount = 0,
-                .pWaitSemaphores = nullptr,
-                .pWaitDstStageMask = nullptr,
-                .commandBufferCount = 1,
-                .pCommandBuffers = &utils_cmd,
-                .signalSemaphoreCount = 1,
-                .pSignalSemaphores = &external_signal_semaphore
-            };
-        }
+        EndSubmission(SubmissionPile);
 
         // Submit
-        vkQueueSubmit(
-            VkVault::Graphics.Queue,
-            frame_submission_count,
-            frame_submit,
-            VK_NULL_HANDLE
-        );
+        SubmitPile(VkVault::Graphics, SubmissionPile);
 
         Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished;
         vkQueuePresentKHR(VkVault::Present.Queue, &Swapchain::PresentInfo);

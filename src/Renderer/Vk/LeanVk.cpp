@@ -12,4 +12,8 @@ namespace LeanVk {
     void EndCommand(VkCommandBuffer cmd) {
         vkEndCommandBuffer(cmd);
     }
+
+    void ResetCommand(VkCommandBuffer cmd) {
+        vkResetCommandBuffer(cmd, 0);
+    }
 }

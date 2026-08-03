@@ -84,6 +84,7 @@ void AddCommandToPile(SubmissionPile<A, B, C, D>& pile, VkCommandBuffer command)
     pile.CmdCount++;
 }
 
+// Timeline Semaphores
 template <u64 A, u64 B, u64 C, u64 D>
 void WaitSemaphore(SubmissionPile<A, B, C, D>& pile, const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     assert(pile.WaitCount < pile.MaxWaitSemaphores && "max wait semaphores on a pile reached");
@@ -116,6 +117,7 @@ void SignalTimeline(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& s
     SignalSemaphore(pile, semaphore_value->Semaphore, value, stage);
 }
 
+// Timeline Semaphores Ticket
 template <u64 A, u64 B, u64 C, u64 D>
 void WaitPrepareForTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     WaitTimeline(pile, ticket.TargetSemaphore, ticket.Value-1, stage);
@@ -137,6 +139,37 @@ void WaitAndSignalTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, 
     SignalTicket(pile, ticket, stage);
 }
 
+// Binary Semaphores
+template <u64 A, u64 B, u64 C, u64 D>
+void WaitBinarySemaphore(SubmissionPile<A, B, C, D>& pile, const VkSemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    assert(pile.WaitCount < pile.MaxWaitSemaphores && "max wait semaphores on a pile reached");
+    pile.WaitSemaphores[pile.WaitCount] = {
+        VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+        semaphore, 1, stage, 0
+    };
+    pile.WaitCount++;
+}
+
+template <u64 A, u64 B, u64 C, u64 D>
+void SignalBinarySemaphore(SubmissionPile<A, B, C, D>& pile, const VkSemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    assert(pile.SignalCount < pile.MaxSignalSemaphores && "max signal semaphores count on a pile reached");
+    pile.SignalSemaphores[pile.SignalCount] = {
+        VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+        semaphore, 0, stage, 0
+    };
+    pile.SignalCount++;
+}
+
+// Submission
+template <u64 A, u64 B, u64 C, u64 D>
+void SubmitPile(QueueContext& ctx, SubmissionPile<A, B, C, D>& pile, VkFence execution_fence = VK_NULL_HANDLE) {
+    if(pile.SubmitCount > 0) {
+        VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence), "pile submission failed");
+        ResetPile(pile);
+    }
+}
+
+// Utils
 template <u64 A, u64 B, u64 C, u64 D>
 bool IsFull(const SubmissionPile<A, B, C, D>& pile) {
     return (
@@ -157,15 +190,7 @@ bool IsEmpty(const SubmissionPile<A, B, C, D>& pile) {
     );
 }
 
-template <u64 A, u64 B, u64 C, u64 D>
-void SubmitPile(QueueContext& ctx, SubmissionPile<A, B, C, D>& pile, VkFence execution_fence = VK_NULL_HANDLE) {
-    if(pile.SubmitCount > 0) {
-        VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence), "pile submission failed");
-        ResetPile(pile);
-    }
-}
-
-// fancy print
+// Fancy print
 template <u64 A, u64 B, u64 C, u64 D>
 struct fmt::formatter<SubmissionPile<A, B, C, D>> {
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {

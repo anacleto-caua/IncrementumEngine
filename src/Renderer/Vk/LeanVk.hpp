@@ -5,5 +5,6 @@
 namespace LeanVk {
     void BeginCommand(VkCommandBuffer cmd, VkCommandBufferUsageFlags flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     void EndCommand(VkCommandBuffer cmd);
+    void ResetCommand(VkCommandBuffer cmd);
 }
 
