@@ -1,4 +1,5 @@
 #include "Renderer.hpp"
+#include "Renderer/Vk/BinarySemaphore.hpp"
 #include "Renderer_Internal.hpp"
 
 #include <array>
@@ -14,6 +15,7 @@
 
 #include "Renderer/Vk/LeanVk.hpp"
 #include "Renderer/Vk/SubmissionPile.hpp"
+#include "Renderer/Vk/BinarySemaphore.hpp"
 #include "Renderer/Vk/TimelineSemaphore.hpp"
 
 namespace Renderer {
@@ -23,7 +25,7 @@ namespace Renderer {
     struct FrameData {
         VkCommandPool CmdPool = VK_NULL_HANDLE;
         VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
-        VkSemaphore ImageAvailable = VK_NULL_HANDLE;
+        BinarySemaphore ImageAvailable  = {};
         u64 LastSignaledValue = 0;
     };
 
@@ -59,7 +61,7 @@ namespace Renderer {
         struct SwapchainImage {
             VkImage Image = VK_NULL_HANDLE;
             VkImageView ImageView = VK_NULL_HANDLE;
-            VkSemaphore RenderFinished = VK_NULL_HANDLE;
+            BinarySemaphore RenderFinished = {};
         };
 
         VkExtent2D Extent;
@@ -95,9 +97,6 @@ namespace Renderer {
         Swapchain::Create();
 
         // Create per frame info
-        VkSemaphoreCreateInfo semaphore_create_info {};
-        semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
         VkCommandPoolCreateInfo render_cmd_poll_create_info {};
         render_cmd_poll_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         render_cmd_poll_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -113,7 +112,7 @@ namespace Renderer {
 
         FrameSemaphore = CreateTimelineSemaphore();
         for (FrameData &frame : Frames) {
-            vkCreateSemaphore(VkVault::Device, &semaphore_create_info, nullptr, &frame.ImageAvailable);
+            frame.ImageAvailable = CreateBinarySemaphore();
 
             vkCreateCommandPool(VkVault::Device, &render_cmd_poll_create_info, nullptr, &frame.CmdPool);
             cmd_buffer_alloc_info.commandPool = frame.CmdPool;
@@ -174,7 +173,7 @@ namespace Renderer {
         DestroyTimelineSemaphore(FrameSemaphore);
         for (FrameData &frame : Frames) {
             if (frame.CmdPool) { vkDestroyCommandPool(VkVault::Device, frame.CmdPool, nullptr); }
-            if (frame.ImageAvailable) { vkDestroySemaphore(VkVault::Device, frame.ImageAvailable, nullptr); }
+            DestroyBinarySemaphore(frame.ImageAvailable);
         }
 
         TerrainPass::Destroy();
@@ -199,7 +198,7 @@ namespace Renderer {
             VkVault::Device,
             Swapchain::Swapchain,
             UINT64_MAX,
-            target_frame.ImageAvailable,
+            target_frame.ImageAvailable.Semaphore,
             VK_NULL_HANDLE,
             &FrameContext.ImageViewIndex
         );
@@ -349,7 +348,7 @@ namespace Renderer {
         // Submit
         SubmitPile(VkVault::Graphics, SubmissionPile);
 
-        Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished;
+        Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished.Semaphore;
         vkQueuePresentKHR(VkVault::Present.Queue, &Swapchain::PresentInfo);
 
         // Save the timeline value so the CPU can wait on it next time!
@@ -531,8 +530,6 @@ namespace Renderer {
             Images.resize(ImageCount);
 
             CleanupImages();
-            VkSemaphoreCreateInfo semaphore_create_info {};
-            semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
             VkImageViewCreateInfo swapchain_image_view_create_info = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -563,10 +560,7 @@ namespace Renderer {
                     vkCreateImageView(VkVault::Device, &swapchain_image_view_create_info, nullptr, &Images[i].ImageView),
                     "swapchain image view creation failed"
                 );
-                VK_CHECK(
-                    vkCreateSemaphore(VkVault::Device, &semaphore_create_info, nullptr, &Images[i].RenderFinished),
-                    "swapchain semaphore creation failed"
-                );
+                Images[i].RenderFinished = CreateBinarySemaphore();
             }
 
             Destroy(old_swapchain);
@@ -581,7 +575,7 @@ namespace Renderer {
         void CleanupImages() {
             for (SwapchainImage& image : Images) {
                 if (image.ImageView) { vkDestroyImageView(VkVault::Device, image.ImageView, nullptr); }
-                if (image.RenderFinished) { vkDestroySemaphore(VkVault::Device, image.RenderFinished, nullptr); }
+                DestroyBinarySemaphore(image.RenderFinished);
             }
         }
     }

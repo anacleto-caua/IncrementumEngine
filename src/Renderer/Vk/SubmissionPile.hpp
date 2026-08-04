@@ -4,6 +4,7 @@
 #include <cassert>
 
 #include "Renderer/VkVault.hpp"
+#include "Renderer/Vk/BinarySemaphore.hpp"
 
 template <
     u64 MAX_SUBMITS = 32,
@@ -141,21 +142,21 @@ void WaitAndSignalTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, 
 
 // Binary Semaphores
 template <u64 A, u64 B, u64 C, u64 D>
-void WaitBinarySemaphore(SubmissionPile<A, B, C, D>& pile, const VkSemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+void WaitBinarySemaphore(SubmissionPile<A, B, C, D>& pile, const BinarySemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     assert(pile.WaitCount < pile.MaxWaitSemaphores && "max wait semaphores on a pile reached");
     pile.WaitSemaphores[pile.WaitCount] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
-        semaphore, 1, stage, 0
+        semaphore.Semaphore, 1, stage, 0
     };
     pile.WaitCount++;
 }
 
 template <u64 A, u64 B, u64 C, u64 D>
-void SignalBinarySemaphore(SubmissionPile<A, B, C, D>& pile, const VkSemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+void SignalBinarySemaphore(SubmissionPile<A, B, C, D>& pile, const BinarySemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
     assert(pile.SignalCount < pile.MaxSignalSemaphores && "max signal semaphores count on a pile reached");
     pile.SignalSemaphores[pile.SignalCount] = {
         VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
-        semaphore, 0, stage, 0
+        semaphore.Semaphore, 0, stage, 0
     };
     pile.SignalCount++;
 }
