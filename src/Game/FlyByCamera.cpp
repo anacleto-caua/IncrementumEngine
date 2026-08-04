@@ -23,24 +23,24 @@ namespace FlyByCamera {
 
     bool IsRunning = false;
 
-    Camera3D* Camera;
+    Camera* TrackedCamera;
 
     void ApplyRotation() {
-        Camera->LookDir.x = cos(math::radians(Yaw)) * cos(math::radians(Pitch));
-        Camera->LookDir.y = sin(math::radians(Pitch));
-        Camera->LookDir.z = sin(math::radians(Yaw)) * cos(math::radians(Pitch));
-        Camera->LookDir = normalize(Camera->LookDir);
+        TrackedCamera->Front.x = cos(math::radians(Yaw)) * cos(math::radians(Pitch));
+        TrackedCamera->Front.y = sin(math::radians(Pitch));
+        TrackedCamera->Front.z = sin(math::radians(Yaw)) * cos(math::radians(Pitch));
+        TrackedCamera->Front = normalize(TrackedCamera->Front);
     }
 
-    void Bind(Camera3D &bCamera) {
-        Camera = &bCamera;
+    void Bind(Camera &new_camera) {
+        TrackedCamera = &new_camera;
 
         Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Shift, Input::ActionType::Press, [](void){ IsRunning = true; });
         Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Shift, Input::ActionType::Release, [](void){ IsRunning = false; });
 
         Update(0);
         ApplyRotation();
-        Move(*Camera);
+        UpdateMatrices(*TrackedCamera);
     }
 
     void Update(f32 delta_time) {
@@ -71,7 +71,7 @@ namespace FlyByCamera {
         if (FrameMovement != vec3::ZERO) {
             FrameMovement = normalize(FrameMovement);
 
-            vec3 LocalFwd = Camera->LookDir;
+            vec3 LocalFwd = TrackedCamera->Front;
             LocalFwd = normalize(LocalFwd);
 
             vec3 LocalRight = normalize(cross(vec3::UP, LocalFwd));
@@ -82,7 +82,7 @@ namespace FlyByCamera {
                 (vec3::UP * FrameMovement.y);
             AllignedMovement = normalize(AllignedMovement);
 
-            Camera->Position += AllignedMovement * SPEED * delta_time * ( IsRunning ? RUNNING_MULT : 1 );
+            TrackedCamera->Position += AllignedMovement * SPEED * delta_time * ( IsRunning ? RUNNING_MULT : 1 );
             FrameMovement = vec3::ZERO;
             IsDirty = true;
         }
@@ -109,7 +109,7 @@ namespace FlyByCamera {
         }
 
         if (IsDirty) {
-            Move(*Camera);
+            UpdateMatrices(*TrackedCamera);
         }
     }
 }

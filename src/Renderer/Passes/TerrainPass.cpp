@@ -330,7 +330,7 @@ namespace TerrainPass {
 
         vkCmdBindIndexBuffer(cmd, Buffer::Get(PlaneMesh::Indices)->Buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        TerrainPushConstants.CameraMVP = Renderer::CurrentCamera->ModelViewProjection;
+        TerrainPushConstants.CameraMVP = Renderer::CurrentCamera->Projection * Renderer::CurrentCamera->View;
         TerrainPushConstants.PlayerPosition = Renderer::CurrentCamera->Position;
         vkCmdPushConstants(
             cmd,

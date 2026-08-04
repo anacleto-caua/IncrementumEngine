@@ -5,43 +5,53 @@
 #include "Core/Math.hpp"
 #include "Engine/Engine.hpp"
 
-Camera3D CreateCamera3D() {
+Camera CreateCamera() {
     return
-        CreateCamera3D(
+        CreateCamera(
             static_cast<f32>(Engine::Config.Width) / static_cast<f32>(Engine::Config.Height),
             static_cast<f32>(Engine::Config.FOV)
         );
 }
 
-Camera3D CreateCamera3D(f32 Aspect, f32 Fov) {
-    Camera3D cam;
-    cam.FocalLength = 1.0f / tan(math::radians(Fov) / 2.0f);
-    cam.Position = vec3::ZERO;
-    cam.LookDir = vec3::FORWARD;
-    cam.Model = mat4(1.0f);
-    cam.Projection = math::perspective(math::radians(Fov), Aspect, 0.1f, 1000.0f);
-    cam.Projection[1][1] *= -1.0f; // Vulkan Y-flip
-    cam.ModelViewProjection = 0;
-    RefreshMVP(cam);
+Camera CreateCamera(f32 aspect, f32 fov) {
+    Camera cam;
+    cam.AspectRatio = aspect;
+    cam.Fov = fov;
+
+    UpdateMatrices(cam);
     return cam;
 }
 
-void RefreshMVP(Camera3D &Camera) {
-    Camera.ModelViewProjection = Camera.Projection * Camera.View * Camera.Model;
+void UpdateMatrices(Camera &camera) {
+    camera.View = math::lookAt(
+        camera.Position,
+        camera.Position + camera.Front,
+        camera.Up
+    );
+
+    camera.Projection = math::perspective(
+        math::radians(camera.Fov),
+        camera.AspectRatio,
+        camera.NearPlane,
+        camera.FarPlane
+    );
+
+    // Force the Y-flip for Vulkan
+    camera.Projection[1][1] *= -1.0f;
 }
 
-void Resize(Camera3D &Camera, f32 NewAspect) {
-    Camera.Projection[0][0] = Camera.FocalLength / NewAspect;
-    RefreshMVP(Camera);
+void Resize(Camera &camera, f32 new_aspect) {
+    camera.AspectRatio = new_aspect;
+    UpdateMatrices(camera);
 }
 
-void Move(Camera3D &Camera) {
-    Camera.View = lookAt(Camera.Position, Camera.Position+Camera.LookDir, vec3::UP);
-    RefreshMVP(Camera);
-}
+void LookAt(Camera &camera, vec3 target) {
+    camera.Front = math::normalize(target - camera.Position);
 
+    // You may also want to recalculate the 'Up' vector here using cross products
+    // against a global 'right' vector to ensure the camera doesn't bank weirdly.
+    // It would be ok for simple targeting but it's required for space games or so.
+    camera.Up = math::normalize(math::cross(vec3::RIGHT, camera.Front));
 
-void LookAt(Camera3D &Camera, vec3 target) {
-    Camera.LookDir = math::normalize(target - Camera.Position);
-    RefreshMVP(Camera);
+    UpdateMatrices(camera);
 }

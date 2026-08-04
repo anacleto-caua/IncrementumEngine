@@ -13,7 +13,7 @@ namespace Engine {
 
     void ResizeEvent(i32 width, i32 height);
 
-    IncResult Create(Camera3D& Camera) {
+    IncResult Create(Camera& Camera) {
         INC_CHECK(
             Platform::Initialize(
                 static_cast<i32>(Config.Width),

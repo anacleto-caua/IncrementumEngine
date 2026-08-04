@@ -7,7 +7,7 @@ void OutFps(f32 delta_time);
 int main() {
     analog::init();
 
-    Camera3D MainCamera;
+    Camera MainCamera;
 
     if (Engine::Create(MainCamera) != IncResult::SUCCESS) {
         analog::error("Couldn't create engine");
@@ -15,9 +15,9 @@ int main() {
     }
 
     // Seem's hacky
-    MainCamera = CreateCamera3D();
+    MainCamera = CreateCamera();
     MainCamera.Position = { 0, 75, 0 };
-    RefreshMVP(MainCamera);
+    UpdateMatrices(MainCamera);
     FlyByCamera::Bind(MainCamera);
 
     while (!Engine::ShouldClose()) {

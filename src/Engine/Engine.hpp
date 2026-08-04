@@ -17,7 +17,7 @@ struct EngineConfig {
 namespace Engine {
     inline EngineConfig Config;
 
-    IncResult Create(Camera3D& Camera);
+    IncResult Create(Camera& Camera);
     void Destroy();
 
     FrameInfo Frame();

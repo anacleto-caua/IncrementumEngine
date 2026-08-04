@@ -35,8 +35,9 @@ namespace Renderer {
         VkPipelineLayout BaseLayout = VK_NULL_HANDLE;
 
         struct CameraUBO {
-            mat4 mvp;
+            mat4 ViewProjection;
         };
+
         std::array<Buffer::Id, Renderer::MAX_FRAMES_IN_FLIGHT> CameraUBOBuffer;
 
         std::array<VkDescriptorSet, Renderer::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
@@ -213,7 +214,7 @@ namespace Renderer {
             // Camera UBO for descriptor
             {
                 auto ubo_buffer = Buffer::Get(GlobalDescriptors::CameraUBOBuffer[FrameContext.FrameInFlightIndex]);
-                GlobalDescriptors::CameraUBO ubo_data = { CurrentCamera->ModelViewProjection };
+                GlobalDescriptors::CameraUBO ubo_data = { CurrentCamera->View * CurrentCamera->Projection };
 
                 vkCmdUpdateBuffer(
                     FrameContext.DrawCommand,
@@ -364,7 +365,7 @@ namespace Renderer {
         DepthBuffer::Resize(uw, uh);
     }
 
-    void BindCamera(Camera3D* camera) {
+    void BindCamera(Camera* camera) {
         CurrentCamera = camera;
     }
 
