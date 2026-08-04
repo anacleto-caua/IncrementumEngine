@@ -25,12 +25,12 @@ namespace FileIO {
         return fs::path(buffer);
 
 #elif defined(__linux__)
-        // Linux: Read the special symlink that always points to the current executable - TODO: non tested
+        // Linux: Read the special symlink that always points to the current executable
         char buffer[PATH_MAX];
-        u64 count = readlink("/proc/self/exe", buffer, PATH_MAX);
+        i64 count = readlink("/proc/self/exe", buffer, PATH_MAX);
 
         if (count != -1) {
-            return fs::path(std::string(buffer, count));
+            return fs::path(std::string(buffer, static_cast<u64>(count)));
         }
 
         analog::warn("Sub-optimal situation reached, given root folder may be wrong.");
