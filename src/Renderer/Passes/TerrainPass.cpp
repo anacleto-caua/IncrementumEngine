@@ -6,7 +6,6 @@
 #include <glm/ext.hpp>
 
 #include "Renderer/VkVault.hpp"
-#include "Renderer/Renderer.hpp"
 #include "Renderer/Renderer_Internal.hpp"
 #include "Renderer/Vk/ShaderBuilder.hpp"
 #include "Renderer/Vk/PipelineDefaults.hpp"
@@ -17,15 +16,6 @@
 #include "Engine/TerrainManager/TerrainDefinitions.hpp"
 
 namespace TerrainPass {
-    // Push constants
-    struct TerrainPushConstants {
-        glm::mat4 CameraMVP;
-        glm::vec3 PlayerPosition;
-        f32 padding;
-    };
-
-    TerrainPushConstants TerrainPushConstants {};
-
     namespace Descriptor {
         std::array<VkDescriptorSet, Renderer::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
     };
@@ -54,8 +44,6 @@ namespace TerrainPass {
     VkPipelineLayout TerrainPipelineLayout {};
 
     IncResult Create() {
-        VkShaderStageFlags all_shader_stages = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
-
         // Image for terrain heightmap
         {
             Image::CreateInfo heightmap_image_create_desc;
@@ -156,11 +144,6 @@ namespace TerrainPass {
 
         // Pipeline Layout creation
         TerrainPipelineLayout = {};
-        VkPushConstantRange terrain_push_constant_ranges = {
-            .stageFlags = all_shader_stages,
-            .offset = 0,
-            .size = static_cast<u32>(sizeof(TerrainPushConstants))
-        };
 
         std::array<VkDescriptorSetLayout, 2> pipeline_layouts = {
             DescriptorManager::GlobalLayout,
@@ -171,8 +154,8 @@ namespace TerrainPass {
         terrain_pipeline_layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         terrain_pipeline_layout_create_info.setLayoutCount = static_cast<u32>(pipeline_layouts.size());
         terrain_pipeline_layout_create_info.pSetLayouts = pipeline_layouts.data();
-        terrain_pipeline_layout_create_info.pPushConstantRanges = &terrain_push_constant_ranges;
-        terrain_pipeline_layout_create_info.pushConstantRangeCount = 1;
+        terrain_pipeline_layout_create_info.pPushConstantRanges = nullptr;
+        terrain_pipeline_layout_create_info.pushConstantRangeCount = 0;
 
         VK_CHECK(
             vkCreatePipelineLayout(
@@ -299,13 +282,6 @@ namespace TerrainPass {
 
         TransferPipe::LazySubmit();
 
-        // Zeroing terrain push constants
-        TerrainPushConstants = {
-            .CameraMVP = glm::mat4(0),
-            .PlayerPosition = glm::vec3(0),
-            .padding = .0
-        };
-
         return IncResult::SUCCESS;
     }
 
@@ -330,25 +306,19 @@ namespace TerrainPass {
 
         vkCmdBindIndexBuffer(cmd, Buffer::Get(PlaneMesh::Indices)->Buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        TerrainPushConstants.CameraMVP = Renderer::CurrentCamera->Projection * Renderer::CurrentCamera->View;
-        TerrainPushConstants.PlayerPosition = Renderer::CurrentCamera->Position;
-        vkCmdPushConstants(
-            cmd,
-            TerrainPipelineLayout,
-            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-            0,
-            sizeof(TerrainPushConstants),
-            &TerrainPushConstants
-        );
-
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, TerrainPipeline);
+
+        std::array<VkDescriptorSet, 2> sets_to_bind = {
+            Renderer::GlobalDescriptors::Sets[Renderer::FrameContext.FrameInFlightIndex], // Set 0
+            Descriptor::Sets[Renderer::FrameContext.FrameInFlightIndex]                   // Set 1
+        };
         vkCmdBindDescriptorSets(
             cmd,
             VK_PIPELINE_BIND_POINT_GRAPHICS,
             TerrainPipelineLayout,
-            DescriptorMap::PerFrame::SetIndex,
-            1,
-            &Descriptor::Sets[Renderer::FrameContext.FrameInFlightIndex],
+            DescriptorMap::Global::SetIndex,
+            sets_to_bind.size(),
+            sets_to_bind.data(),
             0,
             nullptr
         );

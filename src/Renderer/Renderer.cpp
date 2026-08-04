@@ -34,13 +34,15 @@ namespace Renderer {
     namespace GlobalDescriptors {
         VkPipelineLayout BaseLayout = VK_NULL_HANDLE;
 
-        struct CameraUBO {
+        struct SceneGlobals {
             mat4 ViewProjection;
+            alignas (16) vec3 CameraPosition;
         };
 
-        std::array<Buffer::Id, Renderer::MAX_FRAMES_IN_FLIGHT> CameraUBOBuffer;
+        std::array<Buffer::Id, Renderer::MAX_FRAMES_IN_FLIGHT> SceneGlobalsBuffer;
 
-        std::array<VkDescriptorSet, Renderer::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
+        // On Renderer_Internal.hpp
+        // std::array<VkDescriptorSet, Renderer::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
 
         void Create();
         void Destroy();
@@ -213,14 +215,17 @@ namespace Renderer {
         {
             // Camera UBO for descriptor
             {
-                auto ubo_buffer = Buffer::Get(GlobalDescriptors::CameraUBOBuffer[FrameContext.FrameInFlightIndex]);
-                GlobalDescriptors::CameraUBO ubo_data = { CurrentCamera->View * CurrentCamera->Projection };
+                auto ubo_buffer = Buffer::Get(GlobalDescriptors::SceneGlobalsBuffer[FrameContext.FrameInFlightIndex]);
+                GlobalDescriptors::SceneGlobals ubo_data = {
+                    .ViewProjection = CurrentCamera->Projection * CurrentCamera->View,
+                    .CameraPosition = CurrentCamera->Position
+                };
 
                 vkCmdUpdateBuffer(
                     FrameContext.DrawCommand,
                     ubo_buffer->Buffer,
                     0,
-                    sizeof(GlobalDescriptors::CameraUBO),
+                    sizeof(GlobalDescriptors::SceneGlobals),
                     &ubo_data
                 );
             }
@@ -372,10 +377,10 @@ namespace Renderer {
     namespace GlobalDescriptors {
         void Create() {
             Buffer::CreateInfo create_info = {
-                .Size = sizeof(CameraUBO),
+                .Size = sizeof(SceneGlobals),
                 .Type = Buffer::Type::UBO
             };
-            for (Buffer::Id& id : CameraUBOBuffer) {
+            for (Buffer::Id& id : SceneGlobalsBuffer) {
                 id = Buffer::Add(create_info);
             }
 
@@ -389,7 +394,7 @@ namespace Renderer {
             for (u32 i = 0; i < Renderer::MAX_FRAMES_IN_FLIGHT; ++i) {
 
                 // Write the camera ubo buffer
-                auto camera_ubo_buffer_value = Buffer::Get(CameraUBOBuffer[i]);
+                auto camera_ubo_buffer_value = Buffer::Get(SceneGlobalsBuffer[i]);
                 VkDescriptorBufferInfo camera_ubo_descriptor_info {};
                 camera_ubo_descriptor_info.buffer = camera_ubo_buffer_value->Buffer;
                 camera_ubo_descriptor_info.offset = 0;
@@ -398,7 +403,7 @@ namespace Renderer {
                 VkWriteDescriptorSet camera_ubo_write {};
                 camera_ubo_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 camera_ubo_write.dstSet = GlobalDescriptors::Sets[i];
-                camera_ubo_write.dstBinding = DescriptorMap::Global::Binding_CameraUBO;
+                camera_ubo_write.dstBinding = DescriptorMap::Global::Binding_SceneGlobals;
                 camera_ubo_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                 camera_ubo_write.descriptorCount = 1;
                 camera_ubo_write.pBufferInfo = &camera_ubo_descriptor_info;
@@ -424,7 +429,7 @@ namespace Renderer {
         }
 
         void Destroy() {
-            for (Buffer::Id& id : CameraUBOBuffer) {
+            for (Buffer::Id& id : SceneGlobalsBuffer) {
                 Buffer::Del(id);
             }
             if (BaseLayout) { vkDestroyPipelineLayout(VkVault::Device, BaseLayout, nullptr); }

@@ -28,7 +28,7 @@ namespace DescriptorMap {
     namespace Global {
         inline constexpr u32 SetIndex = 0;
 
-        inline constexpr u32 Binding_CameraUBO = 1; // This isn't per frame but okay...
+        inline constexpr u32 Binding_SceneGlobals = 0;
     }
 
     // ================================================

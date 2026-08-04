@@ -17,6 +17,11 @@ namespace Renderer {
         static constexpr VkFormat Format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     };
 
+    // Camera UBO Descriptor
+    namespace GlobalDescriptors {
+        inline std::array<VkDescriptorSet, Renderer::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
+    }
+
     // Per frame data that is shared between multiple runtime dependencies of the renderer
     // only for "frame()" functions for multiple passes as of now
     struct RenderFrameData {

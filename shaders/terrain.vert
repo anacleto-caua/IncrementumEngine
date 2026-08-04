@@ -1,5 +1,14 @@
 #version 450
 
+struct SceneGlobals {
+    mat4 ViewProjection;
+    vec3 CameraPosition;
+};
+
+layout(set = 0, binding = 0) uniform SceneGlobalsData {
+    SceneGlobals data;
+} sceneGlobalsData;
+
 struct ChunkDrawData {
     ivec2 WorldPos;
     uint TextureLayer;
@@ -14,12 +23,6 @@ layout(std430, set = 1, binding = 0) readonly buffer ChunkBuffer {
 
 layout(location = 0) out vec2 texCoord;
 layout(location = 1) out vec3 debugColor;
-
-layout(push_constant) uniform PushConstants {
-    mat4 lookAt;
-    vec3 playerPos;
-    float padding;
-} terrain_push;
 
 const int RESOLUTION = 64;
 const float GRID_SCALE = 50.0;
@@ -44,7 +47,7 @@ void main() {
     float height = texture(heightmapSampler, vec3(u, v, float(gl_InstanceIndex))).r;
     vec3 finalWorldPos = vec3(localZ + chunkOffsetX, height * HEIGHT_SCALE, localX + chunkOffsetZ);
 
-    gl_Position = terrain_push.lookAt * vec4(finalWorldPos, 1.0);
+    gl_Position = sceneGlobalsData.data.ViewProjection * vec4(finalWorldPos, 1.0);
 
     bool checker = ((currentChunk.WorldPos.x + currentChunk.WorldPos.y) % 2) == 0;
     debugColor = checker ? vec3(0.8, 0.2, 0.2) : vec3(0.2, 0.2, 0.8);

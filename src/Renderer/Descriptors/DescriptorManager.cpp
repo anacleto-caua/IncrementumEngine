@@ -21,7 +21,7 @@ namespace DescriptorManager {
         // 1. Create the Global Layout (Set 0)
         // =========================================================
         VkDescriptorSetLayoutBinding camera_ubo_binding = {
-            .binding = DescriptorMap::Global::Binding_CameraUBO,
+            .binding = DescriptorMap::Global::Binding_SceneGlobals,
             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .descriptorCount = 1,
             .stageFlags = ALL_SHADER_STAGES,
