@@ -7,5 +7,7 @@
 namespace TerrainPass {
     IncResult Create();
     void Destroy();
+
+    void FrameSensibleTransfers();
     void Render();
 }

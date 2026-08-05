@@ -23,5 +23,5 @@ namespace TerrainManager {
     void Init();
 
     // Called every time the current_player_chunk changes
-    void RefreshChunks(ivec2 current_player_chunk);
+    void RefreshChunks(vec3 player_position);
 }

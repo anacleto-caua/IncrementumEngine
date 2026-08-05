@@ -229,6 +229,9 @@ namespace Renderer {
                 );
             }
 
+            // Passes transfers
+            TerrainPass::FrameSensibleTransfers();
+
             // Barriers to hold the drawing back
             VkMemoryBarrier transfer_sync_barrier = {
                 .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,

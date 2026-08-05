@@ -1,5 +1,7 @@
 #include "TerrainManager.hpp"
 
+#include <random>
+
 #include <FastNoiseLite.hpp>
 
 namespace TerrainManager {
@@ -57,8 +59,19 @@ namespace TerrainManager {
         }
     }
 
-    void RefreshChunks([[maybe_unused]] ivec2 current_player_chunk) {
-        // ...
+    void RefreshChunks([[maybe_unused]] vec3 player_position) {
+        // Just testing stuff
+        auto random_i32 = [](i32 min, i32 max) -> i32 {
+            static std::random_device rd;
+            static std::mt19937 gen(rd());
+
+            std::uniform_int_distribution<i32> dist(min, max);
+            return dist(gen);
+        };
+
+        for (auto& draw_cmd : ChunkDrawList) {
+            draw_cmd.WorldPos = { random_i32(-20, 20), random_i32(-20, 20) };
+        }
     }
 
     void WriteHeightmap(ivec2 position, u32 target_layer) {

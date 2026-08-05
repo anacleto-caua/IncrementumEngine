@@ -6,6 +6,7 @@
 #include "Engine/Core/FileIO.hpp"
 #include "Engine/Core/Platform.hpp"
 #include "Engine/Core/FrameTimer.hpp"
+#include "Engine/TerrainManager/TerrainManager.hpp"
 #include "Engine/Core/TaskScheduler/TaskScheduler.hpp"
 
 namespace Engine {
@@ -14,6 +15,7 @@ namespace Engine {
     void ResizeEvent(i32 width, i32 height);
 
     IncResult Create(Camera& Camera) {
+        // Core
         INC_CHECK(
             Platform::Initialize(
                 static_cast<i32>(Config.Width),
@@ -26,14 +28,18 @@ namespace Engine {
 
         FileIO::Initialize();
 
+        TaskScheduler::Create();
+
+        // Other systems
+        TerrainManager::Init();
+
+        // Renderer
         INC_CHECK(
             Renderer::Create(),
             "couldn't create renderer."
         );
 
         Renderer::BindCamera(&Camera);
-
-        TaskScheduler::Create();
 
         return IncResult::SUCCESS;
     }
@@ -47,6 +53,10 @@ namespace Engine {
     FrameInfo Frame() {
         FrameInfo frame;
         frame.DeltaTime = Timer.Tick();
+
+        // Systems
+        TerrainManager::RefreshChunks(Renderer::CurrentCamera->Position);
+        // Systems end
 
         // Actual frame starts
         Platform::Update();

@@ -258,8 +258,6 @@ namespace TerrainPass {
         }
 
         PlaneMesh::Upload();
-        // Write the first valid data
-        TerrainManager::Init();
 
         for (auto& buffer : ChunkDrawListBuffers) {
             // TODO: Move this to the frame structure
@@ -297,6 +295,18 @@ namespace TerrainPass {
 
         if (TerrainPipeline) { vkDestroyPipeline(VkVault::Device, TerrainPipeline, nullptr); }
         if (TerrainPipelineLayout) { vkDestroyPipelineLayout(VkVault::Device, TerrainPipelineLayout, nullptr); }
+    }
+
+    void FrameSensibleTransfers() {
+        auto buffer = Buffer::Get(ChunkDrawListBuffers[Renderer::FrameContext.FrameInFlightIndex]);
+
+        vkCmdUpdateBuffer(
+            Renderer::FrameContext.DrawCommand,
+            buffer->Buffer,
+            0,
+            sizeof(TerrainConfig::Memory::ChunkInstanceData) * TerrainManager::CurrentllyActiveChunks,
+            &TerrainManager::ChunkDrawList
+        );
     }
 
     void Render() {
