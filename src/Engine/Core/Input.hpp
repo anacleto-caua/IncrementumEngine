@@ -51,6 +51,7 @@ namespace Input {
             Escape,
             Ctrl,
             Shift,
+            F11,
 
             _KEY_COUNT_
         };

@@ -152,7 +152,8 @@ namespace Input {
             SDL_SCANCODE_SPACE,
             SDL_SCANCODE_ESCAPE,
             SDL_SCANCODE_LCTRL,
-            SDL_SCANCODE_LSHIFT
+            SDL_SCANCODE_LSHIFT,
+            SDL_SCANCODE_F11
         };
 
         static Callbacks KeyCallbacks;
@@ -241,9 +242,11 @@ namespace Window {
     }
 
     void SetWindowMode(WindowMode mode) {
+        CurrentMode = mode;
         switch(mode) {
             case WindowMode::Windowed:
                 SDL_SetWindowFullscreen(SdlWindow, 0);
+                break;
             case WindowMode::Borderless:
                 SDL_SetWindowFullscreen(SdlWindow, SDL_WINDOW_BORDERLESS);
                 break;
@@ -258,7 +261,7 @@ namespace Window {
             SetWindowMode(WindowMode::Fullscreen);
         } else {
             SetWindowMode(WindowMode::Windowed);
-        }
+         }
     }
 
     void CenterPositionOnCurrentMonitor() {

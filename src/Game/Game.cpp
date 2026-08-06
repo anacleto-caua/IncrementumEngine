@@ -34,7 +34,7 @@ namespace Game {
         FlyByCamera::Bind(MainCamera);
 
         // Good taste stuff
-        Window::ToggleFullscreen();
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::F11, Input::ActionType::Press, [](){ Window::ToggleFullscreen(); });
 
         return IncResult::SUCCESS;
 
