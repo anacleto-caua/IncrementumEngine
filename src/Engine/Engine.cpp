@@ -4,6 +4,7 @@
 
 #include "Renderer/Renderer.hpp"
 #include "Engine/Core/FileIO.hpp"
+#include "Engine/Core/Window.hpp"
 #include "Engine/Core/Platform.hpp"
 #include "Engine/Core/FrameTimer.hpp"
 #include "Engine/TerrainManager/TerrainManager.hpp"
@@ -69,10 +70,19 @@ namespace Engine {
     }
 
     void ResizeEvent(i32 width, i32 height) {
+        Config.Width = static_cast<u32>(width);
+        Config.Height = static_cast<u32>(height);
         Renderer::Resize(width, height);
     }
 
     bool ShouldClose() {
         return Platform::ShouldClose();
+    }
+
+    void RefreshConfig() {
+        Window::SetTitle(Config.EngineName.data());
+        Window::SetSize(Config.Width, Config.Height);
+        Timer.SetTargetFPS(static_cast<f32>(Config.TargetFps));
+        Renderer::CurrentCamera->Fov = static_cast<f32>(Config.FOV);
     }
 }

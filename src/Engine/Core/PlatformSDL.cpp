@@ -231,5 +231,37 @@ namespace Window {
         width = w;
         height = h;
     }
-}
 
+    void SetSize(u32 width, u32 height) {
+        SDL_SetWindowSize(SdlWindow, static_cast<i32>(width), static_cast<i32>(height));
+    }
+
+    void SetTitle(const char* title) {
+        SDL_SetWindowTitle(SdlWindow, title);
+    }
+
+    void SetWindowMode(WindowMode mode) {
+        switch(mode) {
+            case WindowMode::Windowed:
+                SDL_SetWindowFullscreen(SdlWindow, 0);
+            case WindowMode::Borderless:
+                SDL_SetWindowFullscreen(SdlWindow, SDL_WINDOW_BORDERLESS);
+                break;
+            case WindowMode::Fullscreen:
+                SDL_SetWindowFullscreen(SdlWindow, SDL_WINDOW_FULLSCREEN);
+                break;
+        }
+    }
+
+    void ToggleFullscreen() {
+        if(CurrentMode == WindowMode::Windowed) {
+            SetWindowMode(WindowMode::Fullscreen);
+        } else {
+            SetWindowMode(WindowMode::Windowed);
+        }
+    }
+
+    void CenterPositionOnCurrentMonitor() {
+        SDL_SetWindowPosition(SdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+}

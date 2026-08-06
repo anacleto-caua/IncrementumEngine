@@ -21,5 +21,7 @@ namespace Engine {
     void Destroy();
 
     FrameInfo Frame();
+
     bool ShouldClose();
+    void RefreshConfig();
 }
