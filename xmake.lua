@@ -158,6 +158,7 @@ target("IncrementumEngine")
         "libs",
         "libs/fnl",
         "libs/vma",
+        "libs/stb",
         "libs/imgui",
         "libs/glm-1.0.2",
         "libs/moodycamel",

@@ -4,6 +4,8 @@
 #include <fstream>
 #include <filesystem>
 
+#include <stb/stb_image.h>
+
 namespace fs = std::filesystem;
 
 #if defined(_WIN32)
@@ -73,6 +75,35 @@ namespace FileIO {
         file.seekg(0);
         file.read(reinterpret_cast<char*>(buffer.data()), file_size_bytes);
         file.close();
+
+        return IncResult::SUCCESS;
+    }
+
+    IncResult ImageRead(const std::string &filename, std::vector<u8> &buffer, u32 &width, u32 &height, u32 &channels, i32 desired_channels) {
+        fs::path file_path = EngineRootPath / filename;
+
+        i32 w, h, c;
+        // stb_image allocates its own memory for the pixels.
+        unsigned char* pixels = stbi_load(file_path.string().c_str(), &w, &h, &c, desired_channels);
+
+        if (!pixels) {
+            analog::critical("failed to load image: {}", filename);
+            return IncResult::FAIL;
+        }
+
+        // Set the output variables
+        width = (u32)w;
+        height = (u32)h;
+        channels = desired_channels > 0 ? (u32)desired_channels : (u32)c;
+
+        u32 image_size_bytes = width * height * channels;
+
+        // Dump the bytes into the output vector to maintain the same memory ownership
+        buffer.assign(pixels, pixels + image_size_bytes);
+
+        //  Ideally I could pass just the pointer and request
+        //  the api user to free by himself using stbi_image_free(ptr) later
+        stbi_image_free(pixels);
 
         return IncResult::SUCCESS;
     }
