@@ -151,7 +151,7 @@ target("IncrementumEngine")
     end
 
     -- Pre compiled headers
-    set_pcxxheader("src/Utils/PCH/pch.hpp")
+    set_pcxxheader("src/pch.hpp")
 
     -- All libraries
     local lib_includes = {

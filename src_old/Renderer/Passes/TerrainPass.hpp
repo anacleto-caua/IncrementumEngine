@@ -1,0 +1,13 @@
+#pragma once
+
+#include <glm/fwd.hpp>
+
+#include <vulkan/vulkan.h>
+
+namespace TerrainPass {
+    IncResult Create();
+    void Destroy();
+
+    void FrameSensibleTransfers();
+    void Render();
+}
