@@ -35,8 +35,8 @@ namespace FlyByCamera {
     void Bind(Camera &new_camera) {
         TrackedCamera = &new_camera;
 
-        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Shift, Input::ActionType::Press, [](void){ IsRunning = true; });
-        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Shift, Input::ActionType::Release, [](void){ IsRunning = false; });
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::LShift, Input::ActionType::Press, [](void){ IsRunning = true; });
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::LShift, Input::ActionType::Release, [](void){ IsRunning = false; });
 
         Update(0);
         ApplyRotation();
@@ -49,21 +49,21 @@ namespace FlyByCamera {
         {
             using namespace Input::Keyboard;
 
-            if (IsKeyDown(Key::Forward)) {
+            if (IsKeyDown(Key::W)) {
                 FrameMovement.z = 1;
-            } else if (IsKeyDown(Key::Backward)) {
+            } else if (IsKeyDown(Key::S)) {
                 FrameMovement.z = -1;
             }
 
-            if (IsKeyDown(Key::Right)) {
+            if (IsKeyDown(Key::D)) {
                 FrameMovement.x = 1;
-            } else if (IsKeyDown(Key::Left)) {
+            } else if (IsKeyDown(Key::A)) {
                 FrameMovement.x = -1;
             }
 
-            if (IsKeyDown(Key::Up)) {
+            if (IsKeyDown(Key::Q)) {
                 FrameMovement.y = 1;
-            } else if (IsKeyDown(Key::Down)) {
+            } else if (IsKeyDown(Key::E)) {
                 FrameMovement.y = -1;
             }
         }

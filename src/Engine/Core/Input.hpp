@@ -40,18 +40,28 @@ namespace Input {
 
     namespace Keyboard {
         enum class Key {
-            Forward,
-            Backward,
-            Right,
-            Left,
-            Up,
-            Down,
-            Interact,
-            Space,
-            Escape,
-            Ctrl,
-            Shift,
-            F11,
+            // Letters
+            A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+
+            // Numbers (Top Row)
+            Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
+
+            // Function Keys
+            F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+
+            // Modifiers
+            LCtrl, LShift, LAlt, LGUI,
+            RCtrl, RShift, RAlt, RGUI,
+
+            // Navigation / Control
+            Space, Enter, Escape, Backspace, Tab,
+            Insert, Delete, Home, End, PageUp, PageDown,
+
+            // Arrows
+            Left, Right, Up, Down,
+
+            // Punctuation / Math
+            LeftBracket, RightBracket, Semicolon, Apostrophe, Comma, Period, Slash, Backslash, Grave, Minus, Equals,
 
             _KEY_COUNT_
         };

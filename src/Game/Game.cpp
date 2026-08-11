@@ -35,6 +35,8 @@ namespace Game {
 
         // Good taste stuff
         Input::Keyboard::RegisterCallback(Input::Keyboard::Key::F11, Input::ActionType::Press, [](){ Window::ToggleFullscreen(); });
+        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Escape, Input::ActionType::Press, []() { Input::Mouse::Free(); });
+        Input::Mouse::RegisterCallback(Input::Mouse::Button::Left, Input::ActionType::Press, []() { Input::Mouse::Capture(); });
 
         return IncResult::SUCCESS;
 
