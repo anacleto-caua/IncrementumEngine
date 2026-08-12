@@ -5,8 +5,8 @@ layout(location = 1) in vec3 debugColor;
 
 layout(location = 0) out vec4 outColor;
 
-// Gotta match the mesh
-const float GRID_CELLS = 63.0;
+// Mock data, should be filled by using specialization
+layout(constant_id = 0) const float GRID_CELLS = 63.0;
 
 void main()
 {

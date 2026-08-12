@@ -13,6 +13,7 @@
 #include "Renderer/Resources/ResourceManager.hpp"
 #include "Engine/TerrainManager/TerrainManager.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
+#include "Renderer/Vk/ShaderSpecializationBuilder.hpp"
 #include "Engine/TerrainManager/TerrainDefinitions.hpp"
 
 namespace TerrainPass {
@@ -212,7 +213,14 @@ namespace TerrainPass {
         std::vector<u32> shader_buffer;
         shader_buffer.reserve(4096);
 
+        // Vertex shader
         VkPipelineShaderStageCreateInfo vert_shader;
+        SpecializationBuilder frag_shader_spec_builder;
+        frag_shader_spec_builder
+            .AddConstant(0, Config.Resolution)
+            .AddConstant(1, Config.GridScale)
+            .AddConstant(2, Config.HeightScale);
+
         INC_CHECK(
             CreateShaderStage(
                 VK_SHADER_STAGE_VERTEX_BIT,
@@ -222,8 +230,14 @@ namespace TerrainPass {
             ),
             "vertex shader creation failed"
         );
+        vert_shader.pSpecializationInfo = frag_shader_spec_builder.Build();
 
+        // Fragment shader
         VkPipelineShaderStageCreateInfo frag_shader;
+        SpecializationBuilder vert_shader_spec_builder;
+        vert_shader_spec_builder
+            .AddConstant(0, static_cast<f32>(Config.Resolution - 1));
+
         INC_CHECK(
             CreateShaderStage(
                 VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -233,6 +247,8 @@ namespace TerrainPass {
             ),
             "fragment shader creation failed"
         );
+
+        frag_shader.pSpecializationInfo = vert_shader_spec_builder.Build();
 
         shader_stages.push_back(vert_shader);
         shader_stages.push_back(frag_shader);

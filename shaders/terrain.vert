@@ -24,9 +24,10 @@ layout(std430, set = 1, binding = 0) readonly buffer ChunkBuffer {
 layout(location = 0) out vec2 texCoord;
 layout(location = 1) out vec3 debugColor;
 
-const int RESOLUTION = 64;
-const float GRID_SCALE = 50.0;
-const float HEIGHT_SCALE = 30.0 * sqrt(GRID_SCALE); // Still doesn't feel like it
+// Mock data, should be filled by using specialization
+layout(constant_id = 0) const int RESOLUTION = 64;
+layout(constant_id = 1) const float GRID_SCALE = 50.0;
+layout(constant_id = 2) const float HEIGHT_SCALE = 210;
 
 void main() {
     ChunkDrawData currentChunk = chunkLinkDataBuffer.chunks[gl_InstanceIndex];
