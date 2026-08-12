@@ -21,7 +21,7 @@ namespace Engine {
             Platform::Initialize(
                 static_cast<i32>(Config.Width),
                 static_cast<i32>(Config.Height),
-                Config.EngineName.data(),
+                Config.ApplicationTitle.data(),
                 Engine::ResizeEvent
             ),
             "couldn't create platform layer."
@@ -80,7 +80,7 @@ namespace Engine {
     }
 
     void RefreshConfig() {
-        Window::SetTitle(Config.EngineName.data());
+        Window::SetTitle(Config.ApplicationTitle.data());
         Window::SetSize(Config.Width, Config.Height);
         Timer.SetTargetFPS(static_cast<f32>(Config.TargetFps));
         Renderer::CurrentCamera->Fov = static_cast<f32>(Config.FOV);

@@ -7,7 +7,7 @@ struct FrameInfo {
 };
 
 struct EngineConfig {
-    std::string_view EngineName = "Incrementum Engine";
+    std::string_view ApplicationTitle = "Incrementum Engine";
     u32 Width = 1280;
     u32 Height = 720;
     u32 TargetFps = 165;

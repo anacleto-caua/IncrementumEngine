@@ -528,8 +528,8 @@ namespace Renderer {
             VK_CHECK(vkCreateSwapchainKHR(VkVault::Device, &CreateInfo, nullptr, &Swapchain), "swapchain creation failed");
 
             vkGetSwapchainImagesKHR(VkVault::Device, Swapchain, &ImageCount, nullptr);
-            std::vector<VkImage> ImagesTemp(ImageCount);
-            vkGetSwapchainImagesKHR(VkVault::Device, Swapchain, &ImageCount, ImagesTemp.data());
+            std::vector<VkImage> images_temp(ImageCount);
+            vkGetSwapchainImagesKHR(VkVault::Device, Swapchain, &ImageCount, images_temp.data());
             Images.resize(ImageCount);
 
             CleanupImages();
@@ -557,7 +557,7 @@ namespace Renderer {
             };
 
             for (u32 i = 0; i < ImageCount; i++) {
-                Images[i].Image = ImagesTemp[i];
+                Images[i].Image = images_temp[i];
                 swapchain_image_view_create_info.image = Images[i].Image;
                 VK_CHECK(
                     vkCreateImageView(VkVault::Device, &swapchain_image_view_create_info, nullptr, &Images[i].ImageView),
@@ -623,12 +623,12 @@ namespace Renderer {
                 .image = depth_image_value->Image,
                 .subresourceRange = Range
             };
-            VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-            VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+            VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
 
             vkCmdPipelineBarrier(
                 cmd,
-                srcStage, dstStage,
+                src_stage, dst_stage,
                 0, 0, nullptr, 0, nullptr, 1,
                 &barrier
             );
