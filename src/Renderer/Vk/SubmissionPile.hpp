@@ -3,6 +3,8 @@
 #include <array>
 #include <cassert>
 
+#include <imgui.h>
+
 #include "Renderer/VkVault.hpp"
 #include "Renderer/Vk/BinarySemaphore.hpp"
 
@@ -34,164 +36,248 @@ struct SubmissionPile {
 
     /*
      * It's cool having this but it breaks my special submission vector in TransferPipe
-    SubmissionPile() = default;
-    SubmissionPile(const SubmissionPile&) = delete;
-    SubmissionPile& operator=(const SubmissionPile&) = delete;
-    SubmissionPile(SubmissionPile&&) = delete;
-    SubmissionPile& operator=(SubmissionPile&&) = delete;
+    Submission) = default;
+    Submissionconst Submission) = delete;
+    Submission operator=(const Submission) = delete;
+    SubmissionSubmission&) = delete;
+    Submission operator=(Submission&) = delete;
     */
+
+    void Reset() {
+        SubmitCount = CmdCount = WaitCount = SignalCount = 0;
+        CmdStart = WaitStart = SignalStart = 0;
+    }
+
+
+    void BeginSubmission() {
+        CmdStart = CmdCount;
+        WaitStart = WaitCount;
+        SignalStart = SignalCount;
+    }
+
+
+    void EndSubmission() {
+        u64 command_quantity = CmdCount - CmdStart;
+        u64 wait_semaphores_quantity = WaitCount - WaitStart;
+        u64 signal_semaphores_quantity = SignalCount - SignalStart;
+
+        assert(SubmitCount < MaxSubmits && "max submission count reached on a pile");
+
+        Submits[SubmitCount] = {
+            VK_STRUCTURE_TYPE_SUBMIT_INFO_2, nullptr, 0,
+            static_cast<u32>(wait_semaphores_quantity), wait_semaphores_quantity > 0 ? &WaitSemaphores[WaitStart] : nullptr,
+            static_cast<u32>(command_quantity), command_quantity > 0 ? &CommandBuffers[CmdStart] : nullptr,
+            static_cast<u32>(signal_semaphores_quantity), signal_semaphores_quantity > 0 ? &SignalSemaphores[SignalStart] : nullptr
+        };
+            SubmitCount++;
+    }
+
+
+    void AddCommand(VkCommandBuffer command) {
+        assert(CmdCount < MaxCommandBuffers && "max command count reached on a pile");
+
+        CommandBuffers[CmdCount] = {
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, nullptr,
+            command, 0
+        };
+        CmdCount++;
+    }
+
+    // Timeline Semaphores
+
+    void WaitSemaphore(const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+        assert(WaitCount < MaxWaitSemaphores && "max wait semaphores on a pile reached");
+        WaitSemaphores[WaitCount] = {
+            VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+            semaphore, value, stage, 0
+        };
+        WaitCount++;
+    }
+
+
+    void SignalSemaphore(const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+        assert(SignalCount < MaxSignalSemaphores && "max signal semaphores count on a pile reached");
+        SignalSemaphores[SignalCount] = {
+            VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+            semaphore, value, stage, 0
+        };
+        SignalCount++;
+    }
+
+
+    void WaitTimeline(const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+        TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
+        WaitSemaphore( semaphore_value->Semaphore, value, stage);
+    }
+
+
+    void SignalTimeline(const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+        TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
+        SignalSemaphore( semaphore_value->Semaphore, value, stage);
+    }
+
+    // Timeline Semaphores Ticket
+
+    void WaitPrepareForTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+        WaitTimeline( ticket.TargetSemaphore, ticket.Value-1, stage);
+    }
+
+
+    void WaitForTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+        WaitTimeline( ticket.TargetSemaphore, ticket.Value, stage);
+    }
+
+
+    void SignalTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+        SignalTimeline( ticket.TargetSemaphore, ticket.Value, stage);
+    }
+
+
+    void WaitAndSignalTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+        WaitPrepareForTicket( ticket, stage); // Guarantee all previously required work has been done
+        SignalTicket( ticket, stage);
+    }
+
+    // Binary Semaphores
+
+    void WaitBinarySemaphore(const BinarySemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+        assert(WaitCount < MaxWaitSemaphores && "max wait semaphores on a pile reached");
+        WaitSemaphores[WaitCount] = {
+            VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+            semaphore.Semaphore, 1, stage, 0
+        };
+        WaitCount++;
+    }
+
+
+    void SignalBinarySemaphore(const BinarySemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+        assert(SignalCount < MaxSignalSemaphores && "max signal semaphores count on a pile reached");
+        SignalSemaphores[SignalCount] = {
+            VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
+            semaphore.Semaphore, 0, stage, 0
+        };
+        SignalCount++;
+    }
+
+    // Submission
+
+    void Submit(QueueContext& ctx, VkFence execution_fence = VK_NULL_HANDLE) {
+        if(SubmitCount > 0) {
+            VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(SubmitCount), Submits.data(), execution_fence), "pile submission failed");
+            Reset();
+        }
+    }
+
+    // Utils
+
+    bool IsFull() {
+        return (
+            SubmitCount == MaxSubmits ||
+            CmdCount == MaxCommandBuffers ||
+            WaitCount == MaxWaitSemaphores ||
+            SignalCount == MaxSignalSemaphores
+        );
+    }
+
+
+    bool IsEmpty() {
+        return (
+            SubmitCount == 0 &&
+            CmdCount == 0 &&
+            WaitCount == 0 &&
+            SignalCount == 0
+        );
+    }
+
+    // dear imgui fancy print - not test btw
+    void ImGuiSubmission() {
+        // Draw the high-level summary table
+        if (ImGui::BeginTable("Submissionummary", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("Resource");
+            ImGui::TableSetupColumn("Usage / Max");
+            ImGui::TableSetupColumn("Batch Start");
+            ImGui::TableHeadersRow();
+
+            // Submits
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::Text("Submits");
+            ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)SubmitCount, (u64)MaxSubmits);
+            ImGui::TableNextColumn(); ImGui::Text("-");
+
+            // Command Buffers
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::Text("Command Buffers");
+            ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)CmdCount, (u64)MaxCommandBuffers);
+            ImGui::TableNextColumn(); ImGui::Text("%llu", (u64)CmdStart);
+
+            // Wait Semaphores
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::Text("Wait Semaphores");
+            ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)WaitCount, (u64)MaxWaitSemaphores);
+            ImGui::TableNextColumn(); ImGui::Text("%llu", (u64)WaitStart);
+
+            // Signal Semaphores
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::Text("Signal Semaphores");
+            ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)SignalCount, (u64)MaxSignalSemaphores);
+            ImGui::TableNextColumn(); ImGui::Text("%llu", (u64)SignalStart);
+
+            ImGui::EndTable();
+        }
+
+        ImGui::Spacing();
+        ImGui::Text("Status: Empty? %s   |   Full? %s", IsEmpty() ? "Yes" : "No", IsFull() ? "Yes" : "No");
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // Draw the interactive Topology Tree
+        if (SubmitCount == 0) {
+            ImGui::TextDisabled("[No Submits Recorded]");
+            return;
+        }
+
+        ImGui::Text("=== SUBMISSION TOPOLOGY ===");
+
+        for (u32 i = 0; i < SubmitCount; ++i) {
+            const auto& submit = Submits[i];
+
+            // utils for showing semaphores
+            auto bullet_text_semaphore_out = [](const VkSemaphoreSubmitInfo& semaphore_submit_info){
+                ImGui::BulletText("Semaphore: %p | Val: %llu | Stage: 0x%llx",
+                  (void*)semaphore_submit_info.semaphore,
+                  (u64)semaphore_submit_info.value,
+                  (u64)semaphore_submit_info.stageMask);
+            };
+
+            // Ensure unique ID for ImGui tree nodes by using the loop index
+            ImGui::SetNextItemOpen(true, ImGuiCond_Once);
+            if (ImGui::TreeNode((void*)(intptr_t)i, "Submit [%u]", i)) {
+
+                ImGui::BulletText("Commands: %u", submit.commandBufferInfoCount);
+
+                // Collapsible Waits Node
+                if (ImGui::TreeNode((void*)(intptr_t)(i + 10000), "Waits: %u", submit.waitSemaphoreInfoCount)) {
+                    for (u32 w = 0; w < submit.waitSemaphoreInfoCount; ++w) {
+                        bullet_text_semaphore_out(submit.pWaitSemaphoreInfos[w]);
+                    }
+                    ImGui::TreePop();
+                }
+
+                // Collapsible Signals Node
+                if (ImGui::TreeNode((void*)(intptr_t)(i + 20000), "Signals: %u", submit.signalSemaphoreInfoCount)) {
+                    for (u32 s = 0; s < submit.signalSemaphoreInfoCount; ++s) {
+                        bullet_text_semaphore_out(submit.pSignalSemaphoreInfos[s]);
+                    }
+                    ImGui::TreePop();
+                }
+                ImGui::TreePop();
+            }
+        }
+    }
 };
 
-// Damn I sure love having to repeat myself a lot to use generics :)
-
-template <u64 A, u64 B, u64 C, u64 D>
-void ResetPile(SubmissionPile<A, B, C, D>& pile) {
-    pile.SubmitCount = pile.CmdCount = pile.WaitCount = pile.SignalCount = 0;
-    pile.CmdStart = pile.WaitStart = pile.SignalStart = 0;
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-void BeginSubmission(SubmissionPile<A, B, C, D>& pile) {
-    pile.CmdStart = pile.CmdCount;
-    pile.WaitStart = pile.WaitCount;
-    pile.SignalStart = pile.SignalCount;
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-void EndSubmission(SubmissionPile<A, B, C, D>& pile) {
-    u64 command_quantity = pile.CmdCount - pile.CmdStart;
-    u64 wait_semaphores_quantity = pile.WaitCount - pile.WaitStart;
-    u64 signal_semaphores_quantity = pile.SignalCount - pile.SignalStart;
-
-    assert(pile.SubmitCount < pile.MaxSubmits && "max submission count reached on a pile");
-
-    pile.Submits[pile.SubmitCount] = {
-        VK_STRUCTURE_TYPE_SUBMIT_INFO_2, nullptr, 0,
-        static_cast<u32>(wait_semaphores_quantity), wait_semaphores_quantity > 0 ? &pile.WaitSemaphores[pile.WaitStart] : nullptr,
-        static_cast<u32>(command_quantity), command_quantity > 0 ? &pile.CommandBuffers[pile.CmdStart] : nullptr,
-        static_cast<u32>(signal_semaphores_quantity), signal_semaphores_quantity > 0 ? &pile.SignalSemaphores[pile.SignalStart] : nullptr
-    };
-        pile.SubmitCount++;
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-void AddCommandToPile(SubmissionPile<A, B, C, D>& pile, VkCommandBuffer command) {
-    assert(pile.CmdCount < pile.MaxCommandBuffers && "max command count reached on a pile");
-
-    pile.CommandBuffers[pile.CmdCount] = {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, nullptr,
-        command, 0
-    };
-    pile.CmdCount++;
-}
-
-// Timeline Semaphores
-template <u64 A, u64 B, u64 C, u64 D>
-void WaitSemaphore(SubmissionPile<A, B, C, D>& pile, const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    assert(pile.WaitCount < pile.MaxWaitSemaphores && "max wait semaphores on a pile reached");
-    pile.WaitSemaphores[pile.WaitCount] = {
-        VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
-        semaphore, value, stage, 0
-    };
-    pile.WaitCount++;
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-void SignalSemaphore(SubmissionPile<A, B, C, D>& pile, const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    assert(pile.SignalCount < pile.MaxSignalSemaphores && "max signal semaphores count on a pile reached");
-    pile.SignalSemaphores[pile.SignalCount] = {
-        VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
-        semaphore, value, stage, 0
-    };
-    pile.SignalCount++;
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-void WaitTimeline(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
-    WaitSemaphore(pile, semaphore_value->Semaphore, value, stage);
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-void SignalTimeline(SubmissionPile<A, B, C, D>& pile, const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
-    SignalSemaphore(pile, semaphore_value->Semaphore, value, stage);
-}
-
-// Timeline Semaphores Ticket
-template <u64 A, u64 B, u64 C, u64 D>
-void WaitPrepareForTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    WaitTimeline(pile, ticket.TargetSemaphore, ticket.Value-1, stage);
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-void WaitForTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    WaitTimeline(pile, ticket.TargetSemaphore, ticket.Value, stage);
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-void SignalTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    SignalTimeline(pile, ticket.TargetSemaphore, ticket.Value, stage);
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-void WaitAndSignalTicket(SubmissionPile<A, B, C, D>& pile, const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    WaitPrepareForTicket(pile, ticket, stage); // Guarantee all previously required work has been done
-    SignalTicket(pile, ticket, stage);
-}
-
-// Binary Semaphores
-template <u64 A, u64 B, u64 C, u64 D>
-void WaitBinarySemaphore(SubmissionPile<A, B, C, D>& pile, const BinarySemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    assert(pile.WaitCount < pile.MaxWaitSemaphores && "max wait semaphores on a pile reached");
-    pile.WaitSemaphores[pile.WaitCount] = {
-        VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
-        semaphore.Semaphore, 1, stage, 0
-    };
-    pile.WaitCount++;
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-void SignalBinarySemaphore(SubmissionPile<A, B, C, D>& pile, const BinarySemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-    assert(pile.SignalCount < pile.MaxSignalSemaphores && "max signal semaphores count on a pile reached");
-    pile.SignalSemaphores[pile.SignalCount] = {
-        VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
-        semaphore.Semaphore, 0, stage, 0
-    };
-    pile.SignalCount++;
-}
-
-// Submission
-template <u64 A, u64 B, u64 C, u64 D>
-void SubmitPile(QueueContext& ctx, SubmissionPile<A, B, C, D>& pile, VkFence execution_fence = VK_NULL_HANDLE) {
-    if(pile.SubmitCount > 0) {
-        VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence), "pile submission failed");
-        ResetPile(pile);
-    }
-}
-
-// Utils
-template <u64 A, u64 B, u64 C, u64 D>
-bool IsFull(const SubmissionPile<A, B, C, D>& pile) {
-    return (
-        pile.SubmitCount == pile.MaxSubmits ||
-        pile.CmdCount == pile.MaxCommandBuffers ||
-        pile.WaitCount == pile.MaxWaitSemaphores ||
-        pile.SignalCount == pile.MaxSignalSemaphores
-    );
-}
-
-template <u64 A, u64 B, u64 C, u64 D>
-bool IsEmpty(const SubmissionPile<A, B, C, D>& pile) {
-    return (
-        pile.SubmitCount == 0 &&
-        pile.CmdCount == 0 &&
-        pile.WaitCount == 0 &&
-        pile.SignalCount == 0
-    );
-}
-
 // Fancy print
+
 template <u64 A, u64 B, u64 C, u64 D>
 struct fmt::formatter<SubmissionPile<A, B, C, D>> {
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
@@ -202,7 +288,7 @@ struct fmt::formatter<SubmissionPile<A, B, C, D>> {
     auto format(const SubmissionPile<A, B, C, D>& pile, FormatContext& ctx) const -> decltype(ctx.out()) {
         fmt::format_to(ctx.out(),
             "+------------------------------------------------+\n"
-            "|         Detailed SubmissionPile State          |\n"
+            "|         Detailed SubmissionState          |\n"
             "+---------------+-----------------+--------------+\n"
             "| Resource      | Usage / Max     | Batch Start  |\n"
             "+---------------+-----------------+--------------+\n"
@@ -217,8 +303,8 @@ struct fmt::formatter<SubmissionPile<A, B, C, D>> {
             pile.CmdCount, pile.MaxCommandBuffers, pile.CmdStart,
             pile.WaitCount, pile.MaxWaitSemaphores, pile.WaitStart,
             pile.SignalCount, pile.MaxSignalSemaphores, pile.SignalStart,
-            IsEmpty(pile) ? "Yes" : "No",
-            IsFull(pile) ? "Yes" : "No"
+            pile.IsEmpty() ? "Yes" : "No",
+            pile.IsFull() ? "Yes" : "No"
         );
 
         if (pile.SubmitCount == 0) {
@@ -253,91 +339,3 @@ struct fmt::formatter<SubmissionPile<A, B, C, D>> {
     }
 };
 
-// dear imgui fancy print - not test btw
-#include <imgui.h>
-
-template <u64 A, u64 B, u64 C, u64 D>
-void ImGuiSubmissionPile(const SubmissionPile<A, B, C, D>& pile) {
-    // Draw the high-level summary table
-    if (ImGui::BeginTable("SubmissionPileSummary", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-        ImGui::TableSetupColumn("Resource");
-        ImGui::TableSetupColumn("Usage / Max");
-        ImGui::TableSetupColumn("Batch Start");
-        ImGui::TableHeadersRow();
-
-        // Submits
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn(); ImGui::Text("Submits");
-        ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)pile.SubmitCount, (u64)pile.MaxSubmits);
-        ImGui::TableNextColumn(); ImGui::Text("-");
-
-        // Command Buffers
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn(); ImGui::Text("Command Buffers");
-        ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)pile.CmdCount, (u64)pile.MaxCommandBuffers);
-        ImGui::TableNextColumn(); ImGui::Text("%llu", (u64)pile.CmdStart);
-
-        // Wait Semaphores
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn(); ImGui::Text("Wait Semaphores");
-        ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)pile.WaitCount, (u64)pile.MaxWaitSemaphores);
-        ImGui::TableNextColumn(); ImGui::Text("%llu", (u64)pile.WaitStart);
-
-        // Signal Semaphores
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn(); ImGui::Text("Signal Semaphores");
-        ImGui::TableNextColumn(); ImGui::Text("%llu / %llu", (u64)pile.SignalCount, (u64)pile.MaxSignalSemaphores);
-        ImGui::TableNextColumn(); ImGui::Text("%llu", (u64)pile.SignalStart);
-
-        ImGui::EndTable();
-    }
-
-    ImGui::Spacing();
-    ImGui::Text("Status: Empty? %s   |   Full? %s", IsEmpty(pile) ? "Yes" : "No", IsFull(pile) ? "Yes" : "No");
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // Draw the interactive Topology Tree
-    if (pile.SubmitCount == 0) {
-        ImGui::TextDisabled("[No Submits Recorded]");
-        return;
-    }
-
-    ImGui::Text("=== SUBMISSION TOPOLOGY ===");
-
-    for (u32 i = 0; i < pile.SubmitCount; ++i) {
-        const auto& submit = pile.Submits[i];
-
-        // utils for showing semaphores
-        auto bullet_text_semaphore_out = [](const VkSemaphoreSubmitInfo& semaphore_submit_info){
-            ImGui::BulletText("Semaphore: %p | Val: %llu | Stage: 0x%llx",
-              (void*)semaphore_submit_info.semaphore,
-              (u64)semaphore_submit_info.value,
-              (u64)semaphore_submit_info.stageMask);
-        };
-
-        // Ensure unique ID for ImGui tree nodes by using the loop index
-        ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-        if (ImGui::TreeNode((void*)(intptr_t)i, "Submit [%u]", i)) {
-
-            ImGui::BulletText("Commands: %u", submit.commandBufferInfoCount);
-
-            // Collapsible Waits Node
-            if (ImGui::TreeNode((void*)(intptr_t)(i + 10000), "Waits: %u", submit.waitSemaphoreInfoCount)) {
-                for (u32 w = 0; w < submit.waitSemaphoreInfoCount; ++w) {
-                    bullet_text_semaphore_out(submit.pWaitSemaphoreInfos[w]);
-                }
-                ImGui::TreePop();
-            }
-
-            // Collapsible Signals Node
-            if (ImGui::TreeNode((void*)(intptr_t)(i + 20000), "Signals: %u", submit.signalSemaphoreInfoCount)) {
-                for (u32 s = 0; s < submit.signalSemaphoreInfoCount; ++s) {
-                    bullet_text_semaphore_out(submit.pSignalSemaphoreInfos[s]);
-                }
-                ImGui::TreePop();
-            }
-            ImGui::TreePop();
-        }
-    }
-}

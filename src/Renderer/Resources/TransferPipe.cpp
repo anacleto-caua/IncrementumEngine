@@ -165,12 +165,12 @@ namespace TransferPipe {
             semaphore = CreateTimelineSemaphore();
         }
 
-        ResetPile(TransferSubmissionPile);
+        TransferSubmissionPile.Reset();
         Create(TransferCommandBufferBlock, &VkVault::Transfer);
 
         SpecialSubmissionPiles.Initialize();
         for (auto &pile : SpecialSubmissionPiles) {
-            ResetPile(pile);
+            pile.Reset();
         }
 
         SpecialCommandBufferBlocks.Initialize();
@@ -213,7 +213,7 @@ namespace TransferPipe {
     // Just write all packages, I need a version of this that controls how much it writes
     void LazyWrite() {
 
-        while(!PackageQueues[CurrentUploadLayer].empty() && !IsFull(TransferSubmissionPile)) {
+        while(!PackageQueues[CurrentUploadLayer].empty() && !TransferSubmissionPile.IsFull()) {
             u64 ring_buffer_read_size = 0;
             Package package = PackageQueues[CurrentUploadLayer].front();
             PackageQueues[CurrentUploadLayer].pop();
@@ -224,12 +224,12 @@ namespace TransferPipe {
                     {
                         BufferUpdate& update_info = package.Data.BufferUpdate;
 
-                        BeginSubmission(TransferSubmissionPile);
+                        TransferSubmissionPile.BeginSubmission();
                         VkCommandBuffer cmd = GetNext(TransferCommandBufferBlock);
                         LeanVk::BeginCommand(cmd);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
-                        WaitAndSignalTicket(TransferSubmissionPile, package.TicketToSignal);
+                        TransferSubmissionPile.WaitAndSignalTicket(package.TicketToSignal);
 
                         vkCmdUpdateBuffer(
                             cmd,
@@ -240,8 +240,8 @@ namespace TransferPipe {
                         );
 
                         LeanVk::EndCommand(cmd);
-                        AddCommandToPile(TransferSubmissionPile, cmd);
-                        EndSubmission(TransferSubmissionPile);
+                        TransferSubmissionPile.AddCommand(cmd);
+                        TransferSubmissionPile.EndSubmission();
                     }
                     break;
                 case PackageType::BufferUpload:
@@ -249,12 +249,12 @@ namespace TransferPipe {
                         BufferUpload& upload_info = package.Data.BufferUpload;
                         ring_buffer_read_size += package.Size;
 
-                        BeginSubmission(TransferSubmissionPile);
+                        TransferSubmissionPile.BeginSubmission();
                         VkCommandBuffer cmd = GetNext(TransferCommandBufferBlock);
                         LeanVk::BeginCommand(cmd);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
-                        WaitAndSignalTicket(TransferSubmissionPile, package.TicketToSignal);
+                        TransferSubmissionPile.WaitAndSignalTicket(package.TicketToSignal);
 
                         VkBufferCopy copy_region {};
                         copy_region.srcOffset = upload_info.ReadOffset;
@@ -270,8 +270,8 @@ namespace TransferPipe {
                         );
 
                         LeanVk::EndCommand(cmd);
-                        AddCommandToPile(TransferSubmissionPile, cmd);
-                        EndSubmission(TransferSubmissionPile);
+                        TransferSubmissionPile.AddCommand(cmd);
+                        TransferSubmissionPile.EndSubmission();
                     }
                     break;
                 case PackageType::OwnerRelease:
@@ -295,13 +295,13 @@ namespace TransferPipe {
                         subresource_range.baseArrayLayer = release_info.TargetLayer;
                         subresource_range.layerCount = 1;
 
-                        BeginSubmission(q1_pile);
+                        q1_pile.BeginSubmission();
                         VkCommandBuffer cmd_a_q1 = GetNext(q1_block);
                         LeanVk::BeginCommand(cmd_a_q1);
 
                         // Guarantee submission order (on this one semaphore) and make tickets valid
-                        WaitPrepareForTicket(q1_pile, package.TicketToSignal);
-                        WaitAndSignalTicket(q1_pile, image_released);
+                        q1_pile.WaitPrepareForTicket(package.TicketToSignal);
+                        q1_pile.WaitAndSignalTicket(image_released);
 
                         VkImageMemoryBarrier2 release_to_q2 {};
                         release_to_q2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -324,8 +324,8 @@ namespace TransferPipe {
                         vkCmdPipelineBarrier2(cmd_a_q1, &dep_release_1);
 
                         LeanVk::EndCommand(cmd_a_q1);
-                        AddCommandToPile(q1_pile, cmd_a_q1);
-                        EndSubmission(q1_pile); // I shall consider not using a single command for a image release
+                        q1_pile.AddCommand(cmd_a_q1);
+                        q1_pile.EndSubmission(); // I shall consider not using a single command for a image release
                     }
                     break;
                 case PackageType::TransferAcquireWriteRelease:
@@ -349,12 +349,12 @@ namespace TransferPipe {
                         subresource_range.baseArrayLayer = write_info.TargetLayer;
                         subresource_range.layerCount = 1;
 
-                        BeginSubmission(TransferSubmissionPile);
+                        TransferSubmissionPile.BeginSubmission();
                         VkCommandBuffer cmd_q2 = GetNext(TransferCommandBufferBlock);
                         LeanVk::BeginCommand(cmd_q2);
 
-                        WaitForTicket(TransferSubmissionPile, image_released);
-                        WaitAndSignalTicket(TransferSubmissionPile, image_writen);
+                        TransferSubmissionPile.WaitForTicket(image_released);
+                        TransferSubmissionPile.WaitAndSignalTicket(image_writen);
 
                         VkImageMemoryBarrier2 acquire_on_q2 {};
                         acquire_on_q2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -417,8 +417,8 @@ namespace TransferPipe {
                         vkCmdPipelineBarrier2(cmd_q2, &dep_release_2);
 
                         LeanVk::EndCommand(cmd_q2);
-                        AddCommandToPile(TransferSubmissionPile, cmd_q2);
-                        EndSubmission(TransferSubmissionPile);
+                        TransferSubmissionPile.AddCommand(cmd_q2);
+                        TransferSubmissionPile.EndSubmission();
                     }
                     break;
                 case PackageType::OwnerAcquire:
@@ -443,12 +443,12 @@ namespace TransferPipe {
                         subresource_range.baseArrayLayer = acquire_info.TargetLayer;
                         subresource_range.layerCount = 1;
 
-                        BeginSubmission(q1_pile);
+                        q1_pile.BeginSubmission();
                         VkCommandBuffer cmd_b_q1 = GetNext(q1_block);
                         LeanVk::BeginCommand(cmd_b_q1);
 
-                        WaitForTicket(q1_pile, image_writen);
-                        SignalTicket(q1_pile, final_ticket);
+                        q1_pile.WaitForTicket(image_writen);
+                        q1_pile.SignalTicket(final_ticket);
 
                         VkImageMemoryBarrier2 acquire_on_q1 {};
                         acquire_on_q1.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -470,8 +470,8 @@ namespace TransferPipe {
                         vkCmdPipelineBarrier2(cmd_b_q1, &dep_acquire_1);
 
                         LeanVk::EndCommand(cmd_b_q1);
-                        AddCommandToPile(q1_pile, cmd_b_q1);
-                        EndSubmission(q1_pile);
+                        q1_pile.AddCommand(cmd_b_q1);
+                        q1_pile.EndSubmission();
                     }
                     break;
                 default:
@@ -494,9 +494,9 @@ namespace TransferPipe {
         */
 
         for (auto* queue : VkVault::UniqueQueues) {
-            SubmitPile(*queue, SpecialSubmissionPiles[queue], VK_NULL_HANDLE);
+            SpecialSubmissionPiles[queue].Submit(*queue, VK_NULL_HANDLE);
         }
-        SubmitPile(VkVault::Transfer, TransferSubmissionPile, VK_NULL_HANDLE);
+        TransferSubmissionPile.Submit(VkVault::Transfer, VK_NULL_HANDLE);
 
         WaitOn(TopTicket); // To safely wipe all command buffers, lazy sollution
 

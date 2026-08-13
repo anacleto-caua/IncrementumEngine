@@ -108,7 +108,7 @@ namespace Renderer {
         cmd_buffer_alloc_info.commandPool = VK_NULL_HANDLE;
         cmd_buffer_alloc_info.commandBufferCount = 1;
 
-        ResetPile(SubmissionPile);
+        SubmissionPile.Reset();
 
         FrameSemaphore = CreateTimelineSemaphore();
         for (FrameData &frame : Frames) {
@@ -334,22 +334,22 @@ namespace Renderer {
         LeanVk::EndCommand(FrameContext.DrawCommand);
 
         // Submission structure
-        BeginSubmission(SubmissionPile);
+        SubmissionPile.BeginSubmission();
 
-        AddCommandToPile(SubmissionPile, FrameContext.DrawCommand);
+        SubmissionPile.AddCommand(FrameContext.DrawCommand);
 
-        WaitBinarySemaphore(SubmissionPile, target_frame.ImageAvailable, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-        SignalBinarySemaphore(SubmissionPile, Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished);
+        SubmissionPile.WaitBinarySemaphore(target_frame.ImageAvailable, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+        SubmissionPile.SignalBinarySemaphore(Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished);
 
         // Hm, seems to be a bad data accesing pattern
         TimelineSemaphoreValue* frame_semaphore_value = GetTimelineSemaphoreValue(FrameSemaphore);
         u64 signal_value = ++frame_semaphore_value->LastPromissedValue;
-        SignalTimeline(SubmissionPile, FrameSemaphore, signal_value);
+        SubmissionPile.SignalTimeline(FrameSemaphore, signal_value);
 
-        EndSubmission(SubmissionPile);
+        SubmissionPile.EndSubmission();
 
         // Submit
-        SubmitPile(VkVault::Graphics, SubmissionPile);
+        SubmissionPile.Submit(VkVault::Graphics);
 
         Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished.Semaphore;
         vkQueuePresentKHR(VkVault::Present.Queue, &Swapchain::PresentInfo);
