@@ -516,8 +516,7 @@ namespace TransferPipe {
         }
     }
 
-    Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src, TransferType Type) {
-        assert(Type == TransferType::Normal && "transfer type yet unsupported");
+    Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src) {
         assert(size < BUFFER_UPDATE_SIZE_LIMIT && "buffer update queued is bigger than self imposed limit");
 
         // TODO:
@@ -547,9 +546,7 @@ namespace TransferPipe {
         return ticket;
     }
 
-    Ticket QueueBufferUpload(Buffer::Id dst, u64 write_offset, const void* src, u64 size, TransferType type) {
-        assert(type == TransferType::Normal && "transfer type yet unsupported");
-
+    Ticket QueueBufferUpload(Buffer::Id dst, u64 write_offset, const void* src, u64 size) {
         auto ticket = MakeTicket();
         u64 read_offset = StagingBuffer.Write(src, size);
         PackageQueues[CurrentUploadLayer].push(
@@ -570,9 +567,7 @@ namespace TransferPipe {
         return ticket;
     }
 
-    Ticket QueueImageSliceUpload(Image::Id dst, u32 target_layer, const void* src, u64 size, TransferType type) {
-        assert(type == TransferType::Normal && "transfer type yet unsupported");
-
+    Ticket QueueImageSliceUpload(Image::Id dst, u32 target_layer, const void* src, u64 size) {
         u64 read_offset = StagingBuffer.Write(src, size);
 
         Ticket image_released_ticket = MakeTicket();
