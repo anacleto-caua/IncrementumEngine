@@ -17,19 +17,20 @@
 #include "Renderer/Vk/SubmissionPile.hpp"
 #include "Renderer/Vk/BinarySemaphore.hpp"
 #include "Renderer/Vk/TimelineSemaphore.hpp"
+#include "Renderer/Vk/CommandBufferBlock.hpp"
 
 namespace Renderer {
     SubmissionPile SubmissionPile;
 
     // Per frame data used to track the frame submission structure
     struct FrameData {
-        VkCommandPool CmdPool = VK_NULL_HANDLE;
-        VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
+        CommandBufferBlock FrameBlock;
         BinarySemaphore ImageAvailable  = {};
         u64 LastSignaledValue = 0;
     };
 
     TimelineSemaphore FrameSemaphore;
+    TimelineSemaphore TransfersSemaphore; // Probably uneeded, but I'll keep it for clarity
     std::array<FrameData, Renderer::MAX_FRAMES_IN_FLIGHT> Frames;
 
     // Camera UBO Descriptor
@@ -111,12 +112,12 @@ namespace Renderer {
         SubmissionPile.Reset();
 
         FrameSemaphore = CreateTimelineSemaphore();
+        TransfersSemaphore = CreateTimelineSemaphore();
+
         for (FrameData &frame : Frames) {
             frame.ImageAvailable = CreateBinarySemaphore();
 
-            vkCreateCommandPool(VkVault::Device, &render_cmd_poll_create_info, nullptr, &frame.CmdPool);
-            cmd_buffer_alloc_info.commandPool = frame.CmdPool;
-            vkAllocateCommandBuffers(VkVault::Device, &cmd_buffer_alloc_info, &frame.CmdBuffer);
+            Create(frame.FrameBlock, &VkVault::Graphics);
         }
 
         // Fill general rendering information
@@ -172,7 +173,7 @@ namespace Renderer {
 
         DestroyTimelineSemaphore(FrameSemaphore);
         for (FrameData &frame : Frames) {
-            if (frame.CmdPool) { vkDestroyCommandPool(VkVault::Device, frame.CmdPool, nullptr); }
+            Destroy(frame.FrameBlock);
             DestroyBinarySemaphore(frame.ImageAvailable);
         }
 
@@ -190,7 +191,8 @@ namespace Renderer {
     void Frame() {
         // Update context
         FrameData& target_frame = Frames[FrameContext.FrameInFlightIndex];
-        FrameContext.DrawCommand = target_frame.CmdBuffer;
+        Reset(target_frame.FrameBlock);
+        FrameContext.DrawCommand = GetNext(target_frame.FrameBlock);
 
         WaitOnTimelineSemaphore(FrameSemaphore, target_frame.LastSignaledValue);
 
@@ -346,6 +348,93 @@ namespace Renderer {
         u64 signal_value = ++frame_semaphore_value->LastPromissedValue;
         SubmissionPile.SignalTimeline(FrameSemaphore, signal_value);
 
+        SubmissionPile.EndSubmission();
+
+        // Pendant image transfer from Transfer Pipe
+        // TODO: I still have no idea on how to properly clean thoose commands
+
+        // Single command for all releases
+        VkCommandBuffer general_release_command = GetNext(target_frame.FrameBlock);
+        LeanVk::BeginCommand(general_release_command);
+        Ticket released_ticket = CreateTicket(TransfersSemaphore);
+
+        while (
+                // Require 2 slots empty for the current transfer + the wholesome general release command
+                (SubmissionPile.CmdCount < (SubmissionPile.MaxCommandBuffers - 2)) &&
+                !(SubmissionPile.IsEmpty()) &&
+                TransferPipe::HasDataToUnroll(VkVault::Graphics)
+             )
+        {
+            VkCommandBuffer acquire_command = GetNext(target_frame.FrameBlock);
+            ImageOwnershipTransfer transfer = TransferPipe::UnrollImageOwnershipTransfer(VkVault::Graphics);
+            Image::Value* image_value = Image::Get(transfer.Image);
+
+            VkImageSubresourceRange subresource_range {};
+            subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            subresource_range.baseMipLevel = 0;
+            subresource_range.levelCount = 1;
+            subresource_range.baseArrayLayer = transfer.TargetLayer;
+            subresource_range.layerCount = 1;
+
+            // release
+            VkImageMemoryBarrier2 release_to_q2 {};
+            release_to_q2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            release_to_q2.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; // Whatever Q1 was doing
+            release_to_q2.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+            release_to_q2.dstStageMask = VK_PIPELINE_STAGE_2_NONE; // Required for release
+            release_to_q2.dstAccessMask = 0;                       // Required for release
+            release_to_q2.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            release_to_q2.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            release_to_q2.srcQueueFamilyIndex = VkVault::Graphics.Index; // be carefull if you try to abstract this
+            release_to_q2.dstQueueFamilyIndex = VkVault::Transfer.Index;
+            release_to_q2.image = image_value->Image;
+            release_to_q2.subresourceRange = subresource_range;
+
+            VkDependencyInfo dep_release_1 {};
+            dep_release_1.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dep_release_1.imageMemoryBarrierCount = 1;
+            dep_release_1.pImageMemoryBarriers = &release_to_q2;
+
+            vkCmdPipelineBarrier2(general_release_command, &dep_release_1);
+
+            // acquire
+            LeanVk::BeginCommand(acquire_command);
+            VkImageMemoryBarrier2 acquire_on_q1 {};
+            acquire_on_q1.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            acquire_on_q1.srcStageMask = VK_PIPELINE_STAGE_2_NONE; // Required for acquire
+            acquire_on_q1.srcAccessMask = 0;                       // Required for acquire
+            acquire_on_q1.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT; // Where Queue1 uses Layout X
+            acquire_on_q1.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+            acquire_on_q1.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            acquire_on_q1.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            acquire_on_q1.srcQueueFamilyIndex = VkVault::Transfer.Index;
+            acquire_on_q1.dstQueueFamilyIndex = VkVault::Graphics.Index;
+            acquire_on_q1.image = image_value->Image;
+            acquire_on_q1.subresourceRange = subresource_range;
+
+            VkDependencyInfo dep_acquire_1 {};
+            dep_acquire_1.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dep_acquire_1.imageMemoryBarrierCount = 1;
+            dep_acquire_1.pImageMemoryBarriers = &acquire_on_q1;
+            vkCmdPipelineBarrier2(acquire_command, &dep_acquire_1);
+
+            LeanVk::EndCommand(acquire_command);
+
+            SubmissionPile.BeginSubmission();
+
+            SubmissionPile.WaitForTicket(released_ticket);
+            SubmissionPile.WaitForTicket(transfer.Written);
+            SubmissionPile.SignalTicket(transfer.Acquired);
+
+            SubmissionPile.AddCommand(acquire_command);
+
+            SubmissionPile.EndSubmission();
+        }
+
+        LeanVk::EndCommand(general_release_command);
+        SubmissionPile.BeginSubmission();
+        SubmissionPile.SignalTicket(released_ticket);
+        SubmissionPile.AddCommand(general_release_command);
         SubmissionPile.EndSubmission();
 
         // Submit
