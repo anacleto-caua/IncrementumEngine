@@ -20,6 +20,14 @@ namespace TransferPipe {
     // Semaphore backing the tickets used internally to order releases before acquires
     inline TimelineSemaphore LazySemaphore;
 
+    // Command buffers for release/acquire barriers - one per unique queue. Deliberately NOT
+    // tied to any frame-in-flight reset cycle (see AcquirePending): a frame's own command block
+    // gets reset as soon as its frame-in-flight slot comes back around, but an acquire command
+    // recorded this frame can still be legitimately pending well past that (it waits on the
+    // Transfer queue, which runs on its own schedule) - resetting a pool out from under a
+    // pending buffer is invalid Vulkan usage, not just a style problem.
+    inline QueueContainer<CommandBufferBlock> SpecialCommandBufferBlocks;
+
     IncResult Create();
     void Destroy();
     /**
@@ -27,18 +35,45 @@ namespace TransferPipe {
      */
     void LazySubmit();
 
+    /**
+     * Releases and writes everything currently queued, without blocking and without resetting
+     * any command buffers. Use this to kick off a new streaming transfer from outside the
+     * render loop (e.g. terrain chunk streaming) - AcquirePending, already called every frame
+     * by Renderer::Frame(), picks up the result once the GPU is actually done.
+     */
+    void SubmitReleaseAndWrite();
+
+    /**
+     * Opportunistically resets TransferCommandBufferBlock/SpecialCommandBufferBlocks once their
+     * outstanding work has actually finished on the GPU - non-blocking, cheap to call every
+     * frame. This is what keeps those pools from growing without bound during streaming.
+     */
+    void TryReclaimCommandBuffers();
+
     bool HasDataToAcquire(QueueRole queue);
     ImageOwnershipTransfer PopAwaitingAcquire(QueueRole queue);
+    void MarkSpecialBlockUsed(QueueRole role, Ticket ticket);
+
+    /**
+     * If anything has ever been re-acquired for "role", fills out_ticket with the most recent
+     * such ticket and returns true. A caller about to sample images owned by "role" (e.g. a
+     * draw command) should wait on this ticket first - AcquirePending's barrier lives in its own
+     * submission entry with no implicit ordering relative to anything else otherwise.
+     */
+    bool GetLastAcquireTicket(QueueRole role, Ticket& out_ticket);
 
     /**
      * Re-acquires ownership of image transfers for "queue" that the Transfer queue has already
-     * written and released back, writing acquire barriers into "pile" via "cmd_block". Keeps
-     * writing while "pile" still has room - it's the caller's job to submit "pile" afterwards,
-     * so this can be folded into an already-existing submission (e.g. a frame's own draw
-     * submit) instead of paying for a dedicated vkQueueSubmit2.
+     * written and released back, writing acquire barriers into "pile" (command buffers come
+     * from TransferPipe's own SpecialCommandBufferBlocks, not the caller's - see the comment on
+     * that member). Keeps writing while "pile" still has room - it's the caller's job to submit
+     * "pile" afterwards, so this can be folded into an already-existing submission (e.g. a
+     * frame's own draw submit) instead of paying for a dedicated vkQueueSubmit2.
      */
     template <typename PileT>
-    void AcquirePending(QueueRole queue, PileT& pile, CommandBufferBlock& cmd_block) {
+    void AcquirePending(QueueRole queue, PileT& pile) {
+        CommandBufferBlock& cmd_block = SpecialCommandBufferBlocks[queue];
+
         auto has_room = [](const PileT& p) {
             return
                 p.CmdCount    + 1 <= p.MaxCommandBuffers &&
@@ -89,6 +124,8 @@ namespace TransferPipe {
             pile.AddCommand(acquire_command);
 
             pile.EndSubmission();
+
+            MarkSpecialBlockUsed(queue, transfer.Acquired);
         }
     }
 

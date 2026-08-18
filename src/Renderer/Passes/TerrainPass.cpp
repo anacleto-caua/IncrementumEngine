@@ -11,10 +11,10 @@
 #include "Renderer/Vk/PipelineDefaults.hpp"
 #include "Renderer/Resources/TransferPipe.hpp"
 #include "Renderer/Resources/ResourceManager.hpp"
-#include "Engine/TerrainManager/TerrainManager.hpp"
+#include "Game/TerrainManager/TerrainManager.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
 #include "Renderer/Vk/ShaderSpecializationBuilder.hpp"
-#include "Engine/TerrainManager/TerrainDefinitions.hpp"
+#include "Game/TerrainManager/TerrainDefinitions.hpp"
 
 namespace TerrainPass {
     namespace Descriptor {
@@ -29,7 +29,7 @@ namespace TerrainPass {
     }
 
     namespace Heightmap {
-        Image::Id Image;
+        // Image::Id Image; is declared in TerrainPass.hpp - TerrainManager needs it to queue chunk uploads
         ImageView::Id ImageView;
         VkSampler Sampler;
     }
@@ -274,27 +274,6 @@ namespace TerrainPass {
         }
 
         PlaneMesh::Upload();
-
-        for (auto& buffer : ChunkDrawListBuffers) {
-            // TODO: Move this to the frame structure
-                TransferPipe::QueueBufferUpload(
-                    buffer,
-                    0,
-                    TerrainManager::ChunkDrawList.data(),
-                    TerrainManager::ChunkDrawList.size() * sizeof(TerrainConfig::Memory::ChunkInstanceData)
-                );
-        }
-
-        for (u32 i = 0; i < TerrainManager::HeightmapData.size(); i++) {
-                TransferPipe::QueueImageSliceUpload(
-                    Heightmap::Image,
-                    i,
-                    &TerrainManager::HeightmapData[i],
-                    sizeof(TerrainManager::Heightmap)
-                );
-        }
-
-        TransferPipe::LazySubmit();
 
         return IncResult::SUCCESS;
     }

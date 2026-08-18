@@ -338,12 +338,28 @@ namespace Renderer {
 
         LeanVk::EndCommand(FrameContext.DrawCommand);
 
+        // Reclaim any command buffer pools whose prior work has actually finished on the GPU
+        TransferPipe::TryReclaimCommandBuffers();
+
+        // Fold pending image ownership acquires into this frame's own submission instead of paying for a second vkQueueSubmit2 -
+        // done BEFORE the draw's own submission below so its ticket is known in time to wait on it there.
+        TransferPipe::AcquirePending(QueueRole::Graphics, SubmissionPile);
+
         // Submission structure
         SubmissionPile.BeginSubmission();
 
         SubmissionPile.AddCommand(FrameContext.DrawCommand);
 
         SubmissionPile.WaitBinarySemaphore(target_frame.ImageAvailable, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+
+        // AcquirePending's barrier is a separate submission entry with no implicit ordering
+        // relative to this one - without this wait, the draw could sample a heightmap layer
+        // that was just re-streamed before its re-acquire has actually executed.
+        Ticket last_acquire_ticket;
+        if (TransferPipe::GetLastAcquireTicket(QueueRole::Graphics, last_acquire_ticket)) {
+            SubmissionPile.WaitForTicket(last_acquire_ticket, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
+        }
+
         SubmissionPile.SignalBinarySemaphore(Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished);
 
         // Hm, seems to be a bad data accesing pattern
@@ -352,9 +368,6 @@ namespace Renderer {
         SubmissionPile.SignalTimeline(FrameSemaphore, signal_value);
 
         SubmissionPile.EndSubmission();
-
-        // Fold pending image ownership acquires into this frame's own submission instead of paying for a second vkQueueSubmit2
-        TransferPipe::AcquirePending(QueueRole::Graphics, SubmissionPile, target_frame.FrameBlock);
 
         // Submit
         SubmissionPile.Submit(QueueRole::Graphics);

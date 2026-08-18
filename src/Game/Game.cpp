@@ -7,6 +7,7 @@
 #include "Game/FlyByCamera.hpp"
 #include "Engine/Core/Input.hpp"
 #include "Engine/Core/Window.hpp"
+#include "Game/TerrainManager/TerrainManager.hpp"
 
 namespace Game {
     void OutFps(f32 delta_time);
@@ -31,6 +32,8 @@ namespace Game {
         INC_CHECK(Engine::Create(MainCamera), "couldn't create engine");
         Engine::RefreshConfig();
 
+        TerrainManager::Init();
+
         FlyByCamera::Bind(MainCamera);
 
         // Good taste stuff
@@ -44,6 +47,7 @@ namespace Game {
 
     void Run() {
         while (!Engine::ShouldClose()) {
+            TerrainManager::RefreshChunks(MainCamera.Position);
             FrameInfo frame = Engine::Frame();
 
             OutFps(frame.DeltaTime);

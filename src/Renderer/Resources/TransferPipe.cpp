@@ -96,7 +96,28 @@ CommandBufferBlock TransferCommandBufferBlock;
 
 // The resources below are one per queue, as of now it's just for ImageSliceUpdates
 QueueContainer<SpecialSubmissionPile> SpecialSubmissionPiles;
-QueueContainer<CommandBufferBlock> SpecialCommandBufferBlocks;
+// SpecialCommandBufferBlocks is declared inline in TransferPipe.hpp - AcquirePending needs it there
+
+/**
+ * Tracks the last ticket signaled by any work touching a given command buffer pool, so
+ * TryReclaimCommandBuffers() can poll IsFinished() and Reset() it once safe, without blocking.
+ * Relying on "last ticket done implies everything earlier on this pool is done" only holds
+ * because every submission touching a given pool goes to the *same* queue, and queues execute
+ * their submitted work in submission order - the same assumption this codebase already leans
+ * on elsewhere (e.g. LazySubmit's vkQueueWaitIdle-based cleanup).
+ */
+struct ReclaimTracker {
+    Ticket LastTicket;
+    bool Valid = false;
+};
+
+ReclaimTracker TransferBlockReclaim;                 // TransferCommandBufferBlock (Transfer queue)
+QueueContainer<ReclaimTracker> SpecialBlockReclaim;   // SpecialCommandBufferBlocks[role] (role's own queue)
+
+// The last ticket AcquirePending signaled for a role, tracked separately from SpecialBlockReclaim
+// above (which also gets touched by releases) - a caller that draws from images owned by "role"
+// needs to wait specifically on this before sampling them. See GetLastAcquireTicket().
+QueueContainer<ReclaimTracker> LastAcquireForRole;
 
 RingBuffer<STAGING_BUFFER_SIZE> StagingBuffer;
 
@@ -142,6 +163,9 @@ namespace TransferPipe {
         for (QueueRole role : VkVault::UniqueRoles) {
             Create(SpecialCommandBufferBlocks[role], role);
         }
+
+        SpecialBlockReclaim.Initialize();
+        LastAcquireForRole.Initialize();
 
         AwaitingRelease.Initialize();
         AwaitingAcquire.Initialize();
@@ -355,6 +379,7 @@ namespace TransferPipe {
             if (!could_write_package) {
                 break;
             }
+            TransferBlockReclaim = { package.TicketToSignal, true };
             PackageQueue.pop();
             StagingBuffer.Read(ring_buffer_read_size);
         }
@@ -405,6 +430,7 @@ namespace TransferPipe {
             vkCmdPipelineBarrier2(release_command, &dep_release);
 
             pile.SignalTicket(transfer.Released);
+            SpecialBlockReclaim[queue] = { transfer.Released, true };
         }
 
         LeanVk::EndCommand(release_command);
@@ -412,8 +438,12 @@ namespace TransferPipe {
         pile.EndSubmission();
     }
 
-    void LazySubmit() {
-        // Stage 1: release anything newly queued, unlocking LazyWrite's gate for it
+    // Stages 1+2 only: release anything newly queued, then let the Transfer queue acquire,
+    // write, and release it back. Non-blocking, no reset - safe to call off the render loop
+    // whenever new streaming data is queued. The caller doesn't need to do anything else;
+    // AcquirePending (already piggybacked onto Renderer::Frame()) picks up the result whenever
+    // the GPU actually gets to it.
+    void SubmitReleaseAndWrite() {
         for (QueueRole role : VkVault::UniqueRoles) {
             while (!AwaitingRelease[role].empty()) {
                 ReleasePending(role);
@@ -421,14 +451,17 @@ namespace TransferPipe {
             }
         }
 
-        // Stage 2: let the Transfer queue acquire, write, and release back everything now unlocked
         LazyWrite();
         TransferSubmissionPile.Submit(QueueRole::Transfer, VK_NULL_HANDLE);
+    }
+
+    void LazySubmit() {
+        SubmitReleaseAndWrite();
 
         // Stage 3: re-acquire everything the Transfer queue just handed back
         for (QueueRole role : VkVault::UniqueRoles) {
             while (HasDataToAcquire(role)) {
-                AcquirePending(role, SpecialSubmissionPiles[role], SpecialCommandBufferBlocks[role]);
+                AcquirePending(role, SpecialSubmissionPiles[role]);
                 SpecialSubmissionPiles[role].Submit(role);
             }
         }
@@ -440,8 +473,10 @@ namespace TransferPipe {
         }
 
         Reset(TransferCommandBufferBlock);
+        TransferBlockReclaim.Valid = false;
         for (QueueRole role : VkVault::UniqueRoles) {
             Reset(SpecialCommandBufferBlocks[role]);
+            SpecialBlockReclaim[role].Valid = false;
         }
 
         /**
@@ -451,6 +486,35 @@ namespace TransferPipe {
         if (!PackageQueue.empty()) {
             LazySubmit();
         }
+    }
+
+    // Non-blocking: resets a pool only once its last known submission has actually finished on
+    // the GPU. Safe to call every frame - most calls will find nothing to do.
+    void TryReclaimCommandBuffers() {
+        if (TransferBlockReclaim.Valid && IsFinished(TransferBlockReclaim.LastTicket)) {
+            Reset(TransferCommandBufferBlock);
+            TransferBlockReclaim.Valid = false;
+        }
+
+        for (QueueRole role : VkVault::UniqueRoles) {
+            ReclaimTracker& tracker = SpecialBlockReclaim[role];
+            if (tracker.Valid && IsFinished(tracker.LastTicket)) {
+                Reset(SpecialCommandBufferBlocks[role]);
+                tracker.Valid = false;
+            }
+        }
+    }
+
+    void MarkSpecialBlockUsed(QueueRole role, Ticket ticket) {
+        SpecialBlockReclaim[role] = { ticket, true };
+        LastAcquireForRole[role] = { ticket, true };
+    }
+
+    bool GetLastAcquireTicket(QueueRole role, Ticket& out_ticket) {
+        ReclaimTracker& tracker = LastAcquireForRole[role];
+        if (!tracker.Valid) { return false; }
+        out_ticket = tracker.LastTicket;
+        return true;
     }
 
     bool HasDataToAcquire(QueueRole queue) {

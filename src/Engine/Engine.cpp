@@ -7,7 +7,6 @@
 #include "Engine/Core/Window.hpp"
 #include "Engine/Core/Platform.hpp"
 #include "Engine/Core/FrameTimer.hpp"
-#include "Engine/TerrainManager/TerrainManager.hpp"
 #include "Engine/Core/TaskScheduler/TaskScheduler.hpp"
 
 namespace Engine {
@@ -31,9 +30,6 @@ namespace Engine {
 
         TaskScheduler::Create();
 
-        // Other systems
-        TerrainManager::Init();
-
         // Renderer
         INC_CHECK(
             Renderer::Create(),
@@ -54,10 +50,6 @@ namespace Engine {
     FrameInfo Frame() {
         FrameInfo frame;
         frame.DeltaTime = Timer.Tick();
-
-        // Systems
-        TerrainManager::RefreshChunks(Renderer::CurrentCamera->Position);
-        // Systems end
 
         // Actual frame starts
         Platform::Update();

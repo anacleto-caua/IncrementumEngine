@@ -49,6 +49,10 @@ namespace TerrainConfig {
             }
             return 1 + 4 * radius + 4 * quadrant_points;
         }();
+
+        // How many chunks RefreshChunks is allowed to replace in a single call, so a fast
+        // camera move doesn't try to regenerate+upload dozens of chunks in one frame
+        constexpr u32 MaxChunkReplacementsPerFrame = 1;
     };
 
     // Defines the sizes for the Vulkan Allocations used by the terrain system

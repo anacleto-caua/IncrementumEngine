@@ -4,6 +4,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include "Renderer/Resources/Image.hpp"
+
 struct TerrainPassConfig {
     u32 Resolution = 64;
     f32 GridScale =  50.0f;
@@ -12,6 +14,10 @@ struct TerrainPassConfig {
 
 namespace TerrainPass {
     inline TerrainPassConfig Config = {};
+
+    namespace Heightmap {
+        inline Image::Id Image;
+    }
 
     IncResult Create();
     void Destroy();
