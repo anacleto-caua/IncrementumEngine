@@ -45,7 +45,7 @@ void main() {
     float localX = u * GRID_SCALE;
     float localZ = v * GRID_SCALE;
 
-    float height = texture(heightmapSampler, vec3(u, v, float(gl_InstanceIndex))).r;
+    float height = texture(heightmapSampler, vec3(u, v, float(currentChunk.TextureLayer))).r;
     vec3 finalWorldPos = vec3(localZ + chunkOffsetX, height * HEIGHT_SCALE, localX + chunkOffsetZ);
 
     gl_Position = sceneGlobalsData.data.ViewProjection * vec4(finalWorldPos, 1.0);
