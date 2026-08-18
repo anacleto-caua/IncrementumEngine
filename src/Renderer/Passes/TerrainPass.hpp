@@ -6,9 +6,10 @@
 
 #include "Renderer/Resources/Image.hpp"
 
+// Resolution and grid scale mirror TerrainManager's VerticesPerEdge/ChunkScale (used only to
+// feed the terrain shaders' specialization constants) - HeightScale has no other home, since
+// nothing outside rendering needs to know how normalized heightmap values map to world Y.
 struct TerrainPassConfig {
-    u32 Resolution = 64;
-    f32 GridScale =  50.0f;
     f32 HeightScale = 210.0f;
 };
 
@@ -17,6 +18,7 @@ namespace TerrainPass {
 
     namespace Heightmap {
         inline Image::Id Image;
+        constexpr VkFormat Format = VK_FORMAT_R16_UNORM;
     }
 
     IncResult Create();

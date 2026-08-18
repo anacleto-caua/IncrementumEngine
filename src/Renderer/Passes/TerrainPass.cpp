@@ -14,7 +14,6 @@
 #include "Game/TerrainManager/TerrainManager.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
 #include "Renderer/Vk/ShaderSpecializationBuilder.hpp"
-#include "Game/TerrainManager/TerrainDefinitions.hpp"
 
 namespace TerrainPass {
     namespace Descriptor {
@@ -23,6 +22,11 @@ namespace TerrainPass {
 
     namespace PlaneMesh {
         Buffer::Id Indices;
+
+        // Only PlaneMesh (and the draw call in Render()) care about the index buffer's shape -
+        // nothing outside this file references these.
+        constexpr u32 IndexCount = (TerrainManager::VerticesPerEdge - 1) * (TerrainManager::VerticesPerEdge - 1) * 6;
+        constexpr u32 IndexBufferSize = IndexCount * sizeof(u32);
 
         void GenerateIndices(u32* IndicesBegin);
         void Upload();
@@ -48,10 +52,10 @@ namespace TerrainPass {
         // Image for terrain heightmap
         {
             Image::CreateInfo heightmap_image_create_desc;
-            heightmap_image_create_desc.Width = TerrainConfig::Mesh::VerticesPerEdge;
-            heightmap_image_create_desc.Height = TerrainConfig::Mesh::VerticesPerEdge;
-            heightmap_image_create_desc.ArrayLayers = TerrainConfig::Streaming::MaxActiveChunks;
-            heightmap_image_create_desc.Format = TerrainConfig::Memory::HeightmapFormat;
+            heightmap_image_create_desc.Width = TerrainManager::VerticesPerEdge;
+            heightmap_image_create_desc.Height = TerrainManager::VerticesPerEdge;
+            heightmap_image_create_desc.ArrayLayers = TerrainManager::MaxCachedChunks;
+            heightmap_image_create_desc.Format = Heightmap::Format;
             heightmap_image_create_desc.Usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
             heightmap_image_create_desc.OwnerQueue = QueueRole::Graphics;
 
@@ -86,7 +90,7 @@ namespace TerrainPass {
         // Buffer for chunk draw list
         {
             Buffer::CreateInfo chunk_instance_buffer_create_info = {
-                .Size = TerrainConfig::Streaming::MaxActiveChunks * sizeof(TerrainConfig::Memory::ChunkInstanceData),
+                .Size = TerrainManager::MaxDrawnChunks * sizeof(TerrainManager::ChunkInstanceData),
                 .Type = Buffer::Type::SSBO,
             };
 
@@ -217,8 +221,8 @@ namespace TerrainPass {
         VkPipelineShaderStageCreateInfo vert_shader;
         SpecializationBuilder frag_shader_spec_builder;
         frag_shader_spec_builder
-            .AddConstant(0, Config.Resolution)
-            .AddConstant(1, Config.GridScale)
+            .AddConstant(0, TerrainManager::VerticesPerEdge)
+            .AddConstant(1, static_cast<f32>(TerrainManager::ChunkScale))
             .AddConstant(2, Config.HeightScale);
 
         INC_CHECK(
@@ -236,7 +240,7 @@ namespace TerrainPass {
         VkPipelineShaderStageCreateInfo frag_shader;
         SpecializationBuilder vert_shader_spec_builder;
         vert_shader_spec_builder
-            .AddConstant(0, static_cast<f32>(Config.Resolution - 1));
+            .AddConstant(0, static_cast<f32>(TerrainManager::VerticesPerEdge - 1));
 
         INC_CHECK(
             CreateShaderStage(
@@ -299,7 +303,7 @@ namespace TerrainPass {
             Renderer::FrameContext.DrawCommand,
             buffer->Buffer,
             0,
-            sizeof(TerrainConfig::Memory::ChunkInstanceData) * TerrainManager::CurrentllyActiveChunks,
+            sizeof(TerrainManager::ChunkInstanceData) * TerrainManager::CurrentllyActiveChunks,
             &TerrainManager::ChunkDrawList
         );
     }
@@ -328,12 +332,12 @@ namespace TerrainPass {
             nullptr
         );
 
-        vkCmdDrawIndexed(cmd, TerrainConfig::Mesh::IndexCount, TerrainManager::CurrentllyActiveChunks, 0, 0, 0);
+        vkCmdDrawIndexed(cmd, PlaneMesh::IndexCount, TerrainManager::CurrentllyActiveChunks, 0, 0, 0);
     }
 
     namespace PlaneMesh {
         void GenerateIndices(u32* indices_begin) {
-            u32 terrain_res = TerrainConfig::Mesh::VerticesPerEdge;
+            u32 terrain_res = TerrainManager::VerticesPerEdge;
             for (u32 z = 0; z < terrain_res - 1; z++) {
                 for (u32 x = 0; x < terrain_res - 1; x++) {
                     // Calculate the index of the current vertex and neighbors
@@ -358,16 +362,16 @@ namespace TerrainPass {
         void Upload() {
             // Create the actual Plane Mesh index buffer
             Buffer::CreateInfo indices_buffer_create_info = {
-                .Size = TerrainConfig::Mesh::IndexBufferSize,
+                .Size = IndexBufferSize,
                 .Type = Buffer::Type::INDEX,
             };
             Indices = Buffer::Add(indices_buffer_create_info);
 
-            std::vector<u32> indices_buffer(TerrainConfig::Mesh::IndexCount);
+            std::vector<u32> indices_buffer(IndexCount);
 
             GenerateIndices(indices_buffer.data());
 
-            TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), TerrainConfig::Mesh::IndexBufferSize);
+            TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), IndexBufferSize);
             TransferPipe::LazySubmit();
         }
     }
@@ -377,19 +381,27 @@ namespace TerrainPass {
             using namespace TerrainManager;
 
             if (ImGui::CollapsingHeader("Terrain Draw Data", ImGuiTreeNodeFlags_DefaultOpen)) {
-                ImGui::Text("Active Chunks: %u / %u", CurrentllyActiveChunks, TerrainConfig::Streaming::MaxActiveChunks);
+                u32 cached_count = 0;
+                for (u32 i = 0; i < MaxCachedChunks; i++) {
+                    if (Cache[i].Valid) { cached_count++; }
+                }
+
+                ImGui::Text("Drawn:  %u / %u", CurrentllyActiveChunks, MaxDrawnChunks);
+                ImGui::Text("Cached: %u / %u", cached_count, MaxCachedChunks);
                 ImGui::Separator();
 
                 // Iterate only up to the currently active chunks to save UI performance
                 for (u32 i = 0; i < CurrentllyActiveChunks; ++i)
                 {
+                    const auto& draw_data = ChunkDrawList[i];
+                    u32 cache_index = draw_data.TextureLayer;
+
                     // Create a unique tree node for each chunk using its index as the ID
                     if (ImGui::TreeNode((void*)(intptr_t)i, "Chunk [%u]", i))
                     {
                         // Draw Data
                         if (ImGui::TreeNode("Instance Draw Data"))
                         {
-                            const auto& draw_data = ChunkDrawList[i];
                             ImGui::Text("World Pos:     (%d, %d)", draw_data.WorldPos.x, draw_data.WorldPos.y);
                             ImGui::Text("Texture Layer: %u", draw_data.TextureLayer);
                             ImGui::TextDisabled("Padding:       %u", draw_data.padding); // Disabled text color for padding
@@ -397,30 +409,31 @@ namespace TerrainPass {
                         }
 
                         // Heightmap Streaming Status
-                        if (ImGui::TreeNode("Heightmap Status")) {
+                        if (ImGui::TreeNode("Cache Slot")) {
 
-                            const auto& status = HeightmapStatus[i];
+                            const auto& slot = Cache[cache_index];
 
-                            ImGui::Text("Position: (%d, %d)", status.Position.x, status.Position.y);
+                            ImGui::Text("Position: (%d, %d)", slot.Position.x, slot.Position.y);
+                            ImGui::Text("Last Used Tick: %llu", (unsigned long long)slot.LastUsedTick);
 
-                            if (status.Ready) {
-                                ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "Ready: True");
+                            if (slot.Valid) {
+                                ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "Valid: True");
                             } else {
-                                ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "Ready: False");
+                                ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "Valid: False");
                             }
                             ImGui::TreePop();
                         }
 
                         // Heightmap Data Preview
                         if (ImGui::TreeNode("Heightmap Preview")) {
-                            const u32 edge = TerrainConfig::Mesh::VerticesPerEdge;
+                            const u32 edge = VerticesPerEdge;
                             ImGui::Text("Grid Size: %u x %u", edge, edge);
 
                             // Show a quick sample of the corners to verify data is loaded
-                            ImGui::BulletText("Top-Left [0][0]:     %u", HeightmapData[i][0][0]);
-                            ImGui::BulletText("Top-Right [0][N]:    %u", HeightmapData[i][0][edge - 1]);
-                            ImGui::BulletText("Bot-Left [N][0]:     %u", HeightmapData[i][edge - 1][0]);
-                            ImGui::BulletText("Bot-Right [N][N]:    %u", HeightmapData[i][edge - 1][edge - 1]);
+                            ImGui::BulletText("Top-Left [0][0]:     %u", HeightmapData[cache_index][0][0]);
+                            ImGui::BulletText("Top-Right [0][N]:    %u", HeightmapData[cache_index][0][edge - 1]);
+                            ImGui::BulletText("Bot-Left [N][0]:     %u", HeightmapData[cache_index][edge - 1][0]);
+                            ImGui::BulletText("Bot-Right [N][N]:    %u", HeightmapData[cache_index][edge - 1][edge - 1]);
 
                             ImGui::TreePop();
                         }
