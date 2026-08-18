@@ -143,7 +143,7 @@ QueueContainer<u64> PendingImageTransfersTimelineStatus;
 
 namespace TransferPipe {
     IncResult Create() {
-        StagingBuffer.Create();
+        INC_CHECK(StagingBuffer.Create(), "staging buffer creation failed");
 
         for (auto& semaphore : SignalSemaphores) {
             semaphore = CreateTimelineSemaphore();

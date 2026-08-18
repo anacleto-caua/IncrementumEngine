@@ -15,7 +15,7 @@ namespace Buffer {
         Type Type;
     };
 
-    Id Add(CreateInfo create_info);
+    IncResult Add(CreateInfo create_info, Id& out_id);
     void Del(Id id);
 
     Value* Get(Id id);
@@ -36,13 +36,13 @@ namespace Image {
         QueueRole OwnerQueue = QueueRole::Transfer;
     };
 
-    Id Add(CreateInfo create_info);
+    IncResult Add(CreateInfo create_info, Id& out_id);
     void Del(Id id);
     Value* Get(Id id);
 }
 
 namespace ImageView {
-    Id Add(VkImageViewCreateInfo create_info);
+    IncResult Add(VkImageViewCreateInfo create_info, Id& out_id);
     void Del(Id id);
     Value* Get(Id id);
 

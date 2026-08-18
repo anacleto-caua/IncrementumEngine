@@ -22,16 +22,18 @@ private:
     }
 
 public:
-    void Create() {
+    IncResult Create() {
         Buffer::CreateInfo CreateInfo = {
             .Size = SIZE,
             .Type = Buffer::Type::STAGING
         };
 
-        Buffer = Buffer::Add(CreateInfo);
+        INC_CHECK(Buffer::Add(CreateInfo, Buffer), "staging buffer creation failed");
         MappedHead = static_cast<u8*>(Buffer::Map(Buffer::Get(Buffer)->Allocation));
         Head = MappedHead;
         Tail = Head;
+
+        return IncResult::SUCCESS;
     }
 
     void Destroy() {

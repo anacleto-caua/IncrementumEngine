@@ -29,7 +29,7 @@ namespace TerrainPass {
         constexpr u32 IndexBufferSize = IndexCount * sizeof(u32);
 
         void GenerateIndices(u32* IndicesBegin);
-        void Upload();
+        IncResult Upload();
     }
 
     namespace Heightmap {
@@ -59,10 +59,10 @@ namespace TerrainPass {
             heightmap_image_create_desc.Usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
             heightmap_image_create_desc.OwnerQueue = QueueRole::Graphics;
 
-            Heightmap::Image = Image::Add(heightmap_image_create_desc);
+            INC_CHECK(Image::Add(heightmap_image_create_desc, Heightmap::Image), "heightmap image creation failed");
             Image::Value* heightmap_image_value = Image::Get(Heightmap::Image);
             auto heightmap_image_view_create_info = ImageView::FillCreateInfo(heightmap_image_value);
-            Heightmap::ImageView = ImageView::Add(heightmap_image_view_create_info);
+            INC_CHECK(ImageView::Add(heightmap_image_view_create_info, Heightmap::ImageView), "heightmap image view creation failed");
 
             VkSamplerCreateInfo heightmap_sampler_info {};
             heightmap_sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -95,7 +95,7 @@ namespace TerrainPass {
             };
 
             for (auto& draw_list_buffer : ChunkDrawListBuffers) {
-                draw_list_buffer = Buffer::Add(chunk_instance_buffer_create_info);
+                INC_CHECK(Buffer::Add(chunk_instance_buffer_create_info, draw_list_buffer), "chunk draw list buffer creation failed");
             }
         }
 
@@ -277,7 +277,7 @@ namespace TerrainPass {
             if (shader_stage.module) { vkDestroyShaderModule(VkVault::Device, shader_stage.module, nullptr); }
         }
 
-        PlaneMesh::Upload();
+        INC_CHECK(PlaneMesh::Upload(), "plane mesh index buffer upload failed");
 
         return IncResult::SUCCESS;
     }
@@ -359,13 +359,13 @@ namespace TerrainPass {
             }
         }
 
-        void Upload() {
+        IncResult Upload() {
             // Create the actual Plane Mesh index buffer
             Buffer::CreateInfo indices_buffer_create_info = {
                 .Size = IndexBufferSize,
                 .Type = Buffer::Type::INDEX,
             };
-            Indices = Buffer::Add(indices_buffer_create_info);
+            INC_CHECK(Buffer::Add(indices_buffer_create_info, Indices), "plane mesh index buffer creation failed");
 
             std::vector<u32> indices_buffer(IndexCount);
 
@@ -373,6 +373,8 @@ namespace TerrainPass {
 
             TransferPipe::QueueBufferUpload(Indices, 0, indices_buffer.data(), IndexBufferSize);
             TransferPipe::LazySubmit();
+
+            return IncResult::SUCCESS;
         }
     }
 

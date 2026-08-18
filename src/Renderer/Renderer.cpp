@@ -46,7 +46,7 @@ namespace Renderer {
         // On Renderer_Internal.hpp
         // std::array<VkDescriptorSet, Renderer::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
 
-        void Create();
+        IncResult Create();
         void Destroy();
     }
 
@@ -82,7 +82,7 @@ namespace Renderer {
         Image::Id Image;
         ImageView::Id ImageView;
 
-        void Create(u32 width, u32 height);
+        IncResult Create(u32 width, u32 height);
         void Destroy();
 
         void Resize(u32 width, u32 height);
@@ -94,7 +94,7 @@ namespace Renderer {
         INC_CHECK(TransferPipe::Create(), "transfer pipe creation failed");
         INC_CHECK(DescriptorManager::Create(), "descriptor manager creation failed");
 
-        Swapchain::Create();
+        INC_CHECK(Swapchain::Create(), "swapchain creation failed");
 
         // Create per frame info
         VkCommandPoolCreateInfo render_cmd_poll_create_info {};
@@ -138,7 +138,7 @@ namespace Renderer {
         ColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         ColorAttachment.clearValue.color = { .float32 = { 0.1f, 0.1f, 0.1f, 1.0f } };
 
-        DepthBuffer::Create(Swapchain::Extent.width, Swapchain::Extent.height);
+        INC_CHECK(DepthBuffer::Create(Swapchain::Extent.width, Swapchain::Extent.height), "depth buffer creation failed");
         DepthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         DepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         DepthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -157,7 +157,7 @@ namespace Renderer {
         RenderingInfo.pDepthAttachment = &DepthAttachment;
 
         // Other essential rendering things
-        GlobalDescriptors::Create();
+        INC_CHECK(GlobalDescriptors::Create(), "global descriptors creation failed");
 
         // Render passes
         INC_CHECK(ImGuiPass::Create(), "failed to create imgui context");
@@ -398,13 +398,13 @@ namespace Renderer {
     }
 
     namespace GlobalDescriptors {
-        void Create() {
+        IncResult Create() {
             Buffer::CreateInfo create_info = {
                 .Size = sizeof(SceneGlobals),
                 .Type = Buffer::Type::UBO
             };
             for (Buffer::Id& id : SceneGlobalsBuffer) {
-                id = Buffer::Add(create_info);
+                INC_CHECK(Buffer::Add(create_info, id), "scene globals buffer creation failed");
             }
 
             DescriptorManager::AllocateSets(
@@ -445,10 +445,12 @@ namespace Renderer {
                 .pPushConstantRanges = nullptr
             };
 
-            VK_OUT(
+            VK_CHECK(
                 vkCreatePipelineLayout(VkVault::Device, &base_layout_info, nullptr, &BaseLayout),
                 "global base pipeline layout creation failed"
             );
+
+            return IncResult::SUCCESS;
         }
 
         void Destroy() {
@@ -618,14 +620,14 @@ namespace Renderer {
             .layerCount = 1
         };
 
-        void Create(u32 width, u32 height) {
+        IncResult Create(u32 width, u32 height) {
             Image::CreateInfo image_create_info {};
             image_create_info.Width = width;
             image_create_info.Height = height;
             image_create_info.Format = Renderer::DepthBuffer::Format;
             image_create_info.Usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
-            Image = Image::Add(image_create_info);
+            INC_CHECK(Image::Add(image_create_info, Image), "depth buffer image creation failed");
             Image::Value* depth_image_value = Image::Get(DepthBuffer::Image);
             depth_image_value->Format = Renderer::DepthBuffer::Format;
 
@@ -659,8 +661,10 @@ namespace Renderer {
             VkImageViewCreateInfo image_view_create_info = ImageView::FillCreateInfo(depth_image_value);
             image_view_create_info.subresourceRange = DepthBuffer::Range;
 
-            ImageView = ImageView::Add(image_view_create_info);
+            INC_CHECK(ImageView::Add(image_view_create_info, ImageView), "depth buffer image view creation failed");
             DepthAttachment.imageView = ImageView::Get(DepthBuffer::ImageView)->ImageView;
+
+            return IncResult::SUCCESS;
         }
 
         void Destroy() {
@@ -671,7 +675,9 @@ namespace Renderer {
         void Resize(u32 width, u32 height) {
             Image::Del(Image);
             ImageView::Del(ImageView);
-            Create(width, height);
+            if (Create(width, height) != IncResult::SUCCESS) {
+                analog::critical("depth buffer recreation failed on resize");
+            }
         }
     }
 }

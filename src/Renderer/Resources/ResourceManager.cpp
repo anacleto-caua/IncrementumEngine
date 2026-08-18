@@ -31,7 +31,7 @@ namespace ResourceManager {
 namespace Image {
     ResourcePool<Value> ImagePool;
 
-    Id Add(CreateInfo create_info) {
+    IncResult Add(CreateInfo create_info, Id& out_id) {
         Value image {};
 
         VkImageCreateInfo image_create_info {};
@@ -52,7 +52,7 @@ namespace Image {
         VmaAllocationCreateInfo alloc_create_info {};
         alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO;
 
-        VK_OUT(
+        VK_CHECK(
             vmaCreateImage(
                 VkVault::VmaAllocator,
                 &image_create_info, &alloc_create_info,
@@ -72,7 +72,8 @@ namespace Image {
         image.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
         image.OwnerQueue = create_info.OwnerQueue;
 
-        return ImagePool.Add(image);
+        out_id = ImagePool.Add(image);
+        return IncResult::SUCCESS;
     }
 
     void Del(Id id) {
@@ -101,21 +102,21 @@ namespace Image {
 namespace ImageView {
     ResourcePool<Value> ViewPool;
 
-    Id Add(VkImageViewCreateInfo create_info) {
+    IncResult Add(VkImageViewCreateInfo create_info, Id& out_id) {
         Value image_view {};
 
-        if (
+        VK_CHECK(
             vkCreateImageView(
                 VkVault::Device,
                 &create_info,
                 nullptr,
                 &image_view.ImageView
-            ) != VK_SUCCESS
-        ) {
-            analog::error("image view creation failed.");
-        }
+            ),
+            "image view creation failed."
+        );
 
-        return ViewPool.Add(image_view);
+        out_id = ViewPool.Add(image_view);
+        return IncResult::SUCCESS;
     }
 
     void Del(Id id) {
@@ -173,7 +174,7 @@ namespace Buffer {
         return &BufferPool.Get(id);
     }
 
-    Id Add(CreateInfo create_info) {
+    IncResult Add(CreateInfo create_info, Id& out_id) {
         Value buffer {};
 
         VkBufferUsageFlags vk_usage = 0;
@@ -214,7 +215,7 @@ namespace Buffer {
                 break;
             default:
                 analog::error("unexpected type on buffer creation.");
-                break;
+                return IncResult::FAIL;
         }
 
         VkBufferCreateInfo buffer_create_info {};
@@ -227,21 +228,21 @@ namespace Buffer {
         alloc_create_info.requiredFlags = memory_flags;
         alloc_create_info.flags = vma_flags;
 
-        if (
+        VK_CHECK(
             vmaCreateBuffer(
                 VkVault::VmaAllocator,
                 &buffer_create_info, &alloc_create_info,
                 &buffer.Buffer, &buffer.Allocation,
                 nullptr
-            ) != VK_SUCCESS
-        ) {
-            analog::error("buffer creation failed.");
-        }
+            ),
+            "buffer creation failed."
+        );
 
         buffer.Size = create_info.Size;
         buffer.Type = create_info.Type;
 
-        return BufferPool.Add(buffer);
+        out_id = BufferPool.Add(buffer);
+        return IncResult::SUCCESS;
     };
 
     void Del(Id id) {
