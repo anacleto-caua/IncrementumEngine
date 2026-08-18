@@ -27,13 +27,7 @@ namespace TaskScheduler {
 
     struct WorkerContext {
         u32 ThreadIndex;
-        u8* ScratchMemory;
-        u64 MemoryHead;
         TaskQueue* Queue;
-
-        void ResetMemory() {
-            MemoryHead = 0;
-        }
     };
 
     typedef void (*TaskEntryPoint)(void* payload, WorkerContext& context);

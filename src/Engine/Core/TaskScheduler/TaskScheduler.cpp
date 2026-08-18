@@ -7,8 +7,6 @@
 #include <cassert>
 #include <condition_variable>
 
-static constexpr u64 THREAD_SCRATCH_MEMORY_SIZE = 1024 * 1024;
-
 namespace TaskScheduler {
     std::atomic<bool> StopSystem = false;
 
@@ -50,7 +48,6 @@ namespace TaskScheduler {
             // Execute the task
             if (has_task && current_task.EntryPoint) {
                 current_task.EntryPoint(current_task.Payload, context);
-                context.ResetMemory(); // Safe as long as data doesn't outlive the task
             } else {
                 // Lock if there is absolutely no work
                 std::unique_lock<std::mutex> lock(WakeMutex);
@@ -73,8 +70,6 @@ namespace TaskScheduler {
         for (u32 i = 0; i < NumThreads; i++) {
             WorkerContexts[i] = {
                 .ThreadIndex = i,
-                .ScratchMemory = new u8[THREAD_SCRATCH_MEMORY_SIZE],
-                .MemoryHead = 0,
                 .Queue = &WorkersTaskQueues[i],
             };
 
@@ -94,11 +89,6 @@ namespace TaskScheduler {
                 worker.join();
             }
         }
-
-        // Free the scratch memory
-        for (auto& ctx : WorkerContexts) {
-            delete[] ctx.ScratchMemory;
-        }
     }
 
     void SubmitTask(TaskEntryPoint entry_point, void* payload) {
@@ -116,7 +106,7 @@ namespace TaskScheduler {
     // TODO: Rethink this, I don't like the busy wait neither the dummy context
     void Wait(std::atomic<u32>& dependency_counter) {
         // Create a dummy context for the main thread if tasks require it
-        WorkerContext dummy_context{ .ThreadIndex = 999, .ScratchMemory = nullptr, .MemoryHead = 0, .Queue = nullptr };
+        WorkerContext dummy_context{ .ThreadIndex = 999, .Queue = nullptr };
 
         while (dependency_counter.load(std::memory_order_acquire) > 0) {
             Task current_task;
