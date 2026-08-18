@@ -52,14 +52,15 @@ namespace Image {
         VmaAllocationCreateInfo alloc_create_info {};
         alloc_create_info.usage = VMA_MEMORY_USAGE_AUTO;
 
-        VK_OUT (
+        VK_OUT(
             vmaCreateImage(
                 VkVault::VmaAllocator,
                 &image_create_info, &alloc_create_info,
                 &image.Image, &image.Allocation,
                 nullptr
-            ) != VK_SUCCESS
-        , "image creation failed.");
+            ),
+            "image creation failed."
+        );
 
         image.Width = create_info.Width;
         image.Height = create_info.Height;
@@ -111,7 +112,7 @@ namespace ImageView {
                 &image_view.ImageView
             ) != VK_SUCCESS
         ) {
-            analog::error("buffer creation failed.");
+            analog::error("image view creation failed.");
         }
 
         return ViewPool.Add(image_view);

@@ -219,8 +219,8 @@ namespace TerrainPass {
 
         // Vertex shader
         VkPipelineShaderStageCreateInfo vert_shader;
-        SpecializationBuilder frag_shader_spec_builder;
-        frag_shader_spec_builder
+        SpecializationBuilder vert_shader_spec_builder;
+        vert_shader_spec_builder
             .AddConstant(0, TerrainManager::VerticesPerEdge)
             .AddConstant(1, static_cast<f32>(TerrainManager::ChunkScale))
             .AddConstant(2, Config.HeightScale);
@@ -234,12 +234,12 @@ namespace TerrainPass {
             ),
             "vertex shader creation failed"
         );
-        vert_shader.pSpecializationInfo = frag_shader_spec_builder.Build();
+        vert_shader.pSpecializationInfo = vert_shader_spec_builder.Build();
 
         // Fragment shader
         VkPipelineShaderStageCreateInfo frag_shader;
-        SpecializationBuilder vert_shader_spec_builder;
-        vert_shader_spec_builder
+        SpecializationBuilder frag_shader_spec_builder;
+        frag_shader_spec_builder
             .AddConstant(0, static_cast<f32>(TerrainManager::VerticesPerEdge - 1));
 
         INC_CHECK(
@@ -252,7 +252,7 @@ namespace TerrainPass {
             "fragment shader creation failed"
         );
 
-        frag_shader.pSpecializationInfo = vert_shader_spec_builder.Build();
+        frag_shader.pSpecializationInfo = frag_shader_spec_builder.Build();
 
         shader_stages.push_back(vert_shader);
         shader_stages.push_back(frag_shader);
