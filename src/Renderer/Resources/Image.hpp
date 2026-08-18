@@ -13,7 +13,7 @@ namespace Image {
         u8 MipLevels;
         u32 ArrayLayers;
         VkFormat Format;
-        VkImageLayout Layout;
+        VkImageLayout UsageLayout;
         QueueRole OwnerQueue;
     };
 

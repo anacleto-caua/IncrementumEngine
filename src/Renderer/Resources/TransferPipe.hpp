@@ -102,7 +102,7 @@ namespace TransferPipe {
             acquire_on_owner.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT; // Where the owner queue uses Layout X
             acquire_on_owner.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
             acquire_on_owner.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            acquire_on_owner.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            acquire_on_owner.newLayout = image_value->UsageLayout;
             acquire_on_owner.srcQueueFamilyIndex = VkVault::Queues[QueueRole::Transfer].FamilyIndex;
             acquire_on_owner.dstQueueFamilyIndex = VkVault::Queues[queue].FamilyIndex;
             acquire_on_owner.image = image_value->Image;

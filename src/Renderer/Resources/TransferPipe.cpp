@@ -1,6 +1,5 @@
 #include "TransferPipe.hpp"
 
-#include <process.h>
 #include <queue>
 #include <cassert>
 
@@ -343,7 +342,7 @@ namespace TransferPipe {
                         release_to_q1.dstStageMask = VK_PIPELINE_STAGE_2_NONE; // Required for release
                         release_to_q1.dstAccessMask = 0;                       // Required for release
                         release_to_q1.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-                        release_to_q1.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                        release_to_q1.newLayout = target_image->UsageLayout;
                         release_to_q1.srcQueueFamilyIndex = queue_2_family_idx;
                         release_to_q1.dstQueueFamilyIndex = queue_1_family_idx;
                         release_to_q1.image = target_image->Image;

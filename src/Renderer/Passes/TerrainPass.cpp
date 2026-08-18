@@ -58,6 +58,7 @@ namespace TerrainPass {
             heightmap_image_create_desc.Format = Heightmap::Format;
             heightmap_image_create_desc.Usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
             heightmap_image_create_desc.OwnerQueue = QueueRole::Graphics;
+            heightmap_image_create_desc.UsageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
             INC_CHECK(Image::Add(heightmap_image_create_desc, Heightmap::Image), "heightmap image creation failed");
             Image::Value* heightmap_image_value = Image::Get(Heightmap::Image);

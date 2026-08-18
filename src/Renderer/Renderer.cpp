@@ -626,6 +626,7 @@ namespace Renderer {
             image_create_info.Height = height;
             image_create_info.Format = Renderer::DepthBuffer::Format;
             image_create_info.Usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+            image_create_info.UsageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
             INC_CHECK(Image::Add(image_create_info, Image), "depth buffer image creation failed");
             Image::Value* depth_image_value = Image::Get(DepthBuffer::Image);
@@ -640,7 +641,7 @@ namespace Renderer {
                 .srcAccessMask = 0,
                 .dstAccessMask = 0,
                 .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                .newLayout = depth_image_value->UsageLayout,
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .image = depth_image_value->Image,

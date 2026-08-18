@@ -34,6 +34,7 @@ namespace Image {
         VkFormat Format = VK_FORMAT_R8G8B8A8_SRGB;
         VkImageUsageFlags Usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         QueueRole OwnerQueue = QueueRole::Transfer;
+        VkImageLayout UsageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     };
 
     IncResult Add(CreateInfo create_info, Id& out_id);

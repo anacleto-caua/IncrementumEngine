@@ -69,7 +69,7 @@ namespace Image {
         image.ArrayLayers = create_info.ArrayLayers;
         image.Depth = create_info.Depth;
         image.Format = create_info.Format;
-        image.Layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        image.UsageLayout = create_info.UsageLayout;
         image.OwnerQueue = create_info.OwnerQueue;
 
         out_id = ImagePool.Add(image);
