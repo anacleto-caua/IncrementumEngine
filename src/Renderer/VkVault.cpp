@@ -250,7 +250,7 @@ namespace VkVault {
 
     IncResult PickQueues() {
         struct QueueRequest {
-            QueueContext *QueueCtx;
+            QueueRole Role;
             i32 LatestScore;
             VkQueueFlags RequiredFlags;
             VkQueueFlags AvoidedFlags;
@@ -258,9 +258,9 @@ namespace VkVault {
             bool ScoreUniqueness;
         };
 
-        std::array<QueueRequest, Queues.size()> queue_requests;
+        std::array<QueueRequest, static_cast<u32>(QueueRole::_COUNT_)> queue_requests;
         queue_requests[0] = {
-            .QueueCtx = &Graphics,
+            .Role = QueueRole::Graphics,
             .LatestScore = -1,
             .RequiredFlags = VK_QUEUE_GRAPHICS_BIT,
             .AvoidedFlags = 0,
@@ -268,7 +268,7 @@ namespace VkVault {
             .ScoreUniqueness = true
         };
         queue_requests[1] = {
-            .QueueCtx = &Present,
+            .Role = QueueRole::Present,
             .LatestScore = -1,
             .RequiredFlags = 0,
             .AvoidedFlags = VK_QUEUE_COMPUTE_BIT,       // Avoid since I don't explicitly support graphics->compute->present yet
@@ -276,7 +276,7 @@ namespace VkVault {
             .ScoreUniqueness = false
         };
         queue_requests[2] = {
-            .QueueCtx = &Transfer,
+            .Role = QueueRole::Transfer,
             .LatestScore = -1,
             .RequiredFlags = VK_QUEUE_TRANSFER_BIT,
             .AvoidedFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT,
@@ -284,7 +284,7 @@ namespace VkVault {
             .ScoreUniqueness = true
         };
         queue_requests[3] = {
-            .QueueCtx = &Compute,
+            .Role = QueueRole::Compute,
             .LatestScore = -1,
             .RequiredFlags = VK_QUEUE_COMPUTE_BIT,
             .AvoidedFlags = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT,
@@ -327,14 +327,14 @@ namespace VkVault {
                 if (req.ScoreUniqueness) {
                     for (QueueRequest &req2 : queue_requests) {
                         if (req2.LatestScore < 0) { break; }    // Do not compare to not yet picked queues
-                        if (QueueFamilyIdx != req2.QueueCtx->Index) {
+                        if (QueueFamilyIdx != Queues[req2.Role].FamilyIndex) {
                             Score += SCORE_PER_UNIQUENESS;
                         }
                     }
                 }
 
                 if (Score > req.LatestScore) {
-                    req.QueueCtx->Index = QueueFamilyIdx;
+                    Queues[req.Role].FamilyIndex = QueueFamilyIdx;
                     req.LatestScore = Score;
                 }
             }
@@ -346,44 +346,48 @@ namespace VkVault {
             }
         }
 
-        // Track unique queues
-        std::vector<QueueContext*> same_queue_different_context;
-        for (QueueContext* queue : Queues) {
-            bool is_unique = true;
-            for (QueueContext* q2 : UniqueQueues) {
-                if (queue == q2) {
+        // Assign each role a UniqueFamilyId - roles that ended up on the same physical family
+        // share the same id, so shared per-family resources (e.g. command pools) aren't duplicated.
+        // UniqueRoles keeps one representative role per unique family, for code that needs to
+        // do something once per physical queue rather than once per role.
+        UniqueFamilyCount = 0;
+        UniqueRoles.clear();
+        for (u32 i = 0; i < static_cast<u32>(QueueRole::_COUNT_); i++) {
+            QueueRole role = static_cast<QueueRole>(i);
+            u32 family_index = Queues[role].FamilyIndex;
+
+            bool found_existing = false;
+            for (u32 j = 0; j < i; j++) {
+                QueueRole earlier_role = static_cast<QueueRole>(j);
+                if (Queues[earlier_role].FamilyIndex == family_index) {
+                    Queues[role].UniqueFamilyId = Queues[earlier_role].UniqueFamilyId;
+                    found_existing = true;
                     break;
                 }
-                if (queue->Index == q2->Index) {
-                    is_unique = false;
-                    same_queue_different_context.push_back(q2);
-                }
             }
-            if (is_unique) {
-                queue->ResourceIndex = static_cast<u32>(UniqueQueues.size());
-                UniqueQueues.push_back(queue);
-                for (QueueContext* q2 : same_queue_different_context) {
-                    q2->ResourceIndex = queue->ResourceIndex;
-                }
+
+            if (!found_existing) {
+                Queues[role].UniqueFamilyId = static_cast<u8>(UniqueFamilyCount);
+                UniqueFamilyCount++;
+                UniqueRoles.push_back(role);
             }
-            same_queue_different_context.clear();
         }
 
         // out queue info for debug
         // TODO: make this available at the debug ui since vulkan uses queue indexes
 
-        auto out_queue = [](const char* fancy_name, QueueContext& queue){
+        auto out_queue = [](const char* fancy_name, QueueRole role){
             analog::info("Queue: {}", fancy_name);
-            analog::info(" - Index: {}", queue.Index);
-            analog::info(" - Resource Index: {}", queue.ResourceIndex);
+            analog::info(" - Index: {}", Queues[role].FamilyIndex);
+            analog::info(" - Resource Index: {}", Queues[role].UniqueFamilyId);
         };
 
         analog::info("VkVault creation, queues defined: ");
-        analog::info("Unique queue count: {}", UniqueQueues.size());
-        out_queue("Graphics", Graphics);
-        out_queue("Transfer", Transfer);
-        out_queue("Present", Present);
-        out_queue("Compute", Compute);
+        analog::info("Unique queue count: {}", UniqueFamilyCount);
+        out_queue("Graphics", QueueRole::Graphics);
+        out_queue("Transfer", QueueRole::Transfer);
+        out_queue("Present", QueueRole::Present);
+        out_queue("Compute", QueueRole::Compute);
 
         return IncResult::SUCCESS;
     }
@@ -392,14 +396,14 @@ namespace VkVault {
         f32 queue_priority = 1.0f;
 
         std::vector<VkDeviceQueueCreateInfo> queue_create_infos = {};
-        queue_create_infos.reserve(UniqueQueues.size());
+        queue_create_infos.reserve(UniqueFamilyCount);
 
-        for (QueueContext *queue : UniqueQueues) {
+        for (QueueRole role : UniqueRoles) {
             VkDeviceQueueCreateInfo create_info = {
                 .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
                 .pNext = nullptr,
                 .flags = 0,
-                .queueFamilyIndex = queue->Index,
+                .queueFamilyIndex = Queues[role].FamilyIndex,
                 .queueCount = 1,
                 .pQueuePriorities = &queue_priority
             };
@@ -469,17 +473,18 @@ namespace VkVault {
         VkCommandPoolCreateInfo cmd_pool_create_info {};
         cmd_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         cmd_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        for (QueueContext* queue : Queues) {
-            vkGetDeviceQueue(Device, queue->Index, 0, &queue->Queue);
 
-            if (QueueResources[queue].MainCmdPool == VK_NULL_HANDLE) {
-                auto& r = QueueResources[queue];
-                cmd_pool_create_info.queueFamilyIndex = queue->Index;
-                VK_CHECK(
-                    vkCreateCommandPool(Device, &cmd_pool_create_info, nullptr, &r.MainCmdPool),
-                    "main command pool creation failed"
-                );
-            }
+        for (u32 i = 0; i < static_cast<u32>(QueueRole::_COUNT_); i++) {
+            QueueRole role = static_cast<QueueRole>(i);
+            vkGetDeviceQueue(Device, Queues[role].FamilyIndex, 0, &Queues[role].Queue);
+        }
+
+        for (QueueRole role : UniqueRoles) {
+            cmd_pool_create_info.queueFamilyIndex = Queues[role].FamilyIndex;
+            VK_CHECK(
+                vkCreateCommandPool(Device, &cmd_pool_create_info, nullptr, &QueueResources[role].MainCmdPool),
+                "main command pool creation failed"
+            );
         }
         return IncResult::SUCCESS;
     }
@@ -559,7 +564,7 @@ namespace VkVault {
     void Destroy() {
         vkDeviceWaitIdle(Device);
 
-        for (QueueResourcePool r :  QueueResources) {
+        for (QueueFamilyResources r :  QueueResources) {
             if (r.MainCmdPool) { vkDestroyCommandPool(Device, r.MainCmdPool, nullptr); }
         }
 
@@ -574,11 +579,11 @@ namespace VkVault {
         if (Instance) { vkDestroyInstance(Instance, nullptr); }
     }
 
-    VkCommandBuffer SingleTimeCmdBegin(QueueContext& ctx) {
+    VkCommandBuffer SingleTimeCmdBegin(QueueRole role) {
         VkCommandBufferAllocateInfo cmd_buffer_alloc_info {};
         cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        cmd_buffer_alloc_info.commandPool = QueueResources[&ctx].MainCmdPool;
+        cmd_buffer_alloc_info.commandPool = QueueResources[role].MainCmdPool;
         cmd_buffer_alloc_info.commandBufferCount = 1;
 
         VkCommandBuffer cmd;
@@ -592,18 +597,18 @@ namespace VkVault {
         return cmd;
     }
 
-    void SingleTimeCmdSubmit(QueueContext& ctx, VkCommandBuffer cmd) {
+    void SingleTimeCmdSubmit(QueueRole role, VkCommandBuffer cmd) {
         vkEndCommandBuffer(cmd);
 
         VkSubmitInfo cmd_buffer_submit_info{};
         cmd_buffer_submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         cmd_buffer_submit_info.commandBufferCount = 1;
         cmd_buffer_submit_info.pCommandBuffers = &cmd;
-        vkQueueSubmit(ctx.Queue, 1, &cmd_buffer_submit_info, VK_NULL_HANDLE);
+        vkQueueSubmit(Queues[role].Queue, 1, &cmd_buffer_submit_info, VK_NULL_HANDLE);
 
-        vkQueueWaitIdle(ctx.Queue);
+        vkQueueWaitIdle(Queues[role].Queue);
 
-        vkFreeCommandBuffers(Device, QueueResources[&ctx].MainCmdPool, 1, &cmd);
+        vkFreeCommandBuffers(Device, QueueResources[role].MainCmdPool, 1, &cmd);
     }
 
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities() {

@@ -2,17 +2,23 @@
 
 #include "Image.hpp"
 #include "Buffer.hpp"
+#include "Renderer/Vk/LeanVk.hpp"
+#include "Renderer/Vk/CommandBufferBlock.hpp"
+#include "Renderer/Resources/ResourceManager.hpp"
 
 // This represents both an acquire and release since it's cleaner to just harvest both at the same time
 // For this I recommend making all releases in a single command and all acquires on a different different command defined by the ticket bellow
 struct ImageOwnershipTransfer {
     Image::Id Image;
-    Ticket Written;     // Acquiring wait on this
-    Ticket Acquired;    // Acquiring signals this
+    Ticket Released;    // Transfer's acquire waits on this - signaled once the owner's release is actually submitted
+    Ticket Written;     // Owner's re-acquire waits on this
+    Ticket Acquired;    // Owner's re-acquire signals this
     u32 TargetLayer;
 };
 
 namespace TransferPipe {
+    // Semaphore backing the tickets used internally to order releases before acquires
+    inline TimelineSemaphore LazySemaphore;
 
     IncResult Create();
     void Destroy();
@@ -21,8 +27,70 @@ namespace TransferPipe {
      */
     void LazySubmit();
 
-    bool HasDataToUnroll(QueueContext& queue);
-    ImageOwnershipTransfer UnrollImageOwnershipTransfer(QueueContext& queue);
+    bool HasDataToAcquire(QueueRole queue);
+    ImageOwnershipTransfer PopAwaitingAcquire(QueueRole queue);
+
+    /**
+     * Re-acquires ownership of image transfers for "queue" that the Transfer queue has already
+     * written and released back, writing acquire barriers into "pile" via "cmd_block". Keeps
+     * writing while "pile" still has room - it's the caller's job to submit "pile" afterwards,
+     * so this can be folded into an already-existing submission (e.g. a frame's own draw
+     * submit) instead of paying for a dedicated vkQueueSubmit2.
+     */
+    template <typename PileT>
+    void AcquirePending(QueueRole queue, PileT& pile, CommandBufferBlock& cmd_block) {
+        auto has_room = [](const PileT& p) {
+            return
+                p.CmdCount    + 1 <= p.MaxCommandBuffers &&
+                p.SubmitCount + 1 <= p.MaxSubmits        &&
+                p.WaitCount   + 1 <= p.MaxWaitSemaphores &&
+                p.SignalCount + 1 <= p.MaxSignalSemaphores;
+        };
+
+        while (has_room(pile) && HasDataToAcquire(queue)) {
+            VkCommandBuffer acquire_command = GetNext(cmd_block);
+            ImageOwnershipTransfer transfer = PopAwaitingAcquire(queue);
+            Image::Value* image_value = Image::Get(transfer.Image);
+
+            VkImageSubresourceRange subresource_range {};
+            subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            subresource_range.baseMipLevel = 0;
+            subresource_range.levelCount = 1;
+            subresource_range.baseArrayLayer = transfer.TargetLayer;
+            subresource_range.layerCount = 1;
+
+            LeanVk::BeginCommand(acquire_command);
+            VkImageMemoryBarrier2 acquire_on_owner {};
+            acquire_on_owner.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            acquire_on_owner.srcStageMask = VK_PIPELINE_STAGE_2_NONE; // Required for acquire
+            acquire_on_owner.srcAccessMask = 0;                       // Required for acquire
+            acquire_on_owner.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT; // Where the owner queue uses Layout X
+            acquire_on_owner.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+            acquire_on_owner.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            acquire_on_owner.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            acquire_on_owner.srcQueueFamilyIndex = VkVault::Queues[QueueRole::Transfer].FamilyIndex;
+            acquire_on_owner.dstQueueFamilyIndex = VkVault::Queues[queue].FamilyIndex;
+            acquire_on_owner.image = image_value->Image;
+            acquire_on_owner.subresourceRange = subresource_range;
+
+            VkDependencyInfo dep_acquire {};
+            dep_acquire.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            dep_acquire.imageMemoryBarrierCount = 1;
+            dep_acquire.pImageMemoryBarriers = &acquire_on_owner;
+            vkCmdPipelineBarrier2(acquire_command, &dep_acquire);
+
+            LeanVk::EndCommand(acquire_command);
+
+            pile.BeginSubmission();
+
+            pile.WaitForTicket(transfer.Written);
+            pile.SignalTicket(transfer.Acquired);
+
+            pile.AddCommand(acquire_command);
+
+            pile.EndSubmission();
+        }
+    }
 
     Ticket QueueBufferUpdate(Buffer::Id dst, u64 offset, u64 size, void* src);
     Ticket QueueBufferUpload(Buffer::Id dst, u64 write_offset, const void* src, u64 size);

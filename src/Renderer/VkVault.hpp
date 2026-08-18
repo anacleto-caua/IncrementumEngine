@@ -3,6 +3,7 @@
 #include <array>
 #include <vector>
 
+#include "Core/EnumIndexedArray.hpp"
 #include "Vk/TimelineSemaphore.hpp"
 
 #define VK_CHECK(expr, ...)                     \
@@ -20,14 +21,23 @@
         }                                       \
     } while(0)
 
-struct QueueContext {
-    u32 Index;
-    u32 ResourceIndex; // Direct index to std::vector<QueueResourcePool> QueueResources
-    VkQueue Queue = VK_NULL_HANDLE;
+enum class QueueRole : u8 {
+    Graphics,
+    Present,
+    Transfer,
+    Compute,
+
+    _COUNT_
 };
 
-// This seem's messy and sub-optimal
-struct QueueResourcePool {
+struct QueueValue {
+    VkQueue Queue = VK_NULL_HANDLE;
+    u32 FamilyIndex = 0;
+    u8 UniqueFamilyId = 0; // Which slot in VkVault::QueueResources this role's family resources live in
+};
+
+// Resources shared by every role that aliases the same physical queue family
+struct QueueFamilyResources {
     VkCommandPool MainCmdPool = VK_NULL_HANDLE;
 };
 
@@ -35,7 +45,9 @@ struct QueueResourcePool {
  * Ideally this wouldn't be here, but cpp compilation works a bit too well
  */
 namespace VkVault {
-    inline std::vector<QueueContext*> UniqueQueues;
+    inline EnumIndexedArray<QueueValue, QueueRole, QueueRole::_COUNT_> Queues;
+    inline u32 UniqueFamilyCount = 0;
+    inline std::vector<QueueRole> UniqueRoles; // one representative role per unique physical queue family
 }
 
 template <typename T>
@@ -45,15 +57,15 @@ private:
 
 public:
     void Initialize() {
-        Resource.resize(VkVault::UniqueQueues.size());
+        Resource.resize(VkVault::UniqueFamilyCount);
     }
 
-    T& operator[](QueueContext* queue_context) {
-        return Resource[queue_context->ResourceIndex];
+    T& operator[](QueueRole role) {
+        return Resource[VkVault::Queues[role].UniqueFamilyId];
     }
 
-    const T& operator[](QueueContext* queue_context) const {
-        return Resource[queue_context->ResourceIndex];
+    const T& operator[](QueueRole role) const {
+        return Resource[VkVault::Queues[role].UniqueFamilyId];
     }
 
     auto begin() { return Resource.begin(); }
@@ -73,13 +85,7 @@ namespace VkVault {
     inline VkSurfaceFormatKHR SurfaceFormat;
     inline VkPresentModeKHR PresentMode;
 
-    inline QueueContext Graphics;
-    inline QueueContext Present;
-    inline QueueContext Transfer;
-    inline QueueContext Compute;
-    inline std::array<QueueContext*, 4> Queues = {{ &Graphics, &Present, &Transfer, &Compute }};
-    inline QueueContainer<QueueResourcePool> QueueResources;
-    //inline std::vector<QueueContext*> UniqueQueues; --- declare above thanks to cpp compilation
+    inline QueueContainer<QueueFamilyResources> QueueResources;
 
     inline constexpr u32 COLOR_ATTACHMENT_FORMAT_COUNT = 1;
     inline std::array<VkFormat, COLOR_ATTACHMENT_FORMAT_COUNT> ColorAttachmentFormats { }; // Will be filled by the SurfaceFormat.format
@@ -103,8 +109,8 @@ namespace VkVault {
     IncResult Create();
     void Destroy();
 
-    VkCommandBuffer SingleTimeCmdBegin(QueueContext& ctx);
-    void SingleTimeCmdSubmit(QueueContext& ctx, VkCommandBuffer cmd);
+    VkCommandBuffer SingleTimeCmdBegin(QueueRole role);
+    void SingleTimeCmdSubmit(QueueRole role, VkCommandBuffer cmd);
 
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities();
 }

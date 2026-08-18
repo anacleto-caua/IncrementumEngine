@@ -30,7 +30,6 @@ namespace Renderer {
     };
 
     TimelineSemaphore FrameSemaphore;
-    TimelineSemaphore TransfersSemaphore; // Probably uneeded, but I'll keep it for clarity
     std::array<FrameData, Renderer::MAX_FRAMES_IN_FLIGHT> Frames;
 
     // Camera UBO Descriptor
@@ -101,7 +100,7 @@ namespace Renderer {
         VkCommandPoolCreateInfo render_cmd_poll_create_info {};
         render_cmd_poll_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         render_cmd_poll_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        render_cmd_poll_create_info.queueFamilyIndex = VkVault::Graphics.Index;
+        render_cmd_poll_create_info.queueFamilyIndex = VkVault::Queues[QueueRole::Graphics].FamilyIndex;
 
         VkCommandBufferAllocateInfo cmd_buffer_alloc_info {};
         cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -112,12 +111,11 @@ namespace Renderer {
         SubmissionPile.Reset();
 
         FrameSemaphore = CreateTimelineSemaphore();
-        TransfersSemaphore = CreateTimelineSemaphore();
 
         for (FrameData &frame : Frames) {
             frame.ImageAvailable = CreateBinarySemaphore();
 
-            Create(frame.FrameBlock, &VkVault::Graphics);
+            Create(frame.FrameBlock, QueueRole::Graphics);
         }
 
         // Fill general rendering information
@@ -191,10 +189,13 @@ namespace Renderer {
     void Frame() {
         // Update context
         FrameData& target_frame = Frames[FrameContext.FrameInFlightIndex];
+
+        // Wait for this frame-in-flight slot's previous GPU work to actually finish before
+        // resetting its command pool - resetting first would reset buffers that might still be pending.
+        WaitOnTimelineSemaphore(FrameSemaphore, target_frame.LastSignaledValue);
+
         Reset(target_frame.FrameBlock);
         FrameContext.DrawCommand = GetNext(target_frame.FrameBlock);
-
-        WaitOnTimelineSemaphore(FrameSemaphore, target_frame.LastSignaledValue);
 
         VkResult result = vkAcquireNextImageKHR(
             VkVault::Device,
@@ -209,7 +210,9 @@ namespace Renderer {
             return;
         }
 
-        LeanVk::ResetCommand(FrameContext.DrawCommand);
+        // No LeanVk::ResetCommand needed here - Reset(target_frame.FrameBlock) above already
+        // reset the whole pool (and the pool was never created with RESET_COMMAND_BUFFER_BIT,
+        // so resetting this one buffer individually would be invalid anyway).
         LeanVk::BeginCommand(FrameContext.DrawCommand);
 
         // Frame sensible transfers, will be completed before the begin of the drawing phase
@@ -350,98 +353,14 @@ namespace Renderer {
 
         SubmissionPile.EndSubmission();
 
-        // Pendant image transfer from Transfer Pipe
-        // TODO: I still have no idea on how to properly clean thoose commands
-
-        // Single command for all releases
-        VkCommandBuffer general_release_command = GetNext(target_frame.FrameBlock);
-        LeanVk::BeginCommand(general_release_command);
-        Ticket released_ticket = CreateTicket(TransfersSemaphore);
-
-        while (
-                // Require 2 slots empty for the current transfer + the wholesome general release command
-                (SubmissionPile.CmdCount < (SubmissionPile.MaxCommandBuffers - 2)) &&
-                !(SubmissionPile.IsEmpty()) &&
-                TransferPipe::HasDataToUnroll(VkVault::Graphics)
-             )
-        {
-            VkCommandBuffer acquire_command = GetNext(target_frame.FrameBlock);
-            ImageOwnershipTransfer transfer = TransferPipe::UnrollImageOwnershipTransfer(VkVault::Graphics);
-            Image::Value* image_value = Image::Get(transfer.Image);
-
-            VkImageSubresourceRange subresource_range {};
-            subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            subresource_range.baseMipLevel = 0;
-            subresource_range.levelCount = 1;
-            subresource_range.baseArrayLayer = transfer.TargetLayer;
-            subresource_range.layerCount = 1;
-
-            // release
-            VkImageMemoryBarrier2 release_to_q2 {};
-            release_to_q2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-            release_to_q2.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; // Whatever Q1 was doing
-            release_to_q2.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
-            release_to_q2.dstStageMask = VK_PIPELINE_STAGE_2_NONE; // Required for release
-            release_to_q2.dstAccessMask = 0;                       // Required for release
-            release_to_q2.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            release_to_q2.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            release_to_q2.srcQueueFamilyIndex = VkVault::Graphics.Index; // be carefull if you try to abstract this
-            release_to_q2.dstQueueFamilyIndex = VkVault::Transfer.Index;
-            release_to_q2.image = image_value->Image;
-            release_to_q2.subresourceRange = subresource_range;
-
-            VkDependencyInfo dep_release_1 {};
-            dep_release_1.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-            dep_release_1.imageMemoryBarrierCount = 1;
-            dep_release_1.pImageMemoryBarriers = &release_to_q2;
-
-            vkCmdPipelineBarrier2(general_release_command, &dep_release_1);
-
-            // acquire
-            LeanVk::BeginCommand(acquire_command);
-            VkImageMemoryBarrier2 acquire_on_q1 {};
-            acquire_on_q1.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-            acquire_on_q1.srcStageMask = VK_PIPELINE_STAGE_2_NONE; // Required for acquire
-            acquire_on_q1.srcAccessMask = 0;                       // Required for acquire
-            acquire_on_q1.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT; // Where Queue1 uses Layout X
-            acquire_on_q1.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-            acquire_on_q1.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            acquire_on_q1.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            acquire_on_q1.srcQueueFamilyIndex = VkVault::Transfer.Index;
-            acquire_on_q1.dstQueueFamilyIndex = VkVault::Graphics.Index;
-            acquire_on_q1.image = image_value->Image;
-            acquire_on_q1.subresourceRange = subresource_range;
-
-            VkDependencyInfo dep_acquire_1 {};
-            dep_acquire_1.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-            dep_acquire_1.imageMemoryBarrierCount = 1;
-            dep_acquire_1.pImageMemoryBarriers = &acquire_on_q1;
-            vkCmdPipelineBarrier2(acquire_command, &dep_acquire_1);
-
-            LeanVk::EndCommand(acquire_command);
-
-            SubmissionPile.BeginSubmission();
-
-            SubmissionPile.WaitForTicket(released_ticket);
-            SubmissionPile.WaitForTicket(transfer.Written);
-            SubmissionPile.SignalTicket(transfer.Acquired);
-
-            SubmissionPile.AddCommand(acquire_command);
-
-            SubmissionPile.EndSubmission();
-        }
-
-        LeanVk::EndCommand(general_release_command);
-        SubmissionPile.BeginSubmission();
-        SubmissionPile.SignalTicket(released_ticket);
-        SubmissionPile.AddCommand(general_release_command);
-        SubmissionPile.EndSubmission();
+        // Fold pending image ownership acquires into this frame's own submission instead of paying for a second vkQueueSubmit2
+        TransferPipe::AcquirePending(QueueRole::Graphics, SubmissionPile, target_frame.FrameBlock);
 
         // Submit
-        SubmissionPile.Submit(VkVault::Graphics);
+        SubmissionPile.Submit(QueueRole::Graphics);
 
         Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished.Semaphore;
-        vkQueuePresentKHR(VkVault::Present.Queue, &Swapchain::PresentInfo);
+        vkQueuePresentKHR(VkVault::Queues[QueueRole::Present].Queue, &Swapchain::PresentInfo);
 
         // Save the timeline value so the CPU can wait on it next time!
         target_frame.LastSignaledValue = signal_value;
@@ -553,8 +472,8 @@ namespace Renderer {
             CreateInfo.clipped = VK_TRUE;
             CreateInfo.oldSwapchain = VK_NULL_HANDLE;
 
-            u32 QueueFamilyIndices[] = { VkVault::Graphics.Index, VkVault::Present.Index };
-            if (VkVault::Graphics.Index != VkVault::Present.Index) {
+            u32 QueueFamilyIndices[] = { VkVault::Queues[QueueRole::Graphics].FamilyIndex, VkVault::Queues[QueueRole::Present].FamilyIndex };
+            if (VkVault::Queues[QueueRole::Graphics].FamilyIndex != VkVault::Queues[QueueRole::Present].FamilyIndex) {
                 CreateInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
                 CreateInfo.queueFamilyIndexCount = 2;
                 CreateInfo.pQueueFamilyIndices = QueueFamilyIndices;
@@ -698,7 +617,7 @@ namespace Renderer {
             depth_image_value->Format = Renderer::DepthBuffer::Format;
 
             // Despite having a creation format the image still starts as a _UNDEFINED, so transit it a first time
-            VkCommandBuffer cmd = VkVault::SingleTimeCmdBegin(VkVault::Graphics);
+            VkCommandBuffer cmd = VkVault::SingleTimeCmdBegin(QueueRole::Graphics);
 
             VkImageMemoryBarrier barrier {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -722,7 +641,7 @@ namespace Renderer {
                 &barrier
             );
 
-            VkVault::SingleTimeCmdSubmit(VkVault::Graphics, cmd);
+            VkVault::SingleTimeCmdSubmit(QueueRole::Graphics, cmd);
 
             VkImageViewCreateInfo image_view_create_info = ImageView::FillCreateInfo(depth_image_value);
             image_view_create_info.subresourceRange = DepthBuffer::Range;

@@ -161,9 +161,9 @@ struct SubmissionPile {
 
     // Submission
 
-    void Submit(QueueContext& ctx, VkFence execution_fence = VK_NULL_HANDLE) {
+    void Submit(QueueRole role, VkFence execution_fence = VK_NULL_HANDLE) {
         if(SubmitCount > 0) {
-            VK_OUT(vkQueueSubmit2(ctx.Queue, static_cast<u32>(SubmitCount), Submits.data(), execution_fence), "pile submission failed");
+            VK_OUT(vkQueueSubmit2(VkVault::Queues[role].Queue, static_cast<u32>(SubmitCount), Submits.data(), execution_fence), "pile submission failed");
             Reset();
         }
     }

@@ -53,7 +53,7 @@ namespace TerrainPass {
             heightmap_image_create_desc.ArrayLayers = TerrainConfig::Streaming::MaxActiveChunks;
             heightmap_image_create_desc.Format = TerrainConfig::Memory::HeightmapFormat;
             heightmap_image_create_desc.Usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-            heightmap_image_create_desc.OwnerQueue = &VkVault::Graphics;
+            heightmap_image_create_desc.OwnerQueue = QueueRole::Graphics;
 
             Heightmap::Image = Image::Add(heightmap_image_create_desc);
             Image::Value* heightmap_image_value = Image::Get(Heightmap::Image);

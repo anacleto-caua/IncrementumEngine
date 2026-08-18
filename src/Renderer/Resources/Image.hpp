@@ -14,7 +14,7 @@ namespace Image {
         u32 ArrayLayers;
         VkFormat Format;
         VkImageLayout Layout;
-        QueueContext* OwnerQueue;
+        QueueRole OwnerQueue;
     };
 
     using Id = Handle<Value>;

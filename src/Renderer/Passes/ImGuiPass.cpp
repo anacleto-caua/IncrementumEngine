@@ -44,8 +44,8 @@ namespace ImGuiPass {
         vk_init_info.Instance = VkVault::Instance;
         vk_init_info.PhysicalDevice = VkVault::PhysicalDevice;
         vk_init_info.Device = VkVault::Device;
-        vk_init_info.QueueFamily = VkVault::Graphics.Index;
-        vk_init_info.Queue = VkVault::Graphics.Queue;
+        vk_init_info.QueueFamily = VkVault::Queues[QueueRole::Graphics].FamilyIndex;
+        vk_init_info.Queue = VkVault::Queues[QueueRole::Graphics].Queue;
         vk_init_info.PipelineInfoMain = pipeline_info;
         // vk_init_info.DescriptorPool; // Leave it alone so the backend creates one with .DescriptorPoolSize
         vk_init_info.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE;
