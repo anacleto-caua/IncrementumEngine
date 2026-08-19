@@ -137,6 +137,8 @@ target("IncrementumEngine")
             add_defines("_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG")
         end
 
+        add_defines("INC_ENABLE_VALIDATION_LAYERS=1")
+
     -- Release Debug version for profiling
     elseif is_mode("releasedbg") then
         set_symbols("debug")
@@ -148,6 +150,9 @@ target("IncrementumEngine")
 
         -- Crucial for AMD μProf to unwind Clang call stacks accurately
         add_cxflags("-fno-omit-frame-pointer", {force = true})
+
+        -- Kept on in releasedbg (unlike plain release) since this mode is used for profiling/debugging
+        add_defines("INC_ENABLE_VALIDATION_LAYERS=1")
     end
 
     -- Pre compiled headers

@@ -1,6 +1,8 @@
 #include "VkVault.hpp"
 
 #include <array>
+#include <format>
+#include <string>
 #include <cstring>
 
 #include "Engine/Core/Window.hpp"
@@ -16,10 +18,6 @@ namespace VkVault {
     static constexpr std::array<const char*, 1> INSTANCE_EXTENSIONS = {
             VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
     };
-
-#ifndef NDEBUG
-    #include <string>
-    #include <format>
 
     VkDebugUtilsMessengerEXT DebugMessenger_;
 
@@ -102,7 +100,6 @@ namespace VkVault {
             func(Instance, DebugMessenger_, nullptr);
         }
     }
-#endif
 
     VkSurfaceFormatKHR DESIRABLE_SURFACE_FORMAT = {
         .format = VK_FORMAT_B8G8R8A8_SRGB,
@@ -142,15 +139,15 @@ namespace VkVault {
         };
 
         // Validation layers
-#ifndef NDEBUG
-        all_instance_extensions.insert(
-            all_instance_extensions.end(),
-            VALIDATION_LAYERS_EXTENSION.begin(),
-            VALIDATION_LAYERS_EXTENSION.end()
-        );
-        instance_create_info.enabledLayerCount = static_cast<u32>(VALIDATION_LAYERS.size());
-        instance_create_info.ppEnabledLayerNames = VALIDATION_LAYERS.data();
-#endif
+        if constexpr (EnableValidationLayers) {
+            all_instance_extensions.insert(
+                all_instance_extensions.end(),
+                VALIDATION_LAYERS_EXTENSION.begin(),
+                VALIDATION_LAYERS_EXTENSION.end()
+            );
+            instance_create_info.enabledLayerCount = static_cast<u32>(VALIDATION_LAYERS.size());
+            instance_create_info.ppEnabledLayerNames = VALIDATION_LAYERS.data();
+        }
 
         instance_create_info.enabledExtensionCount = static_cast<u32>(all_instance_extensions.size());
         instance_create_info.ppEnabledExtensionNames = all_instance_extensions.data();
@@ -541,9 +538,9 @@ namespace VkVault {
     IncResult Create() {
         CreateInstance();
 
-#ifndef NDEBUG
-        _SetupDebugMessenger();
-#endif
+        if constexpr (EnableValidationLayers) {
+            _SetupDebugMessenger();
+        }
 
         PickPhysicalDevice();
 
@@ -572,9 +569,9 @@ namespace VkVault {
         if (Device) { vkDestroyDevice(Device, nullptr); }
         if (Surface) { vkDestroySurfaceKHR(Instance, Surface, nullptr); }
 
-#ifndef NDEBUG
-        _DestroyDebugUtilsMessengerEXT();
-#endif
+        if constexpr (EnableValidationLayers) {
+            _DestroyDebugUtilsMessengerEXT();
+        }
 
         if (Instance) { vkDestroyInstance(Instance, nullptr); }
     }

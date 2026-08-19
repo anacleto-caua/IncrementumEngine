@@ -3,8 +3,19 @@
 #include <array>
 #include <vector>
 
-#include "Core/EnumIndexedArray.hpp"
 #include "Vk/TimelineSemaphore.hpp"
+#include "Core/EnumIndexedArray.hpp"
+
+// Define this as 1 if you want validation layers
+#ifndef INC_ENABLE_VALIDATION_LAYERS
+    #define INC_ENABLE_VALIDATION_LAYERS 0
+#endif
+
+namespace VkVault {
+    // Set per build mode in xmake.lua (debug/releasedbg on, release off). May become a
+    // standalone compile flag later, independent of build mode.
+    inline constexpr bool EnableValidationLayers = INC_ENABLE_VALIDATION_LAYERS != 0;
+}
 
 #define VK_CHECK(expr, ...)                     \
     do {                                        \
