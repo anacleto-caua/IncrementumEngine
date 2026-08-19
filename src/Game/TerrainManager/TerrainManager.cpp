@@ -110,12 +110,7 @@ namespace TerrainManager {
         TaskScheduler::Wait(counter);
 
         for (u32 i = 0; i < coords_counter; i++) {
-            TransferPipe::QueueImageSliceUpload(
-                TerrainPass::Heightmap::Image,
-                i,
-                &HeightmapData[i],
-                sizeof(Heightmap)
-            );
+            TerrainPass::Heightmap::QueueSlice(i, &HeightmapData[i], sizeof(Heightmap));
         }
 
         // The heightmap array is sampled through a single whole-array descriptor, so Vulkan
@@ -126,12 +121,7 @@ namespace TerrainManager {
         // irrelevant since nothing samples it until it's regenerated for real.
         Heightmap blank_heightmap{};
         for (u32 i = coords_counter; i < MaxCachedChunks; i++) {
-            TransferPipe::QueueImageSliceUpload(
-                TerrainPass::Heightmap::Image,
-                i,
-                &blank_heightmap,
-                sizeof(Heightmap)
-            );
+            TerrainPass::Heightmap::QueueSlice(i, &blank_heightmap, sizeof(Heightmap));
         }
 
         TransferPipe::LazySubmit();
@@ -242,8 +232,7 @@ namespace TerrainManager {
             };
             PositionToSlot[PackPosition(Generation.Position)] = Generation.TargetLayer;
 
-            TransferPipe::QueueImageSliceUpload(
-                TerrainPass::Heightmap::Image,
+            TerrainPass::Heightmap::QueueSlice(
                 Generation.TargetLayer,
                 &HeightmapData[Generation.TargetLayer],
                 sizeof(Heightmap)

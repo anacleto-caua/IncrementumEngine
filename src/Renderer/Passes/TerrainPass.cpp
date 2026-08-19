@@ -33,9 +33,13 @@ namespace TerrainPass {
     }
 
     namespace Heightmap {
-        // Image::Id Image; is declared in TerrainPass.hpp - TerrainManager needs it to queue chunk uploads
+        Image::Id Image;
         ImageView::Id ImageView;
         VkSampler Sampler;
+
+        Ticket QueueSlice(u32 target_layer, const void* data, u64 size) {
+            return TransferPipe::QueueImageSliceUpload(Image, target_layer, data, size);
+        }
     }
 
     namespace DebugUI {

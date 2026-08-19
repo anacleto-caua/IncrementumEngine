@@ -4,7 +4,7 @@
 
 #include <vulkan/vulkan.h>
 
-#include "Renderer/Resources/Image.hpp"
+#include "Renderer/Vk/TimelineSemaphore.hpp"
 
 // Resolution and grid scale mirror TerrainManager's VerticesPerEdge/ChunkScale (used only to
 // feed the terrain shaders' specialization constants) - HeightScale has no other home, since
@@ -17,8 +17,13 @@ namespace TerrainPass {
     inline TerrainPassConfig Config = {};
 
     namespace Heightmap {
-        inline Image::Id Image;
         constexpr VkFormat Format = VK_FORMAT_R16_UNORM;
+
+        // Queues an upload of one heightmap layer, without submitting - callers decide when to
+        // flush (TransferPipe::LazySubmit() for a startup batch, SubmitReleaseAndWrite() for one
+        // streamed-in chunk). Keeps TerrainManager from needing to know this pass's internal
+        // Image handle or which TransferPipe function queues an image slice.
+        Ticket QueueSlice(u32 target_layer, const void* data, u64 size);
     }
 
     IncResult Create();
