@@ -109,8 +109,5 @@ namespace VkVault {
     IncResult Create();
     void Destroy();
 
-    VkCommandBuffer SingleTimeCmdBegin(QueueRole role);
-    void SingleTimeCmdSubmit(QueueRole role, VkCommandBuffer cmd);
-
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities();
 }

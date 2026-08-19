@@ -633,7 +633,11 @@ namespace Renderer {
             depth_image_value->Format = Renderer::DepthBuffer::Format;
 
             // Despite having a creation format the image still starts as a _UNDEFINED, so transit it a first time
-            VkCommandBuffer cmd = VkVault::SingleTimeCmdBegin(QueueRole::Graphics);
+            CommandBufferBlock setup_block;
+            Create(setup_block, QueueRole::Graphics);
+
+            VkCommandBuffer cmd = GetNext(setup_block);
+            LeanVk::BeginCommand(cmd);
 
             VkImageMemoryBarrier barrier {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -657,7 +661,16 @@ namespace Renderer {
                 &barrier
             );
 
-            VkVault::SingleTimeCmdSubmit(QueueRole::Graphics, cmd);
+            LeanVk::EndCommand(cmd);
+
+            ::SubmissionPile<1, 1, 0, 0> one_shot_pile;
+            one_shot_pile.BeginSubmission();
+            one_shot_pile.AddCommand(cmd);
+            one_shot_pile.EndSubmission();
+            one_shot_pile.Submit(QueueRole::Graphics);
+
+            vkQueueWaitIdle(VkVault::Queues[QueueRole::Graphics].Queue);
+            Destroy(setup_block);
 
             VkImageViewCreateInfo image_view_create_info = ImageView::FillCreateInfo(depth_image_value);
             image_view_create_info.subresourceRange = DepthBuffer::Range;

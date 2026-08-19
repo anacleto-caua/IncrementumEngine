@@ -579,38 +579,6 @@ namespace VkVault {
         if (Instance) { vkDestroyInstance(Instance, nullptr); }
     }
 
-    VkCommandBuffer SingleTimeCmdBegin(QueueRole role) {
-        VkCommandBufferAllocateInfo cmd_buffer_alloc_info {};
-        cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        cmd_buffer_alloc_info.commandPool = QueueResources[role].MainCmdPool;
-        cmd_buffer_alloc_info.commandBufferCount = 1;
-
-        VkCommandBuffer cmd;
-        vkAllocateCommandBuffers(Device, &cmd_buffer_alloc_info, &cmd);
-
-        VkCommandBufferBeginInfo cmd_buffer_begin_info{};
-        cmd_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        cmd_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(cmd, &cmd_buffer_begin_info);
-
-        return cmd;
-    }
-
-    void SingleTimeCmdSubmit(QueueRole role, VkCommandBuffer cmd) {
-        vkEndCommandBuffer(cmd);
-
-        VkSubmitInfo cmd_buffer_submit_info{};
-        cmd_buffer_submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        cmd_buffer_submit_info.commandBufferCount = 1;
-        cmd_buffer_submit_info.pCommandBuffers = &cmd;
-        vkQueueSubmit(Queues[role].Queue, 1, &cmd_buffer_submit_info, VK_NULL_HANDLE);
-
-        vkQueueWaitIdle(Queues[role].Queue);
-
-        vkFreeCommandBuffers(Device, QueueResources[role].MainCmdPool, 1, &cmd);
-    }
-
     VkSurfaceCapabilitiesKHR QuerySurfaceCapabilities() {
         VkSurfaceCapabilitiesKHR capabilities {};
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(PhysicalDevice, Surface, &capabilities);
