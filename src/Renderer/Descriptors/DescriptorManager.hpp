@@ -32,13 +32,14 @@ namespace DescriptorMap {
     }
 
     // ================================================
-    // SET 1: Per-Frame Data (Changes every frame)
+    // SET 1: Per-Frame-Bound Data (rewritten every frame, or streamed in at a lower frequency -
+    // grouped by "how often this changes" rather than a strict "every single frame" guarantee)
     // ================================================
     namespace PerFrame {
         inline constexpr u32 SetIndex = 1;
 
-        inline constexpr u32 Binding_ChunkDrawListSSBO = 0;
-        inline constexpr u32 Binding_HeightmapTexture = 1; // This isn't per frame but okay...
+        inline constexpr u32 Binding_ChunkDrawListSSBO = 0;  // rewritten every frame
+        inline constexpr u32 Binding_HeightmapTexture = 1;   // streamed in per chunk, not per frame
     }
 
     // ================================================

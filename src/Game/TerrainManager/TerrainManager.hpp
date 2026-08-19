@@ -53,7 +53,7 @@ namespace TerrainManager {
 
     // How many of ChunkDrawList's entries are actually populated this frame - dynamic, since a
     // chunk that's still generating simply isn't in the drawn set yet.
-    inline u32 CurrentllyActiveChunks = 0;
+    inline u32 CurrentlyActiveChunks = 0;
 
     // One entry per GPU-resident heightmap slot (MaxCachedChunks of them - more than are ever
     // drawn at once, so a chunk that falls out of the drawn set keeps its slot until the cache

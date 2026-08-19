@@ -105,7 +105,7 @@ namespace TerrainManager {
             }
         }
 
-        CurrentllyActiveChunks = coords_counter;
+        CurrentlyActiveChunks = coords_counter;
 
         TaskScheduler::Wait(counter);
 
@@ -194,7 +194,7 @@ namespace TerrainManager {
         constexpr i32 radius = ExplorationRadius;
         constexpr i32 r_squared = radius * radius;
 
-        CurrentllyActiveChunks = 0;
+        CurrentlyActiveChunks = 0;
         ivec2 missing_position = { 0, 0 };
         bool found_missing = false;
 
@@ -215,12 +215,12 @@ namespace TerrainManager {
                 if (cache_index != UINT32_MAX) {
                     // Cache hit - draw it, mark it recently used
                     Cache[cache_index].LastUsedTick = CurrentTick;
-                    ChunkDrawList[CurrentllyActiveChunks] = {
+                    ChunkDrawList[CurrentlyActiveChunks] = {
                         .WorldPos = candidate,
                         .TextureLayer = cache_index,
                         .padding = 0
                     };
-                    CurrentllyActiveChunks++;
+                    CurrentlyActiveChunks++;
                 } else if (!found_missing) {
                     // Only ever kick off one generation per call - remember the first miss
                     missing_position = candidate;

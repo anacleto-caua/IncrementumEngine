@@ -304,7 +304,7 @@ namespace TerrainPass {
             Renderer::FrameContext.DrawCommand,
             buffer->Buffer,
             0,
-            sizeof(TerrainManager::ChunkInstanceData) * TerrainManager::CurrentllyActiveChunks,
+            sizeof(TerrainManager::ChunkInstanceData) * TerrainManager::CurrentlyActiveChunks,
             &TerrainManager::ChunkDrawList
         );
     }
@@ -333,7 +333,7 @@ namespace TerrainPass {
             nullptr
         );
 
-        vkCmdDrawIndexed(cmd, PlaneMesh::IndexCount, TerrainManager::CurrentllyActiveChunks, 0, 0, 0);
+        vkCmdDrawIndexed(cmd, PlaneMesh::IndexCount, TerrainManager::CurrentlyActiveChunks, 0, 0, 0);
     }
 
     namespace PlaneMesh {
@@ -389,12 +389,12 @@ namespace TerrainPass {
                     if (Cache[i].Valid) { cached_count++; }
                 }
 
-                ImGui::Text("Drawn:  %u / %u", CurrentllyActiveChunks, MaxDrawnChunks);
+                ImGui::Text("Drawn:  %u / %u", CurrentlyActiveChunks, MaxDrawnChunks);
                 ImGui::Text("Cached: %u / %u", cached_count, MaxCachedChunks);
                 ImGui::Separator();
 
                 // Iterate only up to the currently active chunks to save UI performance
-                for (u32 i = 0; i < CurrentllyActiveChunks; ++i)
+                for (u32 i = 0; i < CurrentlyActiveChunks; ++i)
                 {
                     const auto& draw_data = ChunkDrawList[i];
                     u32 cache_index = draw_data.TextureLayer;
