@@ -1,2 +1,6 @@
 build/
 .xmake/
+src_old/
+docs/
+plans/
+CLAUDE.md
