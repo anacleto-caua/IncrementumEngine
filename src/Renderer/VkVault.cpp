@@ -464,25 +464,11 @@ namespace VkVault {
     }
 
     IncResult CreateQueuesResource() {
-        QueueResources.Initialize();
-
-        // Create the Queues resources
-        VkCommandPoolCreateInfo cmd_pool_create_info {};
-        cmd_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        cmd_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
         for (u32 i = 0; i < static_cast<u32>(QueueRole::_COUNT_); i++) {
             QueueRole role = static_cast<QueueRole>(i);
             vkGetDeviceQueue(Device, Queues[role].FamilyIndex, 0, &Queues[role].Queue);
         }
 
-        for (QueueRole role : UniqueRoles) {
-            cmd_pool_create_info.queueFamilyIndex = Queues[role].FamilyIndex;
-            VK_CHECK(
-                vkCreateCommandPool(Device, &cmd_pool_create_info, nullptr, &QueueResources[role].MainCmdPool),
-                "main command pool creation failed"
-            );
-        }
         return IncResult::SUCCESS;
     }
 
@@ -560,10 +546,6 @@ namespace VkVault {
 
     void Destroy() {
         vkDeviceWaitIdle(Device);
-
-        for (QueueFamilyResources r :  QueueResources) {
-            if (r.MainCmdPool) { vkDestroyCommandPool(Device, r.MainCmdPool, nullptr); }
-        }
 
         if (VmaAllocator) { vmaDestroyAllocator(VmaAllocator); }
         if (Device) { vkDestroyDevice(Device, nullptr); }

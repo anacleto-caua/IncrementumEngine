@@ -47,11 +47,6 @@ struct QueueValue {
     u8 UniqueFamilyId = 0; // Which slot in VkVault::QueueResources this role's family resources live in
 };
 
-// Resources shared by every role that aliases the same physical queue family
-struct QueueFamilyResources {
-    VkCommandPool MainCmdPool = VK_NULL_HANDLE;
-};
-
 /**
  * Ideally this wouldn't be here, but cpp compilation works a bit too well
  */
@@ -95,8 +90,6 @@ namespace VkVault {
     inline VkSurfaceKHR Surface;
     inline VkSurfaceFormatKHR SurfaceFormat;
     inline VkPresentModeKHR PresentMode;
-
-    inline QueueContainer<QueueFamilyResources> QueueResources;
 
     inline constexpr u32 COLOR_ATTACHMENT_FORMAT_COUNT = 1;
     inline std::array<VkFormat, COLOR_ATTACHMENT_FORMAT_COUNT> ColorAttachmentFormats { }; // Will be filled by the SurfaceFormat.format
