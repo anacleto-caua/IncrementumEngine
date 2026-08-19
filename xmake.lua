@@ -54,6 +54,22 @@ rule("compile_shaders")
     end)
 rule_end()
 
+-- Calls add_files(pattern, opt) only if the glob actually matches something - add_files()
+-- otherwise warns "cannot match" for a wildcard that hits nothing.
+function add_files_if_matched(pattern, opt)
+    if #os.files(pattern) > 0 then
+        add_files(pattern, opt)
+    end
+end
+
+-- Adds "<dir>/**.<ext>" for each extension in `extensions`, skipping any extension with zero
+-- matches in the tree (e.g. .comp, since there are no compute shaders yet).
+function add_files_with_extensions(dir, extensions, opt)
+    for _, ext in ipairs(extensions) do
+        add_files_if_matched(path.join(dir, "**." .. ext), opt)
+    end
+end
+
 -- Custom rule for coping assets
 rule("copy_assets")
     on_build_file(function (target, sourcefile, opt)
@@ -227,8 +243,8 @@ target("IncrementumEngine")
 
     -- Add shader and asset files to trigger the custom rules
     -- At the end, to avoid glslc's "No such file or directory"
-    add_files("shaders/**.vert", "shaders/**.frag", "shaders/**.comp", {rule = "compile_shaders"})
-    add_files("resources/**", {rule = "copy_assets"})
+    add_files_with_extensions("shaders", {"vert", "frag", "comp"}, {rule = "compile_shaders"})
+    add_files_if_matched("resources/**", {rule = "copy_assets"})
 
 target_end()
 
