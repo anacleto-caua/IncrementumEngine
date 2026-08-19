@@ -17,10 +17,10 @@ namespace Game {
 }
 
 // Shortcuts to Game's owned components - single-hop ambient access from anywhere (GRenderer.X,
-// not Game::Engine.RendererInstance.X), declared where the thing being aliased actually lives
-// instead of in a separate top-level file. Every one of these is a reference into a real owned
-// member - Game owns Engine owns Renderer owns TransferPipe/TerrainPass/ImGuiPass - there are no
-// independent globals left in this chain.
+// not Game::Engine.Renderer.X), declared where the thing being aliased actually lives instead of
+// in a separate top-level file. Every one of these is a reference into a real owned member - Game
+// owns Engine owns Renderer owns TransferPipe/TerrainPass/ImGuiPass - there are no independent
+// globals left in this chain.
 inline Engine& GEngine = Game::Engine;
 inline Renderer& GRenderer = GEngine.Renderer;
 inline TransferPipe& GTransferPipe = GRenderer.TransferPipe;
