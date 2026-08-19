@@ -2,7 +2,6 @@
 
 #include <imgui.h>
 
-#include "Engine/Engine.hpp"
 #include "Renderer/Camera.hpp"
 #include "Game/FlyByCamera.hpp"
 #include "Engine/Core/Input.hpp"
@@ -25,12 +24,17 @@ namespace Game {
     };
 
     IncResult Create() {
-        MainCamera = CreateCamera();
+        MainCamera =
+            CreateCamera(
+                static_cast<f32>(GEngine.Config.Width) / static_cast<f32>(GEngine.Config.Height),
+                static_cast<f32>(GEngine.Config.FOV)
+            );
+
         MainCamera.Position = { 0, 75, 0 };
         UpdateMatrices(MainCamera);
 
-        INC_CHECK(Engine::Create(MainCamera), "couldn't create engine");
-        Engine::RefreshConfig();
+        INC_CHECK(Engine.Init(MainCamera), "couldn't create engine");
+        Engine.RefreshConfig();
 
         TerrainManager::Init();
 
@@ -46,9 +50,9 @@ namespace Game {
     }
 
     void Run() {
-        while (!Engine::ShouldClose()) {
+        while (!Engine.ShouldClose()) {
             TerrainManager::RefreshChunks(MainCamera.Position);
-            FrameInfo frame = Engine::Frame();
+            FrameInfo frame = Engine.Frame();
 
             OutFps(frame.DeltaTime);
             FlyByCamera::Update(frame.DeltaTime);
@@ -57,7 +61,7 @@ namespace Game {
     }
 
     void Destroy() {
-        Engine::Destroy();
+        Engine.Destroy();
     }
 
     void OutFps(f32 delta_time) {

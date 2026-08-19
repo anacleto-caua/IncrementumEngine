@@ -19,14 +19,44 @@ struct Camera {
     mat4 Projection = mat4(1.0f);
 };
 
-Camera CreateCamera();
-Camera CreateCamera(f32 aspect, f32 fov);
-
 // Updates the View and Projection based on current state.
-void UpdateMatrices(Camera &camera);
+inline void UpdateMatrices(Camera &camera) {
+    camera.View = math::lookAt(
+        camera.Position,
+        camera.Position + camera.Front,
+        camera.Up
+    );
+
+    camera.Projection = math::perspective(
+        math::radians(camera.Fov),
+        camera.AspectRatio,
+        camera.NearPlane,
+        camera.FarPlane
+    );
+
+    // Force the Y-flip for Vulkan
+    camera.Projection[1][1] *= -1.0f;
+}
+
+inline Camera CreateCamera(f32 aspect, f32 fov) {
+    Camera cam;
+    cam.AspectRatio = aspect;
+    cam.Fov = fov;
+
+    UpdateMatrices(cam);
+    return cam;
+}
 
 // Updates the aspect ratio and recalculates the matrices
-void Resize(Camera &camera, f32 new_aspect);
+inline void Resize(Camera &camera, f32 new_aspect) {
+    camera.AspectRatio = new_aspect;
+    UpdateMatrices(camera);
+}
 
 // Snaps the camera to look at a specific point in space
-void LookAt(Camera &camera, vec3 target);
+inline void LookAt(Camera &camera, vec3 target) {
+    camera.Front = math::normalize(target - camera.Position);
+    camera.Up = math::normalize(math::cross(vec3::RIGHT, camera.Front));
+
+    UpdateMatrices(camera);
+}

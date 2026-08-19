@@ -6,8 +6,7 @@
 
 #include <FastNoiseLite.hpp>
 
-#include "Renderer/Passes/TerrainPass.hpp"
-#include "Renderer/Resources/TransferPipe.hpp"
+#include "Game/Game.hpp"
 #include "Engine/Core/TaskScheduler/TaskScheduler.hpp"
 
 namespace TerrainManager {
@@ -110,7 +109,7 @@ namespace TerrainManager {
         TaskScheduler::Wait(counter);
 
         for (u32 i = 0; i < coords_counter; i++) {
-            TerrainPass::Heightmap::QueueSlice(i, &HeightmapData[i], sizeof(Heightmap));
+            GTerrainPass.Heightmap.QueueSlice(i, &HeightmapData[i], sizeof(Heightmap));
         }
 
         // The heightmap array is sampled through a single whole-array descriptor, so Vulkan
@@ -121,10 +120,10 @@ namespace TerrainManager {
         // irrelevant since nothing samples it until it's regenerated for real.
         Heightmap blank_heightmap{};
         for (u32 i = coords_counter; i < MaxCachedChunks; i++) {
-            TerrainPass::Heightmap::QueueSlice(i, &blank_heightmap, sizeof(Heightmap));
+            GTerrainPass.Heightmap.QueueSlice(i, &blank_heightmap, sizeof(Heightmap));
         }
 
-        TransferPipe::LazySubmit();
+        GTransferPipe.LazySubmit();
     }
 
     // --- RefreshChunks(): one in-flight generation at a time, polled, never blocking ---
@@ -232,12 +231,12 @@ namespace TerrainManager {
             };
             PositionToSlot[PackPosition(Generation.Position)] = Generation.TargetLayer;
 
-            TerrainPass::Heightmap::QueueSlice(
+            GTerrainPass.Heightmap.QueueSlice(
                 Generation.TargetLayer,
                 &HeightmapData[Generation.TargetLayer],
                 sizeof(Heightmap)
             );
-            TransferPipe::SubmitReleaseAndWrite();
+            GTransferPipe.SubmitReleaseAndWrite();
 
             // missing_position was computed before this finalization - if it's the position we
             // just resolved, it's not actually missing anymore, so don't re-trigger for it.

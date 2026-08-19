@@ -2,79 +2,72 @@
 
 #include <imgui.h>
 
-#include "Renderer/Renderer.hpp"
+#include "Renderer/Camera.hpp"
 #include "Engine/Core/FileIO.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Engine/Core/Platform.hpp"
-#include "Engine/Core/FrameTimer.hpp"
 #include "Engine/Core/TaskScheduler/TaskScheduler.hpp"
 
-namespace Engine {
-    FrameTimer Timer(Config.TargetFps);
+IncResult Engine::Init(Camera& camera) {
+    // Core
+    INC_CHECK(
+        Platform::Initialize(
+            static_cast<i32>(Config.Width),
+            static_cast<i32>(Config.Height),
+            Config.ApplicationTitle.data(),
+            [this](i32 width, i32 height) { ResizeEvent(width, height); }
+        ),
+        "couldn't create platform layer."
+    );
 
-    void ResizeEvent(i32 width, i32 height);
+    FileIO::Initialize();
 
-    IncResult Create(Camera& Camera) {
-        // Core
-        INC_CHECK(
-            Platform::Initialize(
-                static_cast<i32>(Config.Width),
-                static_cast<i32>(Config.Height),
-                Config.ApplicationTitle.data(),
-                Engine::ResizeEvent
-            ),
-            "couldn't create platform layer."
-        );
+    TaskScheduler::Create();
 
-        FileIO::Initialize();
+    // Renderer
+    INC_CHECK(
+        Renderer.Init(),
+        "couldn't create renderer."
+    );
 
-        TaskScheduler::Create();
+    Renderer.BindCamera(&camera);
 
-        // Renderer
-        INC_CHECK(
-            Renderer::Create(),
-            "couldn't create renderer."
-        );
+    return IncResult::SUCCESS;
+}
 
-        Renderer::BindCamera(&Camera);
+void Engine::Destroy() {
+    Renderer.Destroy();
+    Platform::Shutdown();
+    TaskScheduler::Destroy();
+}
 
-        return IncResult::SUCCESS;
-    }
+FrameInfo Engine::Frame() {
+    FrameInfo frame;
+    frame.DeltaTime = Timer.Tick();
 
-    void Destroy() {
-        Renderer::Destroy();
-        Platform::Shutdown();
-        TaskScheduler::Destroy();
-    }
+    // Actual frame starts
+    Platform::Update();
+    Renderer.Frame();
+    // Actual frame ends
 
-    FrameInfo Frame() {
-        FrameInfo frame;
-        frame.DeltaTime = Timer.Tick();
+    Timer.Sleep();
 
-        // Actual frame starts
-        Platform::Update();
-        Renderer::Frame();
-        // Actual frame ends
+    return frame;
+}
 
-        Timer.Sleep();
+void Engine::ResizeEvent(i32 width, i32 height) {
+    Config.Width = static_cast<u32>(width);
+    Config.Height = static_cast<u32>(height);
+    Renderer.Resize(width, height);
+}
 
-        return frame;
-    }
+bool Engine::ShouldClose() {
+    return Platform::ShouldClose();
+}
 
-    void ResizeEvent(i32 width, i32 height) {
-        Config.Width = static_cast<u32>(width);
-        Config.Height = static_cast<u32>(height);
-        Renderer::Resize(width, height);
-    }
-
-    bool ShouldClose() {
-        return Platform::ShouldClose();
-    }
-
-    void RefreshConfig() {
-        Window::SetTitle(Config.ApplicationTitle.data());
-        Window::SetSize(Config.Width, Config.Height);
-        Timer.SetTargetFPS(static_cast<f32>(Config.TargetFps));
-        Renderer::CurrentCamera->Fov = static_cast<f32>(Config.FOV);
-    }
+void Engine::RefreshConfig() {
+    Window::SetTitle(Config.ApplicationTitle.data());
+    Window::SetSize(Config.Width, Config.Height);
+    Timer.SetTargetFPS(static_cast<f32>(Config.TargetFps));
+    Renderer.CurrentCamera->Fov = static_cast<f32>(Config.FOV);
 }

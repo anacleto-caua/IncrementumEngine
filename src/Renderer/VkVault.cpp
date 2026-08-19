@@ -5,8 +5,8 @@
 #include <string>
 #include <cstring>
 
+#include "Renderer/Renderer.hpp"
 #include "Engine/Core/Window.hpp"
-#include "Renderer/Renderer_Internal.hpp"
 
 namespace VkVault {
     static constexpr std::array<const char*, 5> DEVICE_EXTENSIONS = {
@@ -195,7 +195,7 @@ namespace VkVault {
 
             // Format needed for depth buffer
             VkFormatProperties properties;
-            vkGetPhysicalDeviceFormatProperties(current_physical_device, Renderer::DepthBuffer::Format, &properties);
+            vkGetPhysicalDeviceFormatProperties(current_physical_device, Renderer::DepthBufferFormat, &properties);
             bool depth_format_support = (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
             if (!depth_format_support) {
                 break;

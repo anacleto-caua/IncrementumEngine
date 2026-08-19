@@ -1,697 +1,584 @@
 #include "Renderer.hpp"
-#include "Renderer/Vk/BinarySemaphore.hpp"
-#include "Renderer_Internal.hpp"
 
 #include <array>
 #include <vector>
 
 #include "VkVault.hpp"
-#include "Passes/ImGuiPass.hpp"
-#include "Passes/TerrainPass.hpp"
+#include "Camera.hpp"
+#include "Passes/Pass.hpp"
 #include "Engine/Core/Window.hpp"
-#include "Renderer/Resources/TransferPipe.hpp"
-#include "Renderer/Resources/ResourceManager.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
 
 #include "Renderer/Vk/LeanVk.hpp"
-#include "Renderer/Vk/SubmissionPile.hpp"
-#include "Renderer/Vk/BinarySemaphore.hpp"
-#include "Renderer/Vk/TimelineSemaphore.hpp"
-#include "Renderer/Vk/CommandBufferBlock.hpp"
 
-namespace Renderer {
-    SubmissionPile SubmissionPile;
+IncResult Renderer::Init() {
+    Passes = { &TerrainPass, &ImGuiPass };
 
-    // Per frame data used to track the frame submission structure
-    struct FrameData {
-        CommandBufferBlock FrameBlock;
-        BinarySemaphore ImageAvailable  = {};
-        u64 LastSignaledValue = 0;
+    INC_CHECK(VkVault::Create(), "vulkan context creation failed");
+    INC_CHECK(TransferPipe.Init(), "transfer pipe creation failed");
+    INC_CHECK(DescriptorManager::Create(), "descriptor manager creation failed");
+
+    INC_CHECK(InitSwapchain(), "swapchain creation failed");
+
+    SubmissionPile.Reset();
+
+    INC_CHECK(FrameSemaphore.Init(), "frame semaphore creation failed");
+
+    for (FrameData &frame : Frames) {
+        INC_CHECK(frame.ImageAvailable.Init(), "frame image-available semaphore creation failed");
+
+        INC_CHECK(frame.FrameBlock.Init(QueueRole::Graphics), "frame command buffer block creation failed");
+    }
+
+    // Fill general rendering information
+    Scissor = {
+        .offset = { 0, 0 },
+        .extent = SwapchainExtent
     };
 
-    TimelineSemaphore FrameSemaphore;
-    std::array<FrameData, Renderer::MAX_FRAMES_IN_FLIGHT> Frames;
+    Viewport = {
+        .x = 0, .y = 0,
+        .width = static_cast<float>(SwapchainExtent.width),
+        .height = static_cast<float>(SwapchainExtent.height),
+        .minDepth = 0.0f, .maxDepth = 1.0f
+    };
 
-    // Camera UBO Descriptor
-    namespace GlobalDescriptors {
-        VkPipelineLayout BaseLayout = VK_NULL_HANDLE;
+    ColorAttachment = {};
+    ColorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    ColorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+    ColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    ColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    ColorAttachment.clearValue.color = { .float32 = { 0.1f, 0.1f, 0.1f, 1.0f } };
 
-        struct SceneGlobals {
-            mat4 ViewProjection;
-            alignas (16) vec3 CameraPosition;
-        };
+    INC_CHECK(InitDepthBuffer(SwapchainExtent.width, SwapchainExtent.height), "depth buffer creation failed");
+    DepthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    DepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    DepthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    DepthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    DepthAttachment.clearValue.depthStencil = { 1.0f, 0 };
 
-        std::array<Buffer::Id, Renderer::MAX_FRAMES_IN_FLIGHT> SceneGlobalsBuffer;
+    RenderingInfo = {};
+    RenderingInfo.renderArea = {
+        .offset = { 0, 0 },
+        .extent = SwapchainExtent
+    };
+    RenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    RenderingInfo.layerCount = 1;
+    RenderingInfo.colorAttachmentCount = 1;
+    RenderingInfo.pColorAttachments = &ColorAttachment;
+    RenderingInfo.pDepthAttachment = &DepthAttachment;
 
-        // On Renderer_Internal.hpp
-        // std::array<VkDescriptorSet, Renderer::MAX_FRAMES_IN_FLIGHT> Sets = { VK_NULL_HANDLE };
+    // Other essential rendering things
+    INC_CHECK(InitGlobalDescriptors(), "global descriptors creation failed");
 
-        IncResult Create();
-        void Destroy();
+    // Render passes
+    for (Pass* pass : Passes) {
+        INC_CHECK(pass->Init(), "pass initialization failed");
     }
 
-    // Other pipeline data
-    VkRect2D Scissor {};
-    VkViewport Viewport {};
-    VkRenderingAttachmentInfo ColorAttachment {};
-    VkRenderingAttachmentInfo DepthAttachment {};
-    VkRenderingInfo RenderingInfo {};
+    return IncResult::SUCCESS;
+}
 
-    namespace Swapchain {
-        struct SwapchainImage {
-            VkImage Image = VK_NULL_HANDLE;
-            VkImageView ImageView = VK_NULL_HANDLE;
-            BinarySemaphore RenderFinished = {};
-        };
+void Renderer::Destroy() {
+    vkDeviceWaitIdle(VkVault::Device);
 
-        VkExtent2D Extent;
-        VkSwapchainKHR Swapchain;
-
-        VkPresentInfoKHR PresentInfo {};
-
-        std::vector<SwapchainImage> Images;
-
-        IncResult Create();
-        void Destroy();
-
-        // Implies recreation btw
-        IncResult Resize(u32 width, u32 height);
+    FrameSemaphore.Destroy();
+    for (FrameData &frame : Frames) {
+        frame.FrameBlock.Destroy();
+        frame.ImageAvailable.Destroy();
     }
 
-    namespace DepthBuffer {
-        Image::Id Image;
-        ImageView::Id ImageView;
+    for (auto it = Passes.rbegin(); it != Passes.rend(); ++it) { (*it)->Destroy(); }
+    DestroyGlobalDescriptors();
+    DestroySwapchain();
+    DestroyDepthBuffer();
+    DescriptorManager::Destroy();
+    TransferPipe.Destroy();
 
-        IncResult Create(u32 width, u32 height);
-        void Destroy();
+    Buffers.DestroyAll();
+    Images.DestroyAll();
+    ImageViews.DestroyAll();
 
-        void Resize(u32 width, u32 height);
-    }
+    VkVault::Destroy();
+}
 
-    IncResult Create() {
-        INC_CHECK(VkVault::Create(), "vulkan context creation failed");
-        INC_CHECK(ResourceManager::Initialize(), "resource manager creation failed");
-        INC_CHECK(TransferPipe::Create(), "transfer pipe creation failed");
-        INC_CHECK(DescriptorManager::Create(), "descriptor manager creation failed");
+void Renderer::Frame() {
+    // Update context
+    FrameData& target_frame = Frames[FrameContext.FrameInFlightIndex];
 
-        INC_CHECK(Swapchain::Create(), "swapchain creation failed");
+    // Wait for this frame-in-flight slot's previous GPU work to actually finish before
+    // resetting its command pool - resetting first would reset buffers that might still be pending.
+    FrameSemaphore.Wait(target_frame.LastSignaledValue);
 
-        // Create per frame info
-        VkCommandPoolCreateInfo render_cmd_poll_create_info {};
-        render_cmd_poll_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        render_cmd_poll_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-        render_cmd_poll_create_info.queueFamilyIndex = VkVault::Queues[QueueRole::Graphics].FamilyIndex;
+    target_frame.FrameBlock.Reset();
+    FrameContext.DrawCommand = target_frame.FrameBlock.GetNext();
 
-        VkCommandBufferAllocateInfo cmd_buffer_alloc_info {};
-        cmd_buffer_alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        cmd_buffer_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        cmd_buffer_alloc_info.commandPool = VK_NULL_HANDLE;
-        cmd_buffer_alloc_info.commandBufferCount = 1;
-
-        SubmissionPile.Reset();
-
-        FrameSemaphore = CreateTimelineSemaphore();
-
-        for (FrameData &frame : Frames) {
-            frame.ImageAvailable = CreateBinarySemaphore();
-
-            Create(frame.FrameBlock, QueueRole::Graphics);
-        }
-
-        // Fill general rendering information
-        Scissor = {
-            .offset = { 0, 0 },
-            .extent = Swapchain::Extent
-        };
-
-        Viewport = {
-            .x = 0, .y = 0,
-            .width = static_cast<float>(Swapchain::Extent.width),
-            .height = static_cast<float>(Swapchain::Extent.height),
-            .minDepth = 0.0f, .maxDepth = 1.0f
-        };
-
-        ColorAttachment = {};
-        ColorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        ColorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
-        ColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        ColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        ColorAttachment.clearValue.color = { .float32 = { 0.1f, 0.1f, 0.1f, 1.0f } };
-
-        INC_CHECK(DepthBuffer::Create(Swapchain::Extent.width, Swapchain::Extent.height), "depth buffer creation failed");
-        DepthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        DepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        DepthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        DepthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        DepthAttachment.clearValue.depthStencil = { 1.0f, 0 };
-
-        RenderingInfo = {};
-        RenderingInfo.renderArea = {
-            .offset = { 0, 0 },
-            .extent = Swapchain::Extent
-        };
-        RenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-        RenderingInfo.layerCount = 1;
-        RenderingInfo.colorAttachmentCount = 1;
-        RenderingInfo.pColorAttachments = &ColorAttachment;
-        RenderingInfo.pDepthAttachment = &DepthAttachment;
-
-        // Other essential rendering things
-        INC_CHECK(GlobalDescriptors::Create(), "global descriptors creation failed");
-
-        // Render passes
-        INC_CHECK(ImGuiPass::Create(), "failed to create imgui context");
-        INC_CHECK(TerrainPass::Create(), "failed to create terrain pass");
-
-        return IncResult::SUCCESS;
-    }
-
-    void Destroy() {
+    VkResult result = vkAcquireNextImageKHR(
+        VkVault::Device,
+        SwapchainHandle,
+        UINT64_MAX,
+        target_frame.ImageAvailable.Semaphore,
+        VK_NULL_HANDLE,
+        &FrameContext.ImageViewIndex
+    );
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         vkDeviceWaitIdle(VkVault::Device);
-
-        DestroyTimelineSemaphore(FrameSemaphore);
-        for (FrameData &frame : Frames) {
-            Destroy(frame.FrameBlock);
-            DestroyBinarySemaphore(frame.ImageAvailable);
-        }
-
-        TerrainPass::Destroy();
-        ImGuiPass::Destroy();
-        GlobalDescriptors::Destroy();
-        Swapchain::Destroy();
-        DepthBuffer::Destroy();
-        DescriptorManager::Destroy();
-        TransferPipe::Destroy();
-        ResourceManager::Shutdown();
-        VkVault::Destroy();
+        return;
     }
 
-    void Frame() {
-        // Update context
-        FrameData& target_frame = Frames[FrameContext.FrameInFlightIndex];
+    // No LeanVk::ResetCommand needed here - target_frame.FrameBlock.Reset() above already
+    // reset the whole pool (and the pool was never created with RESET_COMMAND_BUFFER_BIT,
+    // so resetting this one buffer individually would be invalid anyway).
+    LeanVk::BeginCommand(FrameContext.DrawCommand);
 
-        // Wait for this frame-in-flight slot's previous GPU work to actually finish before
-        // resetting its command pool - resetting first would reset buffers that might still be pending.
-        WaitOnTimelineSemaphore(FrameSemaphore, target_frame.LastSignaledValue);
-
-        Reset(target_frame.FrameBlock);
-        FrameContext.DrawCommand = GetNext(target_frame.FrameBlock);
-
-        VkResult result = vkAcquireNextImageKHR(
-            VkVault::Device,
-            Swapchain::Swapchain,
-            UINT64_MAX,
-            target_frame.ImageAvailable.Semaphore,
-            VK_NULL_HANDLE,
-            &FrameContext.ImageViewIndex
-        );
-        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-            vkDeviceWaitIdle(VkVault::Device);
-            return;
-        }
-
-        // No LeanVk::ResetCommand needed here - Reset(target_frame.FrameBlock) above already
-        // reset the whole pool (and the pool was never created with RESET_COMMAND_BUFFER_BIT,
-        // so resetting this one buffer individually would be invalid anyway).
-        LeanVk::BeginCommand(FrameContext.DrawCommand);
-
-        // Frame sensible transfers, will be completed before the begin of the drawing phase
+    // Frame sensible transfers, will be completed before the begin of the drawing phase
+    {
+        // Camera UBO for descriptor
         {
-            // Camera UBO for descriptor
-            {
-                auto ubo_buffer = Buffer::Get(GlobalDescriptors::SceneGlobalsBuffer[FrameContext.FrameInFlightIndex]);
-                GlobalDescriptors::SceneGlobals ubo_data = {
-                    .ViewProjection = CurrentCamera->Projection * CurrentCamera->View,
-                    .CameraPosition = CurrentCamera->Position
-                };
-
-                vkCmdUpdateBuffer(
-                    FrameContext.DrawCommand,
-                    ubo_buffer->Buffer,
-                    0,
-                    sizeof(GlobalDescriptors::SceneGlobals),
-                    &ubo_data
-                );
-            }
-
-            // Passes transfers
-            TerrainPass::FrameSensibleTransfers();
-
-            // Barriers to hold the drawing back
-            VkMemoryBarrier transfer_sync_barrier = {
-                .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
-                .pNext = nullptr,
-                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_INDEX_READ_BIT
+            auto ubo_buffer = Buffers.Get(SceneGlobalsBuffer[FrameContext.FrameInFlightIndex]);
+            SceneGlobals ubo_data = {
+                .ViewProjection = CurrentCamera->Projection * CurrentCamera->View,
+                .CameraPosition = CurrentCamera->Position
             };
 
-            vkCmdPipelineBarrier(
+            vkCmdUpdateBuffer(
                 FrameContext.DrawCommand,
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+                ubo_buffer->Handle,
                 0,
-                1, &transfer_sync_barrier,
-                0, nullptr, 0, nullptr
+                sizeof(SceneGlobals),
+                &ubo_data
             );
         }
 
-        VkImageMemoryBarrier rendering_barrier = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        // Passes transfers
+        for (Pass* pass : Passes) { pass->FrameSensibleTransfers(); }
+
+        // Barriers to hold the drawing back
+        VkMemoryBarrier transfer_sync_barrier = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .pNext = nullptr,
-            .srcAccessMask = 0,
-            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-            .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = Swapchain::Images[FrameContext.ImageViewIndex].Image,
-            .subresourceRange {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            }
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_UNIFORM_READ_BIT | VK_ACCESS_INDEX_READ_BIT
         };
-        VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-        VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
         vkCmdPipelineBarrier(
             FrameContext.DrawCommand,
-            src_stage, dst_stage,
-            0, 0, nullptr, 0, nullptr, 1,
-            &rendering_barrier
-        );
-
-        ColorAttachment.imageView = Swapchain::Images[FrameContext.ImageViewIndex].ImageView;
-        vkCmdBeginRendering(FrameContext.DrawCommand, &RenderingInfo);
-        vkCmdSetViewport(FrameContext.DrawCommand, 0, 1, &Viewport);
-        vkCmdSetScissor(FrameContext.DrawCommand, 0, 1, &Scissor);
-
-        // Bind SET 0 for the entire frame
-        vkCmdBindDescriptorSets(
-            FrameContext.DrawCommand,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            GlobalDescriptors::BaseLayout,
-            0, // firstSet = 0
-            1, // descriptorSetCount = 1
-            &GlobalDescriptors::Sets[FrameContext.FrameInFlightIndex],
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
             0,
-            nullptr
+            1, &transfer_sync_barrier,
+            0, nullptr, 0, nullptr
         );
-
-        // Actual frame begins
-
-        TerrainPass::Render();
-
-        ImGuiPass::Render();
-
-        // Actual frame ends
-
-        vkCmdEndRendering(FrameContext.DrawCommand);
-
-        VkImageMemoryBarrier presenting_barrier = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            .pNext = nullptr,
-            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            .dstAccessMask = 0,
-            .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-            .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = Swapchain::Images[FrameContext.ImageViewIndex].Image,
-            .subresourceRange {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            }
-        };
-        VkPipelineStageFlags src_stage_2 = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        VkPipelineStageFlags dst_stage_2 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-        vkCmdPipelineBarrier(
-            FrameContext.DrawCommand,
-            src_stage_2, dst_stage_2,
-            0, 0, nullptr, 0, nullptr, 1,
-            &presenting_barrier
-        );
-
-        LeanVk::EndCommand(FrameContext.DrawCommand);
-
-        // Reclaim any command buffer pools whose prior work has actually finished on the GPU
-        TransferPipe::TryReclaimCommandBuffers();
-
-        // Fold pending image ownership acquires into this frame's own submission instead of paying for a second vkQueueSubmit2 -
-        // done BEFORE the draw's own submission below so its ticket is known in time to wait on it there.
-        TransferPipe::AcquirePending(QueueRole::Graphics, SubmissionPile);
-
-        // Submission structure
-        SubmissionPile.BeginSubmission();
-
-        SubmissionPile.AddCommand(FrameContext.DrawCommand);
-
-        SubmissionPile.WaitBinarySemaphore(target_frame.ImageAvailable, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
-
-        // AcquirePending's barrier is a separate submission entry with no implicit ordering
-        // relative to this one - without this wait, the draw could sample a heightmap layer
-        // that was just re-streamed before its re-acquire has actually executed.
-        Ticket last_acquire_ticket;
-        if (TransferPipe::GetLastAcquireTicket(QueueRole::Graphics, last_acquire_ticket)) {
-            SubmissionPile.WaitForTicket(last_acquire_ticket, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
-        }
-
-        SubmissionPile.SignalBinarySemaphore(Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished);
-
-        // Hm, seems to be a bad data accesing pattern
-        TimelineSemaphoreValue* frame_semaphore_value = GetTimelineSemaphoreValue(FrameSemaphore);
-        u64 signal_value = ++frame_semaphore_value->LastPromissedValue;
-        SubmissionPile.SignalTimeline(FrameSemaphore, signal_value);
-
-        SubmissionPile.EndSubmission();
-
-        // Submit
-        SubmissionPile.Submit(QueueRole::Graphics);
-
-        Swapchain::PresentInfo.pWaitSemaphores = &Swapchain::Images[FrameContext.ImageViewIndex].RenderFinished.Semaphore;
-        vkQueuePresentKHR(VkVault::Queues[QueueRole::Present].Queue, &Swapchain::PresentInfo);
-
-        // Save the timeline value so the CPU can wait on it next time!
-        target_frame.LastSignaledValue = signal_value;
-
-        FrameContext.FrameInFlightIndex =
-            (FrameContext.FrameInFlightIndex + 1) % Renderer::MAX_FRAMES_IN_FLIGHT;
     }
 
-    void Resize(i32 width, i32 height) {
-        if (width == 0 || height == 0) {
-            return;
+    VkImageMemoryBarrier rendering_barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = 0,
+        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = SwapchainImages[FrameContext.ImageViewIndex].Image,
+        .subresourceRange {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
         }
-        u32 uw = static_cast<u32>(width);
-        u32 uh = static_cast<u32>(height);
-        vkDeviceWaitIdle(VkVault::Device);
-        Swapchain::Resize(uw, uh);
-        DepthBuffer::Resize(uw, uh);
+    };
+    VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    vkCmdPipelineBarrier(
+        FrameContext.DrawCommand,
+        src_stage, dst_stage,
+        0, 0, nullptr, 0, nullptr, 1,
+        &rendering_barrier
+    );
+
+    ColorAttachment.imageView = SwapchainImages[FrameContext.ImageViewIndex].ImageView;
+    vkCmdBeginRendering(FrameContext.DrawCommand, &RenderingInfo);
+    vkCmdSetViewport(FrameContext.DrawCommand, 0, 1, &Viewport);
+    vkCmdSetScissor(FrameContext.DrawCommand, 0, 1, &Scissor);
+
+    // Bind SET 0 for the entire frame
+    vkCmdBindDescriptorSets(
+        FrameContext.DrawCommand,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        GlobalDescriptorsBaseLayout,
+        0, // firstSet = 0
+        1, // descriptorSetCount = 1
+        &GlobalDescriptors.Sets[FrameContext.FrameInFlightIndex],
+        0,
+        nullptr
+    );
+
+    // Actual frame begins
+
+    for (Pass* pass : Passes) { pass->Render(); }
+
+    // Actual frame ends
+
+    vkCmdEndRendering(FrameContext.DrawCommand);
+
+    VkImageMemoryBarrier presenting_barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask = 0,
+        .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = SwapchainImages[FrameContext.ImageViewIndex].Image,
+        .subresourceRange {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        }
+    };
+    VkPipelineStageFlags src_stage_2 = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkPipelineStageFlags dst_stage_2 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    vkCmdPipelineBarrier(
+        FrameContext.DrawCommand,
+        src_stage_2, dst_stage_2,
+        0, 0, nullptr, 0, nullptr, 1,
+        &presenting_barrier
+    );
+
+    LeanVk::EndCommand(FrameContext.DrawCommand);
+
+    // Reclaim any command buffer pools whose prior work has actually finished on the GPU
+    TransferPipe.TryReclaimCommandBuffers();
+
+    // Fold pending image ownership acquires into this frame's own submission instead of paying for a second vkQueueSubmit2 -
+    // done BEFORE the draw's own submission below so its ticket is known in time to wait on it there.
+    TransferPipe.AcquirePending(QueueRole::Graphics, SubmissionPile);
+
+    // Submission structure
+    SubmissionPile.BeginSubmission();
+
+    SubmissionPile.AddCommand(FrameContext.DrawCommand);
+
+    SubmissionPile.WaitBinarySemaphore(target_frame.ImageAvailable, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT);
+
+    // AcquirePending's barrier is a separate submission entry with no implicit ordering
+    // relative to this one - without this wait, the draw could sample a heightmap layer
+    // that was just re-streamed before its re-acquire has actually executed.
+    Ticket last_acquire_ticket;
+    if (TransferPipe.GetLastAcquireTicket(QueueRole::Graphics, last_acquire_ticket)) {
+        SubmissionPile.WaitForTicket(last_acquire_ticket, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
     }
 
-    void BindCamera(Camera* camera) {
-        CurrentCamera = camera;
+    SubmissionPile.SignalBinarySemaphore(SwapchainImages[FrameContext.ImageViewIndex].RenderFinished);
+
+    // Hm, seems to be a bad data accesing pattern
+    u64 signal_value = ++FrameSemaphore.LastPromissedValue;
+    SubmissionPile.SignalTimeline(FrameSemaphore, signal_value);
+
+    SubmissionPile.EndSubmission();
+
+    // Submit
+    SubmissionPile.Submit();
+
+    SwapchainPresentInfo.pWaitSemaphores = &SwapchainImages[FrameContext.ImageViewIndex].RenderFinished.Semaphore;
+    vkQueuePresentKHR(VkVault::Queues[QueueRole::Present].Queue, &SwapchainPresentInfo);
+
+    // Save the timeline value so the CPU can wait on it next time!
+    target_frame.LastSignaledValue = signal_value;
+
+    FrameContext.FrameInFlightIndex =
+        (FrameContext.FrameInFlightIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+void Renderer::Resize(i32 width, i32 height) {
+    if (width == 0 || height == 0) {
+        return;
+    }
+    u32 uw = static_cast<u32>(width);
+    u32 uh = static_cast<u32>(height);
+    vkDeviceWaitIdle(VkVault::Device);
+    ResizeSwapchain(uw, uh);
+    ResizeDepthBuffer(uw, uh);
+}
+
+void Renderer::BindCamera(Camera* camera) {
+    CurrentCamera = camera;
+}
+
+IncResult Renderer::InitGlobalDescriptors() {
+    Buffer::CreateInfo create_info = {
+        .Size = sizeof(SceneGlobals),
+        .Type = Buffer::Type::UBO
+    };
+    for (BufferId& id : SceneGlobalsBuffer) {
+        INC_CHECK(Buffers.Add(create_info, id), "scene globals buffer creation failed");
     }
 
-    namespace GlobalDescriptors {
-        IncResult Create() {
-            Buffer::CreateInfo create_info = {
-                .Size = sizeof(SceneGlobals),
-                .Type = Buffer::Type::UBO
-            };
-            for (Buffer::Id& id : SceneGlobalsBuffer) {
-                INC_CHECK(Buffer::Add(create_info, id), "scene globals buffer creation failed");
-            }
+    DescriptorManager::AllocateSets(
+        DescriptorManager::GlobalLayout,
+        MAX_FRAMES_IN_FLIGHT,
+        GlobalDescriptors.Sets.data()
+    );
 
-            DescriptorManager::AllocateSets(
-                DescriptorManager::GlobalLayout,
-                Renderer::MAX_FRAMES_IN_FLIGHT,
-                GlobalDescriptors::Sets.data()
-            );
+    // Loop through each frame in flight and write both bindings
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
 
-            // Loop through each frame in flight and write both bindings
-            for (u32 i = 0; i < Renderer::MAX_FRAMES_IN_FLIGHT; ++i) {
+        // Write the camera ubo buffer
+        auto camera_ubo_buffer_value = Buffers.Get(SceneGlobalsBuffer[i]);
+        VkDescriptorBufferInfo camera_ubo_descriptor_info {};
+        camera_ubo_descriptor_info.buffer = camera_ubo_buffer_value->Handle;
+        camera_ubo_descriptor_info.offset = 0;
+        camera_ubo_descriptor_info.range = camera_ubo_buffer_value->Size;
 
-                // Write the camera ubo buffer
-                auto camera_ubo_buffer_value = Buffer::Get(SceneGlobalsBuffer[i]);
-                VkDescriptorBufferInfo camera_ubo_descriptor_info {};
-                camera_ubo_descriptor_info.buffer = camera_ubo_buffer_value->Buffer;
-                camera_ubo_descriptor_info.offset = 0;
-                camera_ubo_descriptor_info.range = camera_ubo_buffer_value->Size;
+        VkWriteDescriptorSet camera_ubo_write {};
+        camera_ubo_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        camera_ubo_write.dstSet = GlobalDescriptors.Sets[i];
+        camera_ubo_write.dstBinding = DescriptorMap::Global::Binding_SceneGlobals;
+        camera_ubo_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        camera_ubo_write.descriptorCount = 1;
+        camera_ubo_write.pBufferInfo = &camera_ubo_descriptor_info;
 
-                VkWriteDescriptorSet camera_ubo_write {};
-                camera_ubo_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                camera_ubo_write.dstSet = GlobalDescriptors::Sets[i];
-                camera_ubo_write.dstBinding = DescriptorMap::Global::Binding_SceneGlobals;
-                camera_ubo_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                camera_ubo_write.descriptorCount = 1;
-                camera_ubo_write.pBufferInfo = &camera_ubo_descriptor_info;
-
-                // Execute writes for Set[i]
-                vkUpdateDescriptorSets(VkVault::Device, 1, &camera_ubo_write, 0, nullptr);
-            }
-
-            VkPipelineLayoutCreateInfo base_layout_info = {
-                .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                .pNext = nullptr,
-                .flags = 0,
-                .setLayoutCount = 1,
-                .pSetLayouts = &DescriptorManager::GlobalLayout,
-                .pushConstantRangeCount = 0,
-                .pPushConstantRanges = nullptr
-            };
-
-            VK_CHECK(
-                vkCreatePipelineLayout(VkVault::Device, &base_layout_info, nullptr, &BaseLayout),
-                "global base pipeline layout creation failed"
-            );
-
-            return IncResult::SUCCESS;
-        }
-
-        void Destroy() {
-            for (Buffer::Id& id : SceneGlobalsBuffer) {
-                Buffer::Del(id);
-            }
-            if (BaseLayout) { vkDestroyPipelineLayout(VkVault::Device, BaseLayout, nullptr); }
-        }
+        // Execute writes for Set[i]
+        vkUpdateDescriptorSets(VkVault::Device, 1, &camera_ubo_write, 0, nullptr);
     }
 
-    namespace Swapchain {
-        VkSwapchainCreateInfoKHR CreateInfo {};
+    VkPipelineLayoutCreateInfo base_layout_info = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .setLayoutCount = 1,
+        .pSetLayouts = &DescriptorManager::GlobalLayout,
+        .pushConstantRangeCount = 0,
+        .pPushConstantRanges = nullptr
+    };
 
-        // Calling with old_swapchain = VK_NULL_HANDLE is the equivalent as creating a new one
-        IncResult Recreate(VkSwapchainKHR old_swapchain);
-        void Destroy(VkSwapchainKHR old_swapchain);
-        void CleanupImages();
+    VK_CHECK(
+        vkCreatePipelineLayout(VkVault::Device, &base_layout_info, nullptr, &GlobalDescriptorsBaseLayout),
+        "global base pipeline layout creation failed"
+    );
 
-        IncResult Create() {
-            auto capabilities = VkVault::QuerySurfaceCapabilities();
-            Extent = capabilities.currentExtent;
-            ImageCount = capabilities.minImageCount + 1;
+    return IncResult::SUCCESS;
+}
 
-            CreateInfo = {};
-            CreateInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-            CreateInfo.surface = VkVault::Surface;
-            CreateInfo.minImageCount = Swapchain::ImageCount;
-            CreateInfo.imageFormat = VkVault::SurfaceFormat.format;
-            CreateInfo.imageColorSpace = VkVault::SurfaceFormat.colorSpace;
-            CreateInfo.imageArrayLayers = 1;
-            CreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-            CreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-            CreateInfo.presentMode = VkVault::PresentMode;
-            CreateInfo.clipped = VK_TRUE;
-            CreateInfo.oldSwapchain = VK_NULL_HANDLE;
+void Renderer::DestroyGlobalDescriptors() {
+    for (BufferId& id : SceneGlobalsBuffer) {
+        Buffers.Del(id);
+    }
+    if (GlobalDescriptorsBaseLayout) { vkDestroyPipelineLayout(VkVault::Device, GlobalDescriptorsBaseLayout, nullptr); }
+}
 
-            u32 QueueFamilyIndices[] = { VkVault::Queues[QueueRole::Graphics].FamilyIndex, VkVault::Queues[QueueRole::Present].FamilyIndex };
-            if (VkVault::Queues[QueueRole::Graphics].FamilyIndex != VkVault::Queues[QueueRole::Present].FamilyIndex) {
-                CreateInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-                CreateInfo.queueFamilyIndexCount = 2;
-                CreateInfo.pQueueFamilyIndices = QueueFamilyIndices;
-            } else {
-                CreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-                CreateInfo.queueFamilyIndexCount = 0;
-                CreateInfo.pQueueFamilyIndices = nullptr;
-            }
+IncResult Renderer::InitSwapchain() {
+    auto capabilities = VkVault::QuerySurfaceCapabilities();
+    SwapchainExtent = capabilities.currentExtent;
+    Swapchain.ImageCount = capabilities.minImageCount + 1;
 
-            // Finally create the Swapchain
-            i32 w, h;
-            Window::GetFramebufferSize(w, h);
-            Extent.width = static_cast<u32>(w);
-            Extent.height = static_cast<u32>(h);
+    SwapchainCreateInfo = {};
+    SwapchainCreateInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    SwapchainCreateInfo.surface = VkVault::Surface;
+    SwapchainCreateInfo.minImageCount = Swapchain.ImageCount;
+    SwapchainCreateInfo.imageFormat = VkVault::SurfaceFormat.format;
+    SwapchainCreateInfo.imageColorSpace = VkVault::SurfaceFormat.colorSpace;
+    SwapchainCreateInfo.imageArrayLayers = 1;
+    SwapchainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    SwapchainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    SwapchainCreateInfo.presentMode = VkVault::PresentMode;
+    SwapchainCreateInfo.clipped = VK_TRUE;
+    SwapchainCreateInfo.oldSwapchain = VK_NULL_HANDLE;
 
-            INC_CHECK(Recreate(VK_NULL_HANDLE), "failed to create the swapchain on startup");
-
-            PresentInfo = {};
-            PresentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-            PresentInfo.swapchainCount = 1;
-            PresentInfo.pSwapchains = &Swapchain;
-            PresentInfo.waitSemaphoreCount = 1;
-            PresentInfo.pImageIndices = &FrameContext.ImageViewIndex;
-
-            return IncResult::SUCCESS;
-        }
-
-        void Destroy() {
-            CleanupImages();
-            Destroy(Swapchain);
-        }
-
-        IncResult Resize(u32 width, u32 height) {
-            auto capabilities = VkVault::QuerySurfaceCapabilities();
-            VkExtent2D min_extent = capabilities.minImageExtent;
-            VkExtent2D max_extent = capabilities.maxImageExtent;
-            auto clamp = [](auto val, auto min, auto max) { return (val < min) ? min : (val > max) ? max : val; };
-            Extent.width = clamp(width, min_extent.width, max_extent.width);
-            Extent.height = clamp(height, min_extent.height, max_extent.height);
-            Scissor.extent = Extent;
-            Viewport.width = static_cast<float>(Extent.width);
-            Viewport.height = static_cast<float>(Extent.height);
-            RenderingInfo.renderArea = {
-                .offset = { 0, 0 },
-                .extent = Extent
-            };
-
-            INC_CHECK(Recreate(Swapchain), "failed to recreate the swapchain on a resize event w:{} - h:{}", width, height);
-
-            return IncResult::SUCCESS;
-        }
-
-        IncResult Recreate(VkSwapchainKHR old_swapchain) {
-            vkDeviceWaitIdle(VkVault::Device);
-            CreateInfo.imageExtent = Extent;
-            CreateInfo.oldSwapchain = old_swapchain;
-            auto capabilities = VkVault::QuerySurfaceCapabilities();
-            CreateInfo.preTransform = capabilities.currentTransform;
-
-            VK_CHECK(vkCreateSwapchainKHR(VkVault::Device, &CreateInfo, nullptr, &Swapchain), "swapchain creation failed");
-
-            vkGetSwapchainImagesKHR(VkVault::Device, Swapchain, &ImageCount, nullptr);
-            std::vector<VkImage> images_temp(ImageCount);
-            vkGetSwapchainImagesKHR(VkVault::Device, Swapchain, &ImageCount, images_temp.data());
-            Images.resize(ImageCount);
-
-            CleanupImages();
-
-            VkImageViewCreateInfo swapchain_image_view_create_info = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-                .pNext = nullptr,
-                .flags = 0,
-                .image = VK_NULL_HANDLE, // to fill later
-                .viewType = VK_IMAGE_VIEW_TYPE_2D,
-                .format = VkVault::SurfaceFormat.format,
-                .components = {
-                    .r = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .g = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .b = VK_COMPONENT_SWIZZLE_IDENTITY,
-                    .a = VK_COMPONENT_SWIZZLE_IDENTITY
-                },
-                .subresourceRange = {
-                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                    .baseMipLevel = 0,
-                    .levelCount = 1,
-                    .baseArrayLayer = 0,
-                    .layerCount = 1
-                }
-            };
-
-            for (u32 i = 0; i < ImageCount; i++) {
-                Images[i].Image = images_temp[i];
-                swapchain_image_view_create_info.image = Images[i].Image;
-                VK_CHECK(
-                    vkCreateImageView(VkVault::Device, &swapchain_image_view_create_info, nullptr, &Images[i].ImageView),
-                    "swapchain image view creation failed"
-                );
-                Images[i].RenderFinished = CreateBinarySemaphore();
-            }
-
-            Destroy(old_swapchain);
-
-            return IncResult::SUCCESS;
-        }
-
-        void Destroy(VkSwapchainKHR old_swapchain) {
-            if (Swapchain) { vkDestroySwapchainKHR(VkVault::Device, old_swapchain, nullptr); }
-        }
-
-        void CleanupImages() {
-            for (SwapchainImage& image : Images) {
-                if (image.ImageView) { vkDestroyImageView(VkVault::Device, image.ImageView, nullptr); }
-                DestroyBinarySemaphore(image.RenderFinished);
-            }
-        }
+    u32 QueueFamilyIndices[] = { VkVault::Queues[QueueRole::Graphics].FamilyIndex, VkVault::Queues[QueueRole::Present].FamilyIndex };
+    if (VkVault::Queues[QueueRole::Graphics].FamilyIndex != VkVault::Queues[QueueRole::Present].FamilyIndex) {
+        SwapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        SwapchainCreateInfo.queueFamilyIndexCount = 2;
+        SwapchainCreateInfo.pQueueFamilyIndices = QueueFamilyIndices;
+    } else {
+        SwapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        SwapchainCreateInfo.queueFamilyIndexCount = 0;
+        SwapchainCreateInfo.pQueueFamilyIndices = nullptr;
     }
 
-    namespace DepthBuffer {
-        VkClearDepthStencilValue ClearStencilValue = {
-            .depth = 0.0,
-            .stencil = 1
-        };
+    // Finally create the Swapchain
+    i32 w, h;
+    Window::GetFramebufferSize(w, h);
+    SwapchainExtent.width = static_cast<u32>(w);
+    SwapchainExtent.height = static_cast<u32>(h);
 
-        VkImageSubresourceRange Range = {
-            .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
+    INC_CHECK(RecreateSwapchain(VK_NULL_HANDLE), "failed to create the swapchain on startup");
+
+    SwapchainPresentInfo = {};
+    SwapchainPresentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    SwapchainPresentInfo.swapchainCount = 1;
+    SwapchainPresentInfo.pSwapchains = &SwapchainHandle;
+    SwapchainPresentInfo.waitSemaphoreCount = 1;
+    SwapchainPresentInfo.pImageIndices = &FrameContext.ImageViewIndex;
+
+    return IncResult::SUCCESS;
+}
+
+void Renderer::DestroySwapchain() {
+    CleanupSwapchainImages();
+    DestroySwapchainKHR(SwapchainHandle);
+}
+
+IncResult Renderer::ResizeSwapchain(u32 width, u32 height) {
+    auto capabilities = VkVault::QuerySurfaceCapabilities();
+    VkExtent2D min_extent = capabilities.minImageExtent;
+    VkExtent2D max_extent = capabilities.maxImageExtent;
+    auto clamp = [](auto val, auto min, auto max) { return (val < min) ? min : (val > max) ? max : val; };
+    SwapchainExtent.width = clamp(width, min_extent.width, max_extent.width);
+    SwapchainExtent.height = clamp(height, min_extent.height, max_extent.height);
+    Scissor.extent = SwapchainExtent;
+    Viewport.width = static_cast<float>(SwapchainExtent.width);
+    Viewport.height = static_cast<float>(SwapchainExtent.height);
+    RenderingInfo.renderArea = {
+        .offset = { 0, 0 },
+        .extent = SwapchainExtent
+    };
+
+    INC_CHECK(RecreateSwapchain(SwapchainHandle), "failed to recreate the swapchain on a resize event w:{} - h:{}", width, height);
+
+    return IncResult::SUCCESS;
+}
+
+IncResult Renderer::RecreateSwapchain(VkSwapchainKHR old_swapchain) {
+    vkDeviceWaitIdle(VkVault::Device);
+    SwapchainCreateInfo.imageExtent = SwapchainExtent;
+    SwapchainCreateInfo.oldSwapchain = old_swapchain;
+    auto capabilities = VkVault::QuerySurfaceCapabilities();
+    SwapchainCreateInfo.preTransform = capabilities.currentTransform;
+
+    VK_CHECK(vkCreateSwapchainKHR(VkVault::Device, &SwapchainCreateInfo, nullptr, &SwapchainHandle), "swapchain creation failed");
+
+    vkGetSwapchainImagesKHR(VkVault::Device, SwapchainHandle, &Swapchain.ImageCount, nullptr);
+    std::vector<VkImage> images_temp(Swapchain.ImageCount);
+    vkGetSwapchainImagesKHR(VkVault::Device, SwapchainHandle, &Swapchain.ImageCount, images_temp.data());
+    SwapchainImages.resize(Swapchain.ImageCount);
+
+    CleanupSwapchainImages();
+
+    VkImageViewCreateInfo swapchain_image_view_create_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .image = VK_NULL_HANDLE, // to fill later
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = VkVault::SurfaceFormat.format,
+        .components = {
+            .r = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .g = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .b = VK_COMPONENT_SWIZZLE_IDENTITY,
+            .a = VK_COMPONENT_SWIZZLE_IDENTITY
+        },
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
             .baseMipLevel = 0,
             .levelCount = 1,
             .baseArrayLayer = 0,
             .layerCount = 1
-        };
-
-        IncResult Create(u32 width, u32 height) {
-            Image::CreateInfo image_create_info {};
-            image_create_info.Width = width;
-            image_create_info.Height = height;
-            image_create_info.Format = Renderer::DepthBuffer::Format;
-            image_create_info.Usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-            image_create_info.UsageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-            INC_CHECK(Image::Add(image_create_info, Image), "depth buffer image creation failed");
-            Image::Value* depth_image_value = Image::Get(DepthBuffer::Image);
-            depth_image_value->Format = Renderer::DepthBuffer::Format;
-
-            // Despite having a creation format the image still starts as a _UNDEFINED, so transit it a first time
-            CommandBufferBlock setup_block;
-            Create(setup_block, QueueRole::Graphics);
-
-            VkCommandBuffer cmd = GetNext(setup_block);
-            LeanVk::BeginCommand(cmd);
-
-            VkImageMemoryBarrier barrier {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .pNext = nullptr,
-                .srcAccessMask = 0,
-                .dstAccessMask = 0,
-                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-                .newLayout = depth_image_value->UsageLayout,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image = depth_image_value->Image,
-                .subresourceRange = Range
-            };
-            VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-            VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-
-            vkCmdPipelineBarrier(
-                cmd,
-                src_stage, dst_stage,
-                0, 0, nullptr, 0, nullptr, 1,
-                &barrier
-            );
-
-            LeanVk::EndCommand(cmd);
-
-            ::SubmissionPile<1, 1, 0, 0> one_shot_pile;
-            one_shot_pile.BeginSubmission();
-            one_shot_pile.AddCommand(cmd);
-            one_shot_pile.EndSubmission();
-            one_shot_pile.Submit(QueueRole::Graphics);
-
-            vkQueueWaitIdle(VkVault::Queues[QueueRole::Graphics].Queue);
-            Destroy(setup_block);
-
-            VkImageViewCreateInfo image_view_create_info = ImageView::FillCreateInfo(depth_image_value);
-            image_view_create_info.subresourceRange = DepthBuffer::Range;
-
-            INC_CHECK(ImageView::Add(image_view_create_info, ImageView), "depth buffer image view creation failed");
-            DepthAttachment.imageView = ImageView::Get(DepthBuffer::ImageView)->ImageView;
-
-            return IncResult::SUCCESS;
         }
+    };
 
-        void Destroy() {
-            Image::Del(Image);
-            ImageView::Del(ImageView);
-        }
+    for (u32 i = 0; i < Swapchain.ImageCount; i++) {
+        SwapchainImages[i].Image = images_temp[i];
+        swapchain_image_view_create_info.image = SwapchainImages[i].Image;
+        VK_CHECK(
+            vkCreateImageView(VkVault::Device, &swapchain_image_view_create_info, nullptr, &SwapchainImages[i].ImageView),
+            "swapchain image view creation failed"
+        );
+        INC_CHECK(SwapchainImages[i].RenderFinished.Init(), "swapchain render-finished semaphore creation failed");
+    }
 
-        void Resize(u32 width, u32 height) {
-            Image::Del(Image);
-            ImageView::Del(ImageView);
-            if (Create(width, height) != IncResult::SUCCESS) {
-                analog::critical("depth buffer recreation failed on resize");
-            }
-        }
+    DestroySwapchainKHR(old_swapchain);
+
+    return IncResult::SUCCESS;
+}
+
+void Renderer::DestroySwapchainKHR(VkSwapchainKHR swapchain) {
+    if (SwapchainHandle) { vkDestroySwapchainKHR(VkVault::Device, swapchain, nullptr); }
+}
+
+void Renderer::CleanupSwapchainImages() {
+    for (SwapchainImage& image : SwapchainImages) {
+        if (image.ImageView) { vkDestroyImageView(VkVault::Device, image.ImageView, nullptr); }
+        image.RenderFinished.Destroy();
+    }
+}
+
+IncResult Renderer::InitDepthBuffer(u32 width, u32 height) {
+    Image::CreateInfo image_create_info {};
+    image_create_info.Width = width;
+    image_create_info.Height = height;
+    image_create_info.Format = DepthBufferFormat;
+    image_create_info.Usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    image_create_info.UsageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    INC_CHECK(Images.Add(image_create_info, DepthBufferImage), "depth buffer image creation failed");
+    Image* depth_image_value = Images.Get(DepthBufferImage);
+    depth_image_value->Format = DepthBufferFormat;
+
+    // Despite having a creation format the image still starts as a _UNDEFINED, so transit it a first time
+    CommandBufferBlock setup_block;
+    INC_CHECK(setup_block.Init(QueueRole::Graphics), "depth buffer setup command buffer block creation failed");
+
+    VkCommandBuffer cmd = setup_block.GetNext();
+    LeanVk::BeginCommand(cmd);
+
+    VkImageMemoryBarrier barrier {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = 0,
+        .dstAccessMask = 0,
+        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        .newLayout = depth_image_value->UsageLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = depth_image_value->Handle,
+        .subresourceRange = DepthBufferRange
+    };
+    VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+
+    vkCmdPipelineBarrier(
+        cmd,
+        src_stage, dst_stage,
+        0, 0, nullptr, 0, nullptr, 1,
+        &barrier
+    );
+
+    LeanVk::EndCommand(cmd);
+
+    // `::` needed: this class's own `SubmissionPile` member shadows the template type name.
+    ::SubmissionPile<QueueRole::Graphics, 1, 1, 0, 0> one_shot_pile;
+    one_shot_pile.BeginSubmission();
+    one_shot_pile.AddCommand(cmd);
+    one_shot_pile.EndSubmission();
+    one_shot_pile.Submit();
+
+    vkQueueWaitIdle(VkVault::Queues[QueueRole::Graphics].Queue);
+    setup_block.Destroy();
+
+    VkImageViewCreateInfo image_view_create_info = FillImageViewCreateInfo(depth_image_value);
+    image_view_create_info.subresourceRange = DepthBufferRange;
+
+    INC_CHECK(ImageViews.Add(image_view_create_info, DepthBufferImageView), "depth buffer image view creation failed");
+    DepthAttachment.imageView = ImageViews.Get(DepthBufferImageView)->Handle;
+
+    return IncResult::SUCCESS;
+}
+
+void Renderer::DestroyDepthBuffer() {
+    Images.Del(DepthBufferImage);
+    ImageViews.Del(DepthBufferImageView);
+}
+
+void Renderer::ResizeDepthBuffer(u32 width, u32 height) {
+    Images.Del(DepthBufferImage);
+    ImageViews.Del(DepthBufferImageView);
+    if (InitDepthBuffer(width, height) != IncResult::SUCCESS) {
+        analog::critical("depth buffer recreation failed on resize");
     }
 }

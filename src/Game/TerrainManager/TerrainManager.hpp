@@ -11,10 +11,10 @@
 namespace TerrainManager {
     // --- Mesh / world scale ---
     constexpr u32 VerticesPerEdge = 64;
-    constexpr f64 ChunkScale = 50.0;
+    constexpr f64 ChunkScale = 100.0;
 
     // --- Streaming / cache sizing ---
-    constexpr u32 ExplorationRadius = 8;
+    constexpr u32 ExplorationRadius = 10;
 
     // How many chunks are actually drawn each frame (chunks within ExplorationRadius of the player)
     constexpr u32 MaxDrawnChunks = []() {

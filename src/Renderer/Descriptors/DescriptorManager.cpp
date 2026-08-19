@@ -1,7 +1,7 @@
 #include "DescriptorManager.hpp"
 
 #include "Renderer/VkVault.hpp"
-#include "Renderer/Renderer_Internal.hpp"
+#include "Renderer/Renderer.hpp"
 
 // TODO: I don't really like thoose wonky approximations
 constexpr u32 MAX_SETS = Renderer::MAX_FRAMES_IN_FLIGHT * 50;

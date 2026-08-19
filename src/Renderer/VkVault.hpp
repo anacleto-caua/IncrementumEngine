@@ -3,7 +3,9 @@
 #include <array>
 #include <vector>
 
-#include "Vk/TimelineSemaphore.hpp"
+#include <vulkan/vulkan.h>
+#include <vma/vk_mem_alloc.h>
+
 #include "Core/EnumIndexedArray.hpp"
 
 // Define this as 1 if you want validation layers

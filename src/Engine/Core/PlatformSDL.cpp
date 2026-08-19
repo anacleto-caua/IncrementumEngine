@@ -7,10 +7,10 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
+#include "Game/Game.hpp"
 #include "Engine/Core/Input.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Engine/Core/WindowSDL.hpp"
-#include "Renderer/Passes/ImGuiPass.hpp"
 
 namespace Input {
     void ProcessEvent(const SDL_Event& event);
@@ -49,7 +49,7 @@ namespace Platform {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             Input::ProcessEvent(event);
-            ImGuiPass::ProcessEvent(event); // Kinda janky dependency, but well...
+            GImGuiPass.ProcessEvent(event); // Kinda janky dependency, but well...
         }
 
         f32 x, y;

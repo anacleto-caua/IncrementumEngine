@@ -3,12 +3,12 @@
 #include <cstring>
 #include <cassert>
 
-#include "ResourceManager.hpp"
+#include "Buffer.hpp"
 
 template <u64 SIZE>
 class RingBuffer {
 public:
-    Buffer::Id Buffer;
+    BufferId Buffer;
 
 private:
     static constexpr u64 ALIGNMENT = 4;
@@ -28,8 +28,8 @@ public:
             .Type = Buffer::Type::STAGING
         };
 
-        INC_CHECK(Buffer::Add(CreateInfo, Buffer), "staging buffer creation failed");
-        MappedHead = static_cast<u8*>(Buffer::Map(Buffer::Get(Buffer)->Allocation));
+        INC_CHECK(Buffers.Add(CreateInfo, Buffer), "staging buffer creation failed");
+        MappedHead = static_cast<u8*>(Buffers.Map(Buffer));
         Head = MappedHead;
         Tail = Head;
 
@@ -37,8 +37,8 @@ public:
     }
 
     void Destroy() {
-        Buffer::Unmap(Buffer::Get(Buffer)->Allocation);
-        Buffer::Del(Buffer);
+        Buffers.Unmap(Buffer);
+        Buffers.Del(Buffer);
     }
 
     u64 Write(const void* src, u64 upload_size) {

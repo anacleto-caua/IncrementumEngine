@@ -7,14 +7,17 @@
 
 #include "Renderer/VkVault.hpp"
 #include "Renderer/Vk/BinarySemaphore.hpp"
+#include "Renderer/Vk/TimelineSemaphore.hpp"
 
 template <
+    QueueRole ROLE,
     u64 MAX_SUBMITS = 32,
     u64 MAX_COMMAND_BUFFERS = 64,
     u64 MAX_WAIT_SEMAPHORES = 64,
     u64 MAX_SIGNAL_SEMAPHORES = 64
 >
 struct SubmissionPile {
+    static constexpr QueueRole Role = ROLE;
     static constexpr u64 MaxSubmits = MAX_SUBMITS;
     static constexpr u64 MaxCommandBuffers = MAX_COMMAND_BUFFERS;
     static constexpr u64 MaxWaitSemaphores = MAX_WAIT_SEMAPHORES;
@@ -106,30 +109,28 @@ struct SubmissionPile {
 
 
     void WaitTimeline(const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-        TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
-        WaitSemaphore( semaphore_value->Semaphore, value, stage);
+        WaitSemaphore( semaphore.Semaphore, value, stage);
     }
 
 
     void SignalTimeline(const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-        TimelineSemaphoreValue* semaphore_value = GetTimelineSemaphoreValue(semaphore);
-        SignalSemaphore( semaphore_value->Semaphore, value, stage);
+        SignalSemaphore( semaphore.Semaphore, value, stage);
     }
 
     // Timeline Semaphores Ticket
 
     void WaitPrepareForTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-        WaitTimeline( ticket.TargetSemaphore, ticket.Value-1, stage);
+        WaitTimeline( *ticket.TargetSemaphore, ticket.Value-1, stage);
     }
 
 
     void WaitForTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-        WaitTimeline( ticket.TargetSemaphore, ticket.Value, stage);
+        WaitTimeline( *ticket.TargetSemaphore, ticket.Value, stage);
     }
 
 
     void SignalTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
-        SignalTimeline( ticket.TargetSemaphore, ticket.Value, stage);
+        SignalTimeline( *ticket.TargetSemaphore, ticket.Value, stage);
     }
 
 
@@ -140,7 +141,7 @@ struct SubmissionPile {
 
     // Binary Semaphores
 
-    void WaitBinarySemaphore(const BinarySemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void WaitBinarySemaphore(const BinarySemaphore& semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
         assert(WaitCount < MaxWaitSemaphores && "max wait semaphores on a pile reached");
         WaitSemaphores[WaitCount] = {
             VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
@@ -150,7 +151,7 @@ struct SubmissionPile {
     }
 
 
-    void SignalBinarySemaphore(const BinarySemaphore semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void SignalBinarySemaphore(const BinarySemaphore& semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
         assert(SignalCount < MaxSignalSemaphores && "max signal semaphores count on a pile reached");
         SignalSemaphores[SignalCount] = {
             VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
@@ -161,9 +162,9 @@ struct SubmissionPile {
 
     // Submission
 
-    void Submit(QueueRole role, VkFence execution_fence = VK_NULL_HANDLE) {
+    void Submit(VkFence execution_fence = VK_NULL_HANDLE) {
         if(SubmitCount > 0) {
-            VK_OUT(vkQueueSubmit2(VkVault::Queues[role].Queue, static_cast<u32>(SubmitCount), Submits.data(), execution_fence), "pile submission failed");
+            VK_OUT(vkQueueSubmit2(VkVault::Queues[ROLE].Queue, static_cast<u32>(SubmitCount), Submits.data(), execution_fence), "pile submission failed");
             Reset();
         }
     }
@@ -278,14 +279,14 @@ struct SubmissionPile {
 
 // Fancy print
 
-template <u64 A, u64 B, u64 C, u64 D>
-struct fmt::formatter<SubmissionPile<A, B, C, D>> {
+template <QueueRole R, u64 A, u64 B, u64 C, u64 D>
+struct fmt::formatter<SubmissionPile<R, A, B, C, D>> {
     constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
         return ctx.begin();
     }
 
     template <typename FormatContext>
-    auto format(const SubmissionPile<A, B, C, D>& pile, FormatContext& ctx) const -> decltype(ctx.out()) {
+    auto format(const SubmissionPile<R, A, B, C, D>& pile, FormatContext& ctx) const -> decltype(ctx.out()) {
         fmt::format_to(ctx.out(),
             "+------------------------------------------------+\n"
             "|         Detailed SubmissionState          |\n"
