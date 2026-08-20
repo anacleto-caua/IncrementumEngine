@@ -2,6 +2,7 @@
 
 #include "Core/Math.hpp"
 #include "Engine/Core/Input.hpp"
+#include "Engine/Core/InputContext.hpp"
 
 namespace FlyByCamera {
     static constexpr f32 SPEED = 20;
@@ -15,6 +16,17 @@ namespace FlyByCamera {
 
     static constexpr f32 YAW_CLAMP_MIN = 0;
     static constexpr f32 YAW_CLAMP_MAX = 360;
+
+    enum class Action {
+        MoveForward, MoveBackward,
+        MoveRight, MoveLeft,
+        MoveUp, MoveDown,
+        Run,
+
+        _COUNT_
+    };
+
+    InputContext<Action, Action::_COUNT_> Context;
 
     vec3 FrameMovement = vec3::ZERO;
 
@@ -35,8 +47,16 @@ namespace FlyByCamera {
     void Bind(Camera &new_camera) {
         TrackedCamera = &new_camera;
 
-        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::LShift, Input::ActionType::Press, [](void){ IsRunning = true; });
-        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::LShift, Input::ActionType::Release, [](void){ IsRunning = false; });
+        Context.BindKey(Action::MoveForward, Input::Key::W);
+        Context.BindKey(Action::MoveBackward, Input::Key::S);
+        Context.BindKey(Action::MoveRight, Input::Key::D);
+        Context.BindKey(Action::MoveLeft, Input::Key::A);
+        Context.BindKey(Action::MoveUp, Input::Key::Q);
+        Context.BindKey(Action::MoveDown, Input::Key::E);
+        Context.BindKey(Action::Run, Input::Key::LShift);
+
+        Context.OnPressed(Action::Run, [](){ IsRunning = true; });
+        Context.OnReleased(Action::Run, [](){ IsRunning = false; });
 
         Update(0);
         ApplyRotation();
@@ -44,28 +64,26 @@ namespace FlyByCamera {
     }
 
     void Update(f32 delta_time) {
+        Context.Frame();
+
         bool IsDirty = false;
 
-        {
-            using namespace Input::Keyboard;
+        if (Context.IsActionDown(Action::MoveForward)) {
+            FrameMovement.z = 1;
+        } else if (Context.IsActionDown(Action::MoveBackward)) {
+            FrameMovement.z = -1;
+        }
 
-            if (IsKeyDown(Key::W)) {
-                FrameMovement.z = 1;
-            } else if (IsKeyDown(Key::S)) {
-                FrameMovement.z = -1;
-            }
+        if (Context.IsActionDown(Action::MoveRight)) {
+            FrameMovement.x = 1;
+        } else if (Context.IsActionDown(Action::MoveLeft)) {
+            FrameMovement.x = -1;
+        }
 
-            if (IsKeyDown(Key::D)) {
-                FrameMovement.x = 1;
-            } else if (IsKeyDown(Key::A)) {
-                FrameMovement.x = -1;
-            }
-
-            if (IsKeyDown(Key::Q)) {
-                FrameMovement.y = 1;
-            } else if (IsKeyDown(Key::E)) {
-                FrameMovement.y = -1;
-            }
+        if (Context.IsActionDown(Action::MoveUp)) {
+            FrameMovement.y = 1;
+        } else if (Context.IsActionDown(Action::MoveDown)) {
+            FrameMovement.y = -1;
         }
 
         if (FrameMovement != vec3::ZERO) {
@@ -87,9 +105,9 @@ namespace FlyByCamera {
             IsDirty = true;
         }
 
-        if (Input::Mouse::XDelta != 0 || Input::Mouse::YDelta != 0) {
-            Pitch -= Input::Mouse::YDelta * PITCH_SENSIBILITY;
-            Yaw -= Input::Mouse::XDelta * YAW_SENSIBILITY;
+        if (Input::MouseXDelta != 0 || Input::MouseYDelta != 0) {
+            Pitch -= Input::MouseYDelta * PITCH_SENSIBILITY;
+            Yaw -= Input::MouseXDelta * YAW_SENSIBILITY;
 
             if (Pitch < PITCH_CLAMP_MIN) {
                 Pitch = PITCH_CLAMP_MIN;

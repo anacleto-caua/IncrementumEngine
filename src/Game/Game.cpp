@@ -5,11 +5,22 @@
 #include "Renderer/Camera.hpp"
 #include "Game/FlyByCamera.hpp"
 #include "Engine/Core/Input.hpp"
+#include "Engine/Core/InputContext.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Game/TerrainManager/TerrainManager.hpp"
 
 namespace Game {
     void OutFps(f32 delta_time);
+
+    enum class Action {
+        ToggleFullscreen,
+        ReleaseMouse,
+        CaptureMouse,
+
+        _COUNT_
+    };
+
+    InputContext<Action, Action::_COUNT_> Context;
 
     Camera MainCamera = {
         .Position = vec3::ZERO,
@@ -41,9 +52,13 @@ namespace Game {
         FlyByCamera::Bind(MainCamera);
 
         // Good taste stuff
-        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::F11, Input::ActionType::Press, [](){ Window::ToggleFullscreen(); });
-        Input::Keyboard::RegisterCallback(Input::Keyboard::Key::Escape, Input::ActionType::Press, []() { Input::Mouse::Free(); });
-        Input::Mouse::RegisterCallback(Input::Mouse::Button::Left, Input::ActionType::Press, []() { Input::Mouse::Capture(); });
+        Context.BindKey(Action::ToggleFullscreen, Input::Key::F11);
+        Context.BindKey(Action::ReleaseMouse, Input::Key::Escape);
+        Context.BindButton(Action::CaptureMouse, Input::MouseButton::Left);
+
+        Context.OnPressed(Action::ToggleFullscreen, [](){ Window::ToggleFullscreen(); });
+        Context.OnPressed(Action::ReleaseMouse, []() { Input::FreeMouse(); });
+        Context.OnPressed(Action::CaptureMouse, []() { Input::CaptureMouse(); });
 
         return IncResult::SUCCESS;
 
@@ -54,9 +69,10 @@ namespace Game {
             TerrainManager::RefreshChunks(MainCamera.Position);
             FrameInfo frame = Engine.Frame();
 
+            Context.Frame();
+
             OutFps(frame.DeltaTime);
             FlyByCamera::Update(frame.DeltaTime);
-
         }
     }
 

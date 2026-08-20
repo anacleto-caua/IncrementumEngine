@@ -14,61 +14,61 @@ namespace Input {
 
     inline bool IsActive = true;
 
-    namespace Mouse {
-        enum class Button {
-            Left,
-            Right,
-            Middle,
+    enum class MouseButton {
+        Left,
+        Right,
+        Middle,
 
-            _BUTTON_COUNT_
-        };
+        _BUTTON_COUNT_
+    };
 
-        void Free();
-        void Capture();
+    enum class Key {
+        // Letters
+        A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
 
-        bool IsButtonDown(Button button);
+        // Numbers (Top Row)
+        Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
 
-        inline float XPos = 0;
-        inline float YPos = 0;
+        // Function Keys
+        F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
 
-        inline float XDelta = 0;
-        inline float YDelta = 0;
+        // Modifiers
+        LCtrl, LShift, LAlt, LGUI,
+        RCtrl, RShift, RAlt, RGUI,
 
-        void RegisterCallback(Button Button, ActionType ActionType, UserAction Callback);
-        void RegisterCallback(Button Button, UserAction Callback);
-    }
+        // Navigation / Control
+        Space, Enter, Escape, Backspace, Tab,
+        Insert, Delete, Home, End, PageUp, PageDown,
 
-    namespace Keyboard {
-        enum class Key {
-            // Letters
-            A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+        // Arrows
+        Left, Right, Up, Down,
 
-            // Numbers (Top Row)
-            Num0, Num1, Num2, Num3, Num4, Num5, Num6, Num7, Num8, Num9,
+        // Punctuation / Math
+        LeftBracket, RightBracket, Semicolon, Apostrophe, Comma, Period, Slash, Backslash, Grave, Minus, Equals,
 
-            // Function Keys
-            F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+        _KEY_COUNT_
+    };
 
-            // Modifiers
-            LCtrl, LShift, LAlt, LGUI,
-            RCtrl, RShift, RAlt, RGUI,
+    inline float MouseXPos = 0;
+    inline float MouseYPos = 0;
 
-            // Navigation / Control
-            Space, Enter, Escape, Backspace, Tab,
-            Insert, Delete, Home, End, PageUp, PageDown,
+    inline float MouseXDelta = 0;
+    inline float MouseYDelta = 0;
 
-            // Arrows
-            Left, Right, Up, Down,
+    void CaptureMouse();
+    void FreeMouse();
 
-            // Punctuation / Math
-            LeftBracket, RightBracket, Semicolon, Apostrophe, Comma, Period, Slash, Backslash, Grave, Minus, Equals,
+    bool IsButtonDown(MouseButton button);
+    bool IsKeyDown(Key key);
 
-            _KEY_COUNT_
-        };
+    bool WasButtonPressed(MouseButton button);
+    bool WasButtonReleased(MouseButton button);
+    bool WasKeyPressed(Key key);
+    bool WasKeyReleased(Key key);
 
-        bool IsKeyDown(Key key);
+    void RegisterCallback(MouseButton button, ActionType action, UserAction callback);
+    void RegisterCallback(MouseButton button, UserAction callback);
 
-        void RegisterCallback(Key Key, ActionType ActionType, UserAction Callback);
-        void RegisterCallback(Key Key, UserAction Callback);
-    }
+    void RegisterCallback(Key key, ActionType action, UserAction callback);
+    void RegisterCallback(Key key, UserAction callback);
 }
