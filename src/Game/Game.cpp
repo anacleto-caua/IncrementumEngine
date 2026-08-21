@@ -1,21 +1,19 @@
 #include "Game.hpp"
 
-#include <imgui.h>
-
 #include "Renderer/Camera.hpp"
 #include "Game/FlyByCamera.hpp"
 #include "Engine/Core/Input.hpp"
 #include "Engine/Core/InputContext.hpp"
+#include "Engine/Core/PerfOverlay.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Game/TerrainManager/TerrainManager.hpp"
 
 namespace Game {
-    void OutFps(f32 delta_time);
-
     enum class Action {
         ToggleFullscreen,
         ReleaseMouse,
         CaptureMouse,
+        TogglePerfOverlay,
 
         _COUNT_
     };
@@ -55,10 +53,12 @@ namespace Game {
         Context.BindKey(Action::ToggleFullscreen, Input::Key::F11);
         Context.BindKey(Action::ReleaseMouse, Input::Key::Escape);
         Context.BindButton(Action::CaptureMouse, Input::MouseButton::Left);
+        Context.BindKey(Action::TogglePerfOverlay, Input::Key::F3);
 
         Context.OnPressed(Action::ToggleFullscreen, [](){ Window::ToggleFullscreen(); });
         Context.OnPressed(Action::ReleaseMouse, []() { Input::FreeMouse(); });
         Context.OnPressed(Action::CaptureMouse, []() { Input::CaptureMouse(); });
+        Context.OnPressed(Action::TogglePerfOverlay, []() { PerfOverlay::Visible = !PerfOverlay::Visible; });
 
         return IncResult::SUCCESS;
 
@@ -73,7 +73,7 @@ namespace Game {
 
             Context.Frame();
 
-            OutFps(frame.DeltaTime);
+            PerfOverlay::Frame(frame.DeltaTime);
             FlyByCamera::Update(frame.DeltaTime);
         }
     }
@@ -81,26 +81,4 @@ namespace Game {
     void Destroy() {
         Engine.Destroy();
     }
-
-    void OutFps(f32 delta_time) {
-        ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
-                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
-                                        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs;
-
-        // Position: Bottom-Right
-        const f32 pad = 10.0f;
-        const ImVec2 viewport_pos = ImGui::GetMainViewport()->WorkPos;
-        const ImVec2 viewport_size = ImGui::GetMainViewport()->WorkSize;
-        ImVec2 window_pos = { (viewport_pos.x + viewport_size.x - pad), (viewport_pos.y + viewport_size.y - pad) };
-        ImVec2 window_pos_pivot = { 1.0f, 1.0f }; // Pivot on bottom-right corner
-
-        ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always, window_pos_pivot);
-        ImGui::SetNextWindowBgAlpha(0.35f); // Transparent background
-
-        if (ImGui::Begin("Perf Overlay", nullptr, window_flags)) {
-            ImGui::Text("FPS: %.1f (%.3f ms)", 1.0f / delta_time, delta_time * 1000.0f);
-        }
-        ImGui::End();
-    }
-
 }

@@ -1,5 +1,6 @@
 #include "TerrainManager.hpp"
 
+#include <chrono>
 #include <vector>
 #include <cstring>
 #include <unordered_map>
@@ -149,6 +150,7 @@ namespace TerrainManager {
         bool InFlight = false;            // main-thread-only, no atomics needed
     };
     PendingGeneration Generation;
+    std::chrono::steady_clock::time_point GenerationStartTime;
 
     void GenerateHeightmapTask(void* payload, TaskScheduler::WorkerContext&) {
         PendingGeneration* generation = static_cast<PendingGeneration*>(payload);
@@ -199,6 +201,7 @@ namespace TerrainManager {
         CurrentlyActiveChunks = 0;
         ivec2 missing_position = { 0, 0 };
         bool found_missing = false;
+        u32 culled_count = 0;
 
         for (i32 x = player_coord.x - radius; x <= player_coord.x + radius; x++) {
             for (i32 y = player_coord.y - radius; y <= player_coord.y + radius; y++) {
@@ -227,6 +230,8 @@ namespace TerrainManager {
                             .padding = 0
                         };
                         CurrentlyActiveChunks++;
+                    } else {
+                        culled_count++;
                     }
                 } else if (!found_missing) {
                     // Only ever kick off one generation per call - remember the first miss
@@ -239,8 +244,15 @@ namespace TerrainManager {
         // Phase 2: finalize a generation that finished since last frame, landing it in the cache -
         // deliberately AFTER this call's drawn-list rebuild above, so it only becomes eligible to
         // be drawn starting next frame (see the comment on phase 1 for why).
+        DebugStats.DrawnLastFrame = CurrentlyActiveChunks;
+        DebugStats.CulledLastFrame = culled_count;
+
         if (Generation.InFlight && Generation.Done.load(std::memory_order_acquire)) {
             std::memcpy(HeightmapData[Generation.TargetLayer], Generation.StagingData, sizeof(Heightmap));
+
+            DebugStats.ChunksGenerated++;
+            DebugStats.LastGenerationMs =
+                std::chrono::duration<f32, std::milli>(std::chrono::steady_clock::now() - GenerationStartTime).count();
 
             Cache[Generation.TargetLayer] = {
                 .Position = Generation.Position,
@@ -278,14 +290,30 @@ namespace TerrainManager {
             // instead of cleanly showing as missing and getting regenerated on its own.
             if (Cache[Generation.TargetLayer].Valid) {
                 PositionToSlot.erase(PackPosition(Cache[Generation.TargetLayer].Position));
+
+                EvictionLog[EvictionLogCursor] = {
+                    .EvictedPosition = Cache[Generation.TargetLayer].Position,
+                    .ReplacedByPosition = Generation.Position,
+                    .Slot = Generation.TargetLayer,
+                    .Tick = CurrentTick
+                };
+                EvictionLogCursor = (EvictionLogCursor + 1) % EvictionLogSize;
+                if (EvictionLogCount < EvictionLogSize) { EvictionLogCount++; }
+                DebugStats.Evictions++;
             }
             Cache[Generation.TargetLayer].Valid = false;
 
             Generation.Done.store(false, std::memory_order_relaxed);
             Generation.InFlight = true;
+            GenerationStartTime = std::chrono::steady_clock::now();
+            DebugStats.GenerationsStarted++;
 
             TaskScheduler::SubmitTask(GenerateHeightmapTask, &Generation);
         }
+
+        DebugStats.GenerationInFlight = Generation.InFlight;
+        DebugStats.InFlightPosition = Generation.Position;
+        DebugStats.InFlightSlot = Generation.TargetLayer;
     }
 
     void WriteHeightmap(Heightmap& out, ivec2 position) {

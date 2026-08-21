@@ -230,7 +230,8 @@ target("IncrementumEngine")
             "version",
             "uuid",
             "imm32",
-            "cfgmgr32"
+            "cfgmgr32",
+            "psapi"
         )
 
     elseif is_plat("linux") then

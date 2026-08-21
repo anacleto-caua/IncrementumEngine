@@ -364,9 +364,76 @@ void TerrainPass::OutTerrainData() {
             if (Cache[i].Valid) { cached_count++; }
         }
 
-        ImGui::Text("Drawn:  %u / %u", CurrentlyActiveChunks, MaxDrawnChunks);
-        ImGui::Text("Cached: %u / %u", cached_count, MaxCachedChunks);
+        if (ImGui::BeginTable("TerrainResidency", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("Metric");
+            ImGui::TableSetupColumn("Value");
+            ImGui::TableHeadersRow();
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::Text("Drawn");
+            ImGui::TableNextColumn(); ImGui::Text("%u / %u", CurrentlyActiveChunks, MaxDrawnChunks);
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::Text("Culled (frustum)");
+            ImGui::TableNextColumn(); ImGui::Text("%u", DebugStats.CulledLastFrame);
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::Text("Cached");
+            ImGui::TableNextColumn(); ImGui::Text("%u / %u", cached_count, MaxCachedChunks);
+
+            ImGui::EndTable();
+        }
+
         ImGui::Checkbox("Frustum Culling", &CullingEnabled);
+        ImGui::Separator();
+
+        if (ImGui::TreeNodeEx("Streaming", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (DebugStats.GenerationInFlight) {
+                ImGui::TextColored(
+                    ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
+                    "Generating (%d, %d) -> slot %u",
+                    DebugStats.InFlightPosition.x, DebugStats.InFlightPosition.y, DebugStats.InFlightSlot
+                );
+            } else {
+                ImGui::TextDisabled("Idle");
+            }
+
+            ImGui::Text("Generated:  %llu", (unsigned long long)DebugStats.ChunksGenerated);
+            ImGui::Text("Started:    %llu", (unsigned long long)DebugStats.GenerationsStarted);
+            ImGui::Text("Evictions:  %llu", (unsigned long long)DebugStats.Evictions);
+            ImGui::Text("Last gen:   %.2f ms", static_cast<f64>(DebugStats.LastGenerationMs));
+
+            ImGui::TreePop();
+        }
+
+        if (ImGui::TreeNode("Eviction Log")) {
+            if (EvictionLogCount == 0) {
+                ImGui::TextDisabled("[No evictions yet]");
+            } else if (ImGui::BeginTable("Evictions", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+                ImGui::TableSetupColumn("Tick");
+                ImGui::TableSetupColumn("Slot");
+                ImGui::TableSetupColumn("Evicted");
+                ImGui::TableSetupColumn("Replaced By");
+                ImGui::TableHeadersRow();
+
+                // Walk backwards from the cursor so the most recent eviction is listed first.
+                for (u32 i = 0; i < EvictionLogCount; i++) {
+                    u32 index = (EvictionLogCursor + EvictionLogSize - 1 - i) % EvictionLogSize;
+                    const auto& record = EvictionLog[index];
+
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn(); ImGui::Text("%llu", (unsigned long long)record.Tick);
+                    ImGui::TableNextColumn(); ImGui::Text("%u", record.Slot);
+                    ImGui::TableNextColumn(); ImGui::Text("(%d, %d)", record.EvictedPosition.x, record.EvictedPosition.y);
+                    ImGui::TableNextColumn(); ImGui::Text("(%d, %d)", record.ReplacedByPosition.x, record.ReplacedByPosition.y);
+                }
+
+                ImGui::EndTable();
+            }
+
+            ImGui::TreePop();
+        }
+
         ImGui::Separator();
 
         // Iterate only up to the currently active chunks to save UI performance

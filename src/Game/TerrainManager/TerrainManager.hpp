@@ -2,6 +2,7 @@
 
 #include <array>
 
+#include "Core/Frustum.hpp"
 #include "Core/Math.hpp"
 #include "Core/Frustum.hpp"
 
@@ -72,6 +73,36 @@ namespace TerrainManager {
     // Debug/validation toggle - lets frustum culling be disabled at runtime to sanity-check its
     // effect (e.g. via ImGui) without a rebuild.
     inline bool CullingEnabled = true;
+
+    // --- Debug instrumentation ---
+    // Rolling log of the most recent cache evictions, so thrashing (the same positions being
+    // repeatedly evicted and regenerated) is visible rather than having to be inferred.
+    constexpr u32 EvictionLogSize = 32;
+
+    struct EvictionRecord {
+        ivec2 EvictedPosition;
+        ivec2 ReplacedByPosition;
+        u32 Slot;
+        u64 Tick;
+    };
+
+    inline std::array<EvictionRecord, EvictionLogSize> EvictionLog{};
+    inline u32 EvictionLogCount = 0;
+    inline u32 EvictionLogCursor = 0;
+
+    struct Stats {
+        u64 ChunksGenerated = 0;      // completed generations since startup (excluding Init's batch)
+        u64 Evictions = 0;            // cache slots reclaimed from a valid chunk
+        u64 GenerationsStarted = 0;
+        f32 LastGenerationMs = 0;     // wall time of the most recently finalized generation
+        bool GenerationInFlight = false;
+        ivec2 InFlightPosition = { 0, 0 };
+        u32 InFlightSlot = 0;
+        u32 DrawnLastFrame = 0;       // after frustum culling
+        u32 CulledLastFrame = 0;      // cache-resident but rejected by the frustum test
+    };
+
+    inline Stats DebugStats;
 
     // Called by the terrain pass once
     void Init();
