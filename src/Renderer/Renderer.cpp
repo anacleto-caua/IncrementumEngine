@@ -12,7 +12,7 @@
 #include "Renderer/Vk/LeanVk.hpp"
 
 IncResult Renderer::Init() {
-    Passes = { &TerrainPass, &ImGuiPass };
+    Passes = { &TerrainPass, &SkyPass, &ImGuiPass };
 
     INC_CHECK(VkVault::Create(), "vulkan context creation failed");
     INC_CHECK(TransferPipe.Init(), "transfer pipe creation failed");
@@ -136,9 +136,12 @@ void Renderer::Frame() {
         // Camera UBO for descriptor
         {
             auto ubo_buffer = Buffers.Get(SceneGlobalsBuffer[FrameContext.FrameInFlightIndex]);
+            mat4 view_projection = CurrentCamera->Projection * CurrentCamera->View;
             SceneGlobals ubo_data = {
-                .ViewProjection = CurrentCamera->Projection * CurrentCamera->View,
-                .CameraPosition = CurrentCamera->Position
+                .ViewProjection = view_projection,
+                .CameraPosition = CurrentCamera->Position,
+                .InverseViewProjection = math::inverse(view_projection),
+                .SunDirection = SunDirection
             };
 
             vkCmdUpdateBuffer(

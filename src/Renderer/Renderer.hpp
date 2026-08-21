@@ -16,10 +16,9 @@
 #include "Renderer/Vk/CommandBufferBlock.hpp"
 #include "Renderer/Resources/TransferPipe.hpp"
 #include "Renderer/Passes/TerrainPass.hpp"
+#include "Renderer/Passes/SkyPass.hpp"
 #include "Renderer/Passes/ImGuiPass.hpp"
 
-// Forward-declared, not included: only ever used here as a pointer, and full inclusion would be
-// circular (Camera.hpp reads GEngine.Config, transitively reachable from here).
 struct Camera;
 
 class Renderer {
@@ -28,6 +27,9 @@ public:
     static constexpr VkFormat DepthBufferFormat = RendererConstants::DepthBufferFormat;
 
     Camera* CurrentCamera = nullptr;
+
+    // Any future lighting system shall feed from this
+    vec3 SunDirection = math::normalize(vec3(0.0f, 0.0f, -1.0f));
 
     // Per-frame data shared with passes - read directly every frame by TerrainPass/ImGuiPass.
     struct RenderFrameData {
@@ -61,6 +63,7 @@ public:
     // real members instead of raw pointers into globals declared elsewhere. Reached ambiently
     // via the GTerrainPass/GImGuiPass aliases in Game/Game.hpp.
     TerrainPass TerrainPass;
+    SkyPass SkyPass;
     ImGuiPass ImGuiPass;
 
 private:
@@ -83,6 +86,8 @@ private:
     struct SceneGlobals {
         mat4 ViewProjection;
         alignas (16) vec3 CameraPosition;
+        alignas (16) mat4 InverseViewProjection;
+        alignas (16) vec3 SunDirection;
     };
     VkPipelineLayout GlobalDescriptorsBaseLayout = VK_NULL_HANDLE;
     std::array<BufferId, MAX_FRAMES_IN_FLIGHT> SceneGlobalsBuffer;
