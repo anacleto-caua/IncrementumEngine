@@ -66,8 +66,10 @@ namespace Game {
 
     void Run() {
         while (!Engine.ShouldClose()) {
-            TerrainManager::RefreshChunks(MainCamera.Position);
             FrameInfo frame = Engine.Frame();
+
+            // TODO: Idk if I should feed the camera here, maybe I should just get the renderer camera from inside this system, hum
+            TerrainManager::RefreshChunks(MainCamera.Position, MainCamera.Frustum);
 
             Context.Frame();
 

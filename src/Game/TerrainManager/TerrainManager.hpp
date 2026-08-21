@@ -3,6 +3,7 @@
 #include <array>
 
 #include "Core/Math.hpp"
+#include "Core/Frustum.hpp"
 
 /**
  * A lot of the constants here should match something in the terrain shaders,
@@ -68,9 +69,13 @@ namespace TerrainManager {
     inline std::array<CacheSlot, MaxCachedChunks> Cache;
     inline std::array<Heightmap, MaxCachedChunks> HeightmapData;
 
+    // Debug/validation toggle - lets frustum culling be disabled at runtime to sanity-check its
+    // effect (e.g. via ImGui) without a rebuild.
+    inline bool CullingEnabled = true;
+
     // Called by the terrain pass once
     void Init();
 
     // Called every time the current_player_chunk changes
-    void RefreshChunks(vec3 player_position);
+    void RefreshChunks(vec3 player_position, const Frustum& camera_frustum);
 }

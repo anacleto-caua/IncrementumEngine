@@ -22,8 +22,8 @@ struct EngineConfig {
 
 class Engine {
 public:
-    EngineConfig Config;
-    FrameTimer Timer{Config.TargetFps};
+    EngineConfig Config = {};
+    FrameTimer Timer = { Config.TargetFps };
 
     // Owned, not an independent global - Renderer has real RAII sub-members (TimelineSemaphore,
     // BinarySemaphore, CommandBufferBlock), so its teardown order benefits from a guaranteed

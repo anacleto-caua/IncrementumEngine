@@ -68,6 +68,25 @@ namespace math {
     using glm::length;
     using glm::distance;
 
+    // GLM also declares a scalar-compatibility overload for dot/length/distance
+    // (genType dot(genType, genType), matching GLSL's "a scalar is a 1-component vector"
+    // rule) that wins overload resolution against the real vec<L,T,Q> overload whenever the
+    // argument is a class DERIVED from vec<L,T,Q> - like vec2/vec3 below - rather than
+    // vec<L,T,Q> itself: the scalar overload is a trivial exact-match by value, while the
+    // vec<L,T,Q> overload needs a derived-to-base deduction step that doesn't get a chance to
+    // compete. cross/normalize have no such competing overload, so they're unaffected and need
+    // no equivalent below. A non-template function always wins over a function template given
+    // equally-good conversions, so these concrete overloads take priority for vec2/vec3 and
+    // route to the real vector implementation instead.
+    inline f32 dot(const vec2& a, const vec2& b) { return glm::dot(static_cast<const glm::vec2&>(a), static_cast<const glm::vec2&>(b)); }
+    inline f32 dot(const vec3& a, const vec3& b) { return glm::dot(static_cast<const glm::vec3&>(a), static_cast<const glm::vec3&>(b)); }
+
+    inline f32 length(const vec2& v) { return glm::length(static_cast<const glm::vec2&>(v)); }
+    inline f32 length(const vec3& v) { return glm::length(static_cast<const glm::vec3&>(v)); }
+
+    inline f32 distance(const vec2& a, const vec2& b) { return glm::distance(static_cast<const glm::vec2&>(a), static_cast<const glm::vec2&>(b)); }
+    inline f32 distance(const vec3& a, const vec3& b) { return glm::distance(static_cast<const glm::vec3&>(a), static_cast<const glm::vec3&>(b)); }
+
     // Matrix Transformations
     using glm::translate;
     using glm::rotate;

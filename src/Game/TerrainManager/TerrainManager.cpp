@@ -26,6 +26,19 @@ namespace TerrainManager {
     }
     std::unordered_map<u64, u32> PositionToSlot;
 
+    // World-space bounds of a chunk, for frustum culling. Y uses the full [0, HeightScale] range
+    // the shader declares rather than this chunk's actual min/max height - conservative (never
+    // wrongly culls a chunk) at the cost of not culling chunks whose real geometry doesn't reach
+    // the top of that range.
+    AABB ChunkBounds(ivec2 world_pos) {
+        f32 min_x = static_cast<f32>(world_pos.x) * static_cast<f32>(ChunkScale);
+        f32 min_z = static_cast<f32>(world_pos.y) * static_cast<f32>(ChunkScale);
+        return {
+            .Min = { min_x, 0.0f, min_z },
+            .Max = { min_x + static_cast<f32>(ChunkScale), GTerrainPass.Config.HeightScale, min_z + static_cast<f32>(ChunkScale) }
+        };
+    }
+
     // --- Init(): parallel one-shot batch, blocking until all of it is done ---
 
     struct InitGenTask {
@@ -166,7 +179,7 @@ namespace TerrainManager {
         return oldest;
     }
 
-    void RefreshChunks(vec3 player_position) {
+    void RefreshChunks(vec3 player_position, const Frustum& camera_frustum) {
         CurrentTick++;
 
         // Phase 1: rebuild the drawn list from the cache as it stood at the start of this call -
@@ -202,14 +215,19 @@ namespace TerrainManager {
                 }
 
                 if (cache_index != UINT32_MAX) {
-                    // Cache hit - draw it, mark it recently used
+                    // Cache hit - always mark recently used regardless of visibility, so turning
+                    // away from a chunk doesn't make it LRU-evict while it's still within
+                    // ExplorationRadius.
                     Cache[cache_index].LastUsedTick = CurrentTick;
-                    ChunkDrawList[CurrentlyActiveChunks] = {
-                        .WorldPos = candidate,
-                        .TextureLayer = cache_index,
-                        .padding = 0
-                    };
-                    CurrentlyActiveChunks++;
+
+                    if (!CullingEnabled || Intersects(camera_frustum, ChunkBounds(candidate))) {
+                        ChunkDrawList[CurrentlyActiveChunks] = {
+                            .WorldPos = candidate,
+                            .TextureLayer = cache_index,
+                            .padding = 0
+                        };
+                        CurrentlyActiveChunks++;
+                    }
                 } else if (!found_missing) {
                     // Only ever kick off one generation per call - remember the first miss
                     missing_position = candidate;

@@ -15,8 +15,10 @@
 #include "Game/TerrainManager/TerrainManager.hpp"
 
 // Resolution and grid scale mirror TerrainManager's VerticesPerEdge/ChunkScale (used only to
-// feed the terrain shaders' specialization constants) - HeightScale has no other home, since
-// nothing outside rendering needs to know how normalized heightmap values map to world Y.
+// feed the terrain shaders' specialization constants) - HeightScale has no other home despite
+// TerrainManager also reading it directly (for frustum-culling AABBs), consistent with this
+// codebase's existing Game/Renderer cross-layer reads (e.g. TerrainPass.cpp already reads
+// TerrainManager's globals the same way, just in the other direction).
 struct TerrainPassConfig {
     f32 HeightScale = 210.0f;
 };

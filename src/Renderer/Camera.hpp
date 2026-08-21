@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Math.hpp"
+#include "Core/Frustum.hpp"
 
 struct Camera {
     // Spatial
@@ -17,6 +18,7 @@ struct Camera {
     // Output
     mat4 View = mat4(1.0f);
     mat4 Projection = mat4(1.0f);
+    Frustum Frustum = {};
 };
 
 // Updates the View and Projection based on current state.
@@ -36,6 +38,8 @@ inline void UpdateMatrices(Camera &camera) {
 
     // Force the Y-flip for Vulkan
     camera.Projection[1][1] *= -1.0f;
+
+    camera.Frustum = ExtractFrustum(camera.Projection * camera.View);
 }
 
 inline Camera CreateCamera(f32 aspect, f32 fov) {

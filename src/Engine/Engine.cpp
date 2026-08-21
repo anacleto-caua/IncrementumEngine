@@ -42,15 +42,19 @@ void Engine::Destroy() {
 }
 
 FrameInfo Engine::Frame() {
+    // Paced before Tick(), not after the frame's work: Sleep() spins against the *previous*
+    // Tick()'s start point, so waiting here covers the whole previous loop iteration - including
+    // the game-side work that runs outside this function (TerrainManager::RefreshChunks() before
+    // it, FlyByCamera::Update() and the ImGui overlay after it). Sleeping at the end of this
+    // function instead would only pace Platform::Update() + Renderer.Frame(), leaving that game
+    // work as unpaced time added on top of the target and making the loop consistently overshoot.
+    Timer.Sleep();
+
     FrameInfo frame;
     frame.DeltaTime = Timer.Tick();
 
-    // Actual frame starts
     Platform::Update();
     Renderer.Frame();
-    // Actual frame ends
-
-    Timer.Sleep();
 
     return frame;
 }

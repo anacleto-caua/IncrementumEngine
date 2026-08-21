@@ -269,6 +269,11 @@ void TerrainPass::Destroy() {
 }
 
 void TerrainPass::FrameSensibleTransfers() {
+    // The drawn set can legitimately be empty now that it's frustum-culled (e.g. looking up from
+    // above the terrain), and vkCmdUpdateBuffer rejects a dataSize of 0. Nothing samples the
+    // buffer this frame either, since Render() skips the draw at the same count.
+    if (TerrainManager::CurrentlyActiveChunks == 0) { return; }
+
     auto buffer = Buffers.Get(ChunkDrawListBuffers[GRenderer.FrameContext.FrameInFlightIndex]);
 
     vkCmdUpdateBuffer(
@@ -282,6 +287,8 @@ void TerrainPass::FrameSensibleTransfers() {
 
 void TerrainPass::Render() {
     OutTerrainData();
+
+    if (TerrainManager::CurrentlyActiveChunks == 0) { return; }
 
     VkCommandBuffer& cmd = GRenderer.FrameContext.DrawCommand;
 
@@ -359,6 +366,7 @@ void TerrainPass::OutTerrainData() {
 
         ImGui::Text("Drawn:  %u / %u", CurrentlyActiveChunks, MaxDrawnChunks);
         ImGui::Text("Cached: %u / %u", cached_count, MaxCachedChunks);
+        ImGui::Checkbox("Frustum Culling", &CullingEnabled);
         ImGui::Separator();
 
         // Iterate only up to the currently active chunks to save UI performance
