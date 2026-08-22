@@ -75,8 +75,11 @@ namespace TaskScheduler {
     }
 
     void Create() {
-        // Leave one thread for the main thread to avoid OS overhead
-        NumThreads = static_cast<u8>(std::thread::hardware_concurrency() - 1);
+        // Half of logical processors, not hardware_concurrency() - 1: the latter is real CPU
+        // oversubscription (leaves ~1 thread for the OS/main thread/everything else on the
+        // machine) and, past what the hardware can actually run in parallel, tends to lose
+        // throughput to context-switch/cache-thrashing overhead rather than gain it.
+        NumThreads = static_cast<u8>(std::thread::hardware_concurrency() / 2);
         if (NumThreads == 0) NumThreads = 1; // lol
 
         WorkerContexts.resize(NumThreads);
