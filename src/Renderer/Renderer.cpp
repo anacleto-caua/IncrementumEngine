@@ -12,7 +12,9 @@
 #include "Renderer/Vk/LeanVk.hpp"
 
 IncResult Renderer::Init() {
-    Passes = { &TerrainPass, &SkyPass, &ImGuiPass };
+    // Text after Sky: it writes no depth itself (screen-space overlay) and would get overdrawn by
+    // Sky's own background fill otherwise.
+    Passes = { &TerrainPass, &SkyPass, &TextPass, &ImGuiPass };
 
     INC_CHECK(VkVault::Create(), "vulkan context creation failed");
     INC_CHECK(TransferPipe.Init(), "transfer pipe creation failed");
@@ -409,6 +411,8 @@ IncResult Renderer::InitSwapchain() {
     Window::GetFramebufferSize(w, h);
     SwapchainExtent.width = static_cast<u32>(w);
     SwapchainExtent.height = static_cast<u32>(h);
+    Swapchain.Width = SwapchainExtent.width;
+    Swapchain.Height = SwapchainExtent.height;
 
     INC_CHECK(RecreateSwapchain(VK_NULL_HANDLE), "failed to create the swapchain on startup");
 
@@ -434,6 +438,8 @@ IncResult Renderer::ResizeSwapchain(u32 width, u32 height) {
     auto clamp = [](auto val, auto min, auto max) { return (val < min) ? min : (val > max) ? max : val; };
     SwapchainExtent.width = clamp(width, min_extent.width, max_extent.width);
     SwapchainExtent.height = clamp(height, min_extent.height, max_extent.height);
+    Swapchain.Width = SwapchainExtent.width;
+    Swapchain.Height = SwapchainExtent.height;
     Scissor.extent = SwapchainExtent;
     Viewport.width = static_cast<float>(SwapchainExtent.width);
     Viewport.height = static_cast<float>(SwapchainExtent.height);

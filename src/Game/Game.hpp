@@ -26,4 +26,5 @@ inline Renderer& GRenderer = GEngine.Renderer;
 inline TransferPipe& GTransferPipe = GRenderer.TransferPipe;
 inline TerrainPass& GTerrainPass = GRenderer.TerrainPass;
 inline SkyPass& GSkyPass = GRenderer.SkyPass;
+inline TextPass& GTextPass = GRenderer.TextPass;
 inline ImGuiPass& GImGuiPass = GRenderer.ImGuiPass;

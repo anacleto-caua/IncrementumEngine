@@ -17,6 +17,7 @@
 #include "Renderer/Resources/TransferPipe.hpp"
 #include "Renderer/Passes/TerrainPass.hpp"
 #include "Renderer/Passes/SkyPass.hpp"
+#include "Renderer/Passes/TextPass.hpp"
 #include "Renderer/Passes/ImGuiPass.hpp"
 
 struct Camera;
@@ -45,9 +46,13 @@ public:
     };
     GlobalDescriptorsState GlobalDescriptors;
 
-    // Only ImageCount is read outside this class (ImGuiPass's Vulkan backend init).
+    // ImageCount is read by ImGuiPass's Vulkan backend init; Width/Height by TextPass to convert
+    // its screen-space pixel coordinates to NDC - the actual GPU-side swapchain resolution, not
+    // EngineConfig::Width/Height (which can be a frame stale relative to a live resize).
     struct SwapchainState {
         u32 ImageCount = 0;
+        u32 Width = 0;
+        u32 Height = 0;
     };
     SwapchainState Swapchain;
 
@@ -64,6 +69,7 @@ public:
     // via the GTerrainPass/GImGuiPass aliases in Game/Game.hpp.
     TerrainPass TerrainPass;
     SkyPass SkyPass;
+    TextPass TextPass;
     ImGuiPass ImGuiPass;
 
 private:

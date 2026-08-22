@@ -75,6 +75,22 @@ namespace Game {
 
             PerfOverlay::Frame(Engine.CurrentFrame.DeltaTime);
             FlyByCamera::Update(Engine.CurrentFrame.DeltaTime);
+
+            // Simplest possible exercise of TextPass: a static bottom-left watermark. Real
+            // HUD/label usage can call GTextPass.DrawText() from anywhere. Reads the window's own
+            // framebuffer size rather than GRenderer.Swapchain (Renderer's internal, GPU-precise
+            // extent, kept for TextPass's own NDC math) - a UI label's position doesn't need that
+            // precision, and Game code has no reason to reach into Renderer's swapchain state for it.
+            i32 window_width, window_height;
+            Window::GetFramebufferSize(window_width, window_height);
+
+            GTextPass.DrawText(
+                "Incrementum Engine",
+                10.0f,
+                static_cast<f32>(window_height) - 25.0f,
+                vec3(0.85f, 0.0f, 0.85f),
+                2.5f
+            );
         }
     }
 
