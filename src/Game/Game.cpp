@@ -75,13 +75,17 @@ namespace Game {
         while (!Engine.ShouldClose()) {
             Engine.Frame();
 
+            // Must run before RefreshChunks(): it rotates MainCamera and recomputes its Frustum for
+            // this frame. Running RefreshChunks() first culls against last frame's frustum, which
+            // shows up as a black leading edge during a fast turn.
+            FlyByCamera::Update(Engine.CurrentFrame.DeltaTime);
+
             // TODO: Idk if I should feed the camera here, maybe I should just get the renderer camera from inside this system, hum
             TerrainManager::RefreshChunks(MainCamera.Position, MainCamera.Frustum);
 
             Context.Frame();
 
             PerfOverlay::Frame(Engine.CurrentFrame.DeltaTime);
-            FlyByCamera::Update(Engine.CurrentFrame.DeltaTime);
             TerrainDebugTools::Update(Engine.CurrentFrame.DeltaTime);
 
             // Simplest possible exercise of TextPass: a static bottom-left watermark. Real
