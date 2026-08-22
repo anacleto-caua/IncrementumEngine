@@ -8,15 +8,13 @@
 
 #include <imgui.h>
 
-#define STB_EASY_FONT_IMPLEMENTATION // no-op (every function is already `static`) but harmless -
-                                      // documents intent the same way implementation.cpp does for
-                                      // the other vendored single-header libs
 #include <stb/stb_easy_font.h>
 
 #include "Game/Game.hpp"
 #include "Renderer/VkVault.hpp"
 #include "Renderer/Vk/ShaderBuilder.hpp"
 #include "Renderer/Vk/PipelineDefaults.hpp"
+#include "Renderer/Tools/DebugPanel.hpp"
 
 void TextPass::DrawText(const char* text, f32 x, f32 y, vec3 color, f32 scale) {
     if (StagingVertexCount >= MaxVertices) { return; }
@@ -268,7 +266,8 @@ void TextPass::Render() {
 }
 
 void TextPass::OutTextData() {
-    if (ImGui::CollapsingHeader("Text")) {
+    if (DebugPanel::BeginSection(DebugPanel::Section::Text)) {
         ImGui::Text("Quads: %u / %u", StagingVertexCount / 4, MaxQuads);
+        DebugPanel::EndSection();
     }
 }

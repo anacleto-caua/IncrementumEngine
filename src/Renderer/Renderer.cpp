@@ -6,6 +6,7 @@
 #include "VkVault.hpp"
 #include "Camera.hpp"
 #include "Passes/Pass.hpp"
+#include "Tools/DebugPanel.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
 
@@ -222,6 +223,7 @@ void Renderer::Frame() {
 
     // Actual frame begins
 
+    DebugPanel::DrawToolbar();
     for (Pass* pass : Passes) { pass->Render(); }
 
     // Actual frame ends

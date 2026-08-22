@@ -9,6 +9,7 @@
 #include "Renderer/VkVault.hpp"
 #include "Renderer/Vk/ShaderBuilder.hpp"
 #include "Renderer/Vk/PipelineDefaults.hpp"
+#include "Renderer/Tools/DebugPanel.hpp"
 #include "Renderer/Resources/ImageView.hpp"
 #include "Game/TerrainManager/TerrainManager.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
@@ -358,7 +359,7 @@ IncResult TerrainPass::PlaneMeshResource::Upload() {
 void TerrainPass::OutTerrainData() {
     using namespace TerrainManager;
 
-    if (ImGui::CollapsingHeader("Terrain Draw Data", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (DebugPanel::BeginSection(DebugPanel::Section::Terrain)) {
         u32 cached_count = 0;
         for (u32 i = 0; i < MaxCachedChunks; i++) {
             if (Cache[i].Valid) { cached_count++; }
@@ -387,7 +388,7 @@ void TerrainPass::OutTerrainData() {
         ImGui::Checkbox("Frustum Culling", &CullingEnabled);
         ImGui::Separator();
 
-        if (ImGui::TreeNodeEx("Streaming", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::TreeNode("Streaming")) {
             if (DebugStats.GenerationInFlight) {
                 ImGui::TextColored(
                     ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
@@ -487,5 +488,7 @@ void TerrainPass::OutTerrainData() {
                 ImGui::TreePop(); // End Chunk [i]
             }
         }
+
+        DebugPanel::EndSection();
     }
 }

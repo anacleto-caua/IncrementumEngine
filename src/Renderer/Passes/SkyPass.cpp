@@ -7,6 +7,7 @@
 
 #include "Game/Game.hpp"
 #include "Renderer/VkVault.hpp"
+#include "Renderer/Tools/DebugPanel.hpp"
 #include "Renderer/Vk/ShaderBuilder.hpp"
 #include "Renderer/Vk/PipelineDefaults.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
@@ -154,9 +155,23 @@ void SkyPass::Render() {
 }
 
 void SkyPass::OutSkyData() {
-    if (ImGui::CollapsingHeader("Sky", ImGuiTreeNodeFlags_DefaultOpen)) {
-        bool changed = false;
+    // Advances regardless of whether the Sky debug section is even open - this used to live
+    // inside the section's own visibility gate, which was harmless back when that section
+    // defaulted open, but froze the animation entirely now that every section defaults closed.
+    bool changed = false;
+    if (AnimateSun) {
+        ElapsedSeconds += GEngine.CurrentFrame.DeltaTime;
+        f32 phase = std::fmod(ElapsedSeconds, DayLengthSeconds) / DayLengthSeconds * 6.28318530f;
 
+        SunAzimuthDegrees = math::degrees(phase) - 180.0f;
+        // abs(sin(phase)), not sin(phase) - keeps elevation in [Min, Max] for every phase instead
+        // of going negative (see the "why no real night" note on AnimateSun's declaration) - a
+        // stylized double-arc rather than a physically accurate day/night cycle.
+        SunElevationDegrees = MinElevationDegrees + (MaxElevationDegrees - MinElevationDegrees) * std::abs(std::sin(phase));
+        changed = true;
+    }
+
+    if (DebugPanel::BeginSection(DebugPanel::Section::Sky)) {
         if (ImGui::Checkbox("Animate Sun", &AnimateSun) && AnimateSun) {
             // Restart the phase from wherever the sun currently sits, rather than snapping to
             // wherever the cycle "would have been" since Init() - avoids a visible pop when
@@ -170,26 +185,16 @@ void SkyPass::OutSkyData() {
         changed |= ImGui::SliderFloat("Sun Elevation", &SunElevationDegrees, 0.0f, 180.0f);
         ImGui::EndDisabled();
 
-        if (AnimateSun) {
-            ElapsedSeconds += GEngine.CurrentFrame.DeltaTime;
-            f32 phase = std::fmod(ElapsedSeconds, DayLengthSeconds) / DayLengthSeconds * 6.28318530f;
+        DebugPanel::EndSection();
+    }
 
-            SunAzimuthDegrees = math::degrees(phase) - 180.0f;
-            // abs(sin(phase)), not sin(phase) - keeps elevation in [Min, Max] for every phase
-            // instead of going negative (see the "why no real night" note on AnimateSun's
-            // declaration) - a stylized double-arc rather than a physically accurate day/night cycle.
-            SunElevationDegrees = MinElevationDegrees + (MaxElevationDegrees - MinElevationDegrees) * std::abs(std::sin(phase));
-            changed = true;
-        }
-
-        if (changed) {
-            f32 azimuth = math::radians(SunAzimuthDegrees);
-            f32 elevation = math::radians(SunElevationDegrees);
-            GRenderer.SunDirection = math::normalize(vec3(
-                std::cos(elevation) * std::cos(azimuth),
-                std::sin(elevation),
-                std::cos(elevation) * std::sin(azimuth)
-            ));
-        }
+    if (changed) {
+        f32 azimuth = math::radians(SunAzimuthDegrees);
+        f32 elevation = math::radians(SunElevationDegrees);
+        GRenderer.SunDirection = math::normalize(vec3(
+            std::cos(elevation) * std::cos(azimuth),
+            std::sin(elevation),
+            std::cos(elevation) * std::sin(azimuth)
+        ));
     }
 }

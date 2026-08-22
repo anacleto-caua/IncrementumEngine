@@ -369,23 +369,6 @@ namespace VkVault {
                 UniqueRoles.push_back(role);
             }
         }
-
-        // out queue info for debug
-        // TODO: make this available at the debug ui since vulkan uses queue indexes
-
-        auto out_queue = [](const char* fancy_name, QueueRole role){
-            analog::info("Queue: {}", fancy_name);
-            analog::info(" - Index: {}", Queues[role].FamilyIndex);
-            analog::info(" - Resource Index: {}", Queues[role].UniqueFamilyId);
-        };
-
-        analog::info("VkVault creation, queues defined: ");
-        analog::info("Unique queue count: {}", UniqueFamilyCount);
-        out_queue("Graphics", QueueRole::Graphics);
-        out_queue("Transfer", QueueRole::Transfer);
-        out_queue("Present", QueueRole::Present);
-        out_queue("Compute", QueueRole::Compute);
-
         return IncResult::SUCCESS;
     }
 
