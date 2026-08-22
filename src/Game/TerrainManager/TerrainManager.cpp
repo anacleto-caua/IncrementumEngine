@@ -3,6 +3,8 @@
 #include <chrono>
 #include <vector>
 #include <cstring>
+#include <random>
+#include <algorithm>
 #include <unordered_map>
 
 #include <FastNoiseLite.hpp>
@@ -11,48 +13,50 @@
 #include "Engine/Core/TaskScheduler/TaskScheduler.hpp"
 
 namespace TerrainManager {
-    void WriteHeightmap(Heightmap& out, ivec2 position);
+    void WriteHeightmap(Heightmap& out, ivec2 position, f64 world_step);
 
     FastNoiseLite ContinentalNoise;
     FastNoiseLite MountainNoise;
     FastNoiseLite DetailNoise;
 
-    // Cache position lookup: Phase 1 of RefreshChunks() needs "is this grid position resident,
-    // and if so in which slot" for every candidate in the exploration circle, every frame - a
-    // linear scan of Cache for each candidate would be O(MaxDrawnChunks * MaxCachedChunks) per
-    // frame. Keeping this map in lockstep with Cache (updated at the same two points Cache's
-    // Position/Valid change: finalize and eviction-kickoff) makes each lookup O(1) instead.
+    // Cache position lookup: Phase 1 of RefreshRing() needs "is this grid position resident, and
+    // if so in which slot" for every candidate in a ring's exploration circle, every frame - a
+    // linear scan of a ring's Cache for each candidate would be O(drawn * cached) per ring per
+    // frame. Keeping each ring's own map in lockstep with its Cache (updated at the same two
+    // points Cache's Position/Valid change: finalize and eviction-kickoff) makes each lookup O(1)
+    // instead.
     u64 PackPosition(ivec2 position) {
         return (static_cast<u64>(static_cast<u32>(position.x)) << 32) | static_cast<u32>(position.y);
     }
-    std::unordered_map<u64, u32> PositionToSlot;
 
     // World-space bounds of a chunk, for frustum culling. Y uses the full [0, HeightScale] range
     // the shader declares rather than this chunk's actual min/max height - conservative (never
     // wrongly culls a chunk) at the cost of not culling chunks whose real geometry doesn't reach
-    // the top of that range.
-    AABB ChunkBounds(ivec2 world_pos) {
-        f32 min_x = static_cast<f32>(world_pos.x) * static_cast<f32>(ChunkScale);
-        f32 min_z = static_cast<f32>(world_pos.y) * static_cast<f32>(ChunkScale);
+    // the top of that range. `chunk_scale` is the owning ring's ChunkScale.
+    AABB ChunkBounds(ivec2 world_pos, f64 chunk_scale) {
+        f32 min_x = static_cast<f32>(world_pos.x) * static_cast<f32>(chunk_scale);
+        f32 min_z = static_cast<f32>(world_pos.y) * static_cast<f32>(chunk_scale);
         return {
             .Min = { min_x, 0.0f, min_z },
-            .Max = { min_x + static_cast<f32>(ChunkScale), GTerrainPass.Config.HeightScale, min_z + static_cast<f32>(ChunkScale) }
+            .Max = { min_x + static_cast<f32>(chunk_scale), GTerrainPass.Config.HeightScale, min_z + static_cast<f32>(chunk_scale) }
         };
     }
 
-    // --- Init(): parallel one-shot batch, blocking until all of it is done ---
+    // --- Init(): ring 0's initial batch is parallel and blocking; outer rings start empty and
+    // stream in through RefreshChunks() like anything else ---
 
     struct InitGenTask {
         ivec2 Position;
         u32 TargetLayer;
+        f64 WorldStep;
         std::atomic<u32>* Counter;
     };
 
     void InitGenerateHeightmapTask(void* payload, TaskScheduler::WorkerContext&) {
         InitGenTask* task = static_cast<InitGenTask*>(payload);
         // Safe to write straight into the shared array: distinct slot per task, and nothing
-        // else reads HeightmapData until Init() returns (render loop hasn't started yet).
-        WriteHeightmap(HeightmapData[task->TargetLayer], task->Position);
+        // else reads Ring0.HeightmapData until Init() returns (render loop hasn't started yet).
+        WriteHeightmap(Ring0.HeightmapData[task->TargetLayer], task->Position, task->WorldStep);
         task->Counter->fetch_sub(1, std::memory_order_release);
     }
 
@@ -72,7 +76,29 @@ namespace TerrainManager {
         DetailNoise.SetFractalOctaves(4);
         DetailNoise.SetFrequency(0.08f);
 
-        // Kickstart the valid data
+        // --- Ring geometry: fixed for the whole run, computed once here ---
+        Ring0.ChunkScale = ChunkScale;
+        Ring0.ScanRadius = ExplorationRadius;
+        Ring0.InnerRadius = 0.0;
+        Ring0.OuterRadius = ChunkScale * static_cast<f64>(ExplorationRadius);
+        Ring0.LayerOffset = 0;
+
+        f64 previous_outer_radius = Ring0.OuterRadius;
+        u32 layer_cursor = MaxCachedChunks;
+        for (u32 i = 0; i < OuterRingCount; i++) {
+            OuterRings[i].ChunkScale = OuterRingChunkScales[i];
+            // Reaches all the way to this ring's own OuterRadius, not just the annulus width -
+            // see the comment on RingState::ScanRadius and on OuterRingScanRadius in the header.
+            OuterRings[i].ScanRadius = OuterRingScanRadius;
+            OuterRings[i].InnerRadius = previous_outer_radius;
+            OuterRings[i].OuterRadius = previous_outer_radius + OuterRings[i].ChunkScale * static_cast<f64>(OuterRingExplorationRadius);
+            OuterRings[i].LayerOffset = layer_cursor;
+
+            previous_outer_radius = OuterRings[i].OuterRadius;
+            layer_cursor += OuterRingMaxCachedChunks;
+        }
+
+        // Kickstart the valid data - ring 0 only, exactly as before this plan.
         vec3 player_pos = {0, 0, 0};
         ivec2 player_coord;
         player_coord.x = static_cast<i32>(std::floor(player_pos.x/ChunkScale));
@@ -81,6 +107,7 @@ namespace TerrainManager {
         u32 coords_counter = 0;
         i32 radius = ExplorationRadius;
         i32 r_squared = radius*radius;
+        f64 world_step = ChunkScale / static_cast<f64>(VerticesPerEdge - 1);
 
         // Payloads must outlive their tasks - reserve() up front so push_back() never
         // reallocates (MaxDrawnChunks is this loop's own exact upper bound).
@@ -99,18 +126,18 @@ namespace TerrainManager {
                 if ((dx * dx) + (dy * dy) <= r_squared) {
                     ChunkDrawList[coords_counter] = {
                         .WorldPos = { x, y },
-                        .TextureLayer = coords_counter,
-                        .padding = 0
+                        .TextureLayer = coords_counter,   // Ring0.LayerOffset == 0
+                        .Scale = static_cast<f32>(ChunkScale)
                     };
-                    Cache[coords_counter] = {
+                    Ring0.Cache[coords_counter] = {
                         .Position = { x, y },
                         .Valid = true,
                         .LastUsedTick = 0
                     };
-                    PositionToSlot[PackPosition({ x, y })] = coords_counter;
+                    Ring0.PositionToSlot[PackPosition({ x, y })] = coords_counter;
 
                     counter.fetch_add(1, std::memory_order_relaxed);
-                    tasks.push_back({ .Position = { x, y }, .TargetLayer = coords_counter, .Counter = &counter });
+                    tasks.push_back({ .Position = { x, y }, .TargetLayer = coords_counter, .WorldStep = world_step, .Counter = &counter });
                     TaskScheduler::SubmitTask(InitGenerateHeightmapTask, &tasks.back());
 
                     coords_counter++;
@@ -123,85 +150,108 @@ namespace TerrainManager {
         TaskScheduler::Wait(counter);
 
         for (u32 i = 0; i < coords_counter; i++) {
-            GTerrainPass.Heightmap.QueueSlice(i, &HeightmapData[i], sizeof(Heightmap));
+            GTerrainPass.Heightmap.QueueSlice(i, &Ring0.HeightmapData[i], sizeof(Heightmap));
         }
 
         // The heightmap array is sampled through a single whole-array descriptor, so Vulkan
         // requires every layer to already be VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL at draw
-        // time - not just the ones actually referenced this frame. Cache slots beyond the
-        // initial drawn set have no real data yet (Cache[i].Valid stays false, so they're never
-        // picked to draw), but their layer still needs an initial transition; content is
-        // irrelevant since nothing samples it until it's regenerated for real.
+        // time - not just the ones actually referenced this frame. That covers ring 0's own
+        // unfilled cache slots and every outer ring's entirely-empty cache (outer rings fill in
+        // for real over the following frames via RefreshChunks()); content is irrelevant since
+        // nothing samples it until it's regenerated for real.
         Heightmap blank_heightmap{};
-        for (u32 i = coords_counter; i < MaxCachedChunks; i++) {
+        for (u32 i = coords_counter; i < TotalMaxCachedChunks; i++) {
             GTerrainPass.Heightmap.QueueSlice(i, &blank_heightmap, sizeof(Heightmap));
         }
 
         GTransferPipe.LazySubmit();
     }
 
-    // --- RefreshChunks(): one in-flight generation at a time, polled, never blocking ---
-
-    struct PendingGeneration {
-        Heightmap StagingData;            // worker writes here, never into the shared HeightmapData
-        ivec2 Position = { 0, 0 };
-        u32 TargetLayer = 0;
-        std::atomic<bool> Done{false};    // release by worker, acquire by main thread
-        bool InFlight = false;            // main-thread-only, no atomics needed
-    };
-    PendingGeneration Generation;
-    std::chrono::steady_clock::time_point GenerationStartTime;
+    // --- RefreshChunks(): one in-flight generation at a time PER RING, polled, never blocking ---
 
     void GenerateHeightmapTask(void* payload, TaskScheduler::WorkerContext&) {
         PendingGeneration* generation = static_cast<PendingGeneration*>(payload);
-        WriteHeightmap(generation->StagingData, generation->Position);
+        WriteHeightmap(generation->StagingData, generation->Position, generation->WorldStep);
         generation->Done.store(true, std::memory_order_release);
     }
 
-    // Monotonic per-RefreshChunks-call counter, stamped onto a cache slot whenever it's part of
-    // the current frame's drawn set - what makes LRU eviction a "smallest tick wins" scan.
-    u64 CurrentTick = 0;
+    // Picks a cache slot to generate a new chunk into, within one ring: prefer one that's never
+    // been used, else evict the least-recently-used slot - which is never one of this frame's
+    // drawn slots, since RefreshRing() already stamped all of those to CurrentTick before this is
+    // ever called. Also skips any slot already claimed by another in-flight generation in this
+    // same ring's pool - without this, two generations kicked off in the same RefreshRing() call
+    // could both target the same cache slot (invalidating it doesn't remove it from consideration
+    // on its own; only tracking "is some pool entry already writing here" does).
+    template<typename RingT>
+    u32 PickSlotToGenerateInto(RingT& ring) {
+        u32 count = static_cast<u32>(ring.Cache.size());
 
-    // Picks a cache slot to generate a new chunk into: prefer one that's never been used, else
-    // evict the least-recently-used slot - which is never one of this frame's drawn slots, since
-    // RefreshChunks() already stamped all of those to CurrentTick before this is ever called.
-    u32 PickSlotToGenerateInto() {
-        for (u32 i = 0; i < MaxCachedChunks; i++) {
-            if (!Cache[i].Valid) { return i; }
+        auto is_claimed = [&](u32 slot) {
+            for (const PendingGeneration& gen : ring.GenerationPool) {
+                if (gen.InFlight && gen.TargetLayer == slot) { return true; }
+            }
+            return false;
+        };
+
+        for (u32 i = 0; i < count; i++) {
+            if (!ring.Cache[i].Valid && !is_claimed(i)) { return i; }
         }
 
         u32 oldest = 0;
         u64 oldest_tick = UINT64_MAX;
-        for (u32 i = 0; i < MaxCachedChunks; i++) {
-            if (Cache[i].LastUsedTick < oldest_tick) {
-                oldest_tick = Cache[i].LastUsedTick;
+        for (u32 i = 0; i < count; i++) {
+            if (is_claimed(i)) { continue; }
+            if (ring.Cache[i].LastUsedTick < oldest_tick) {
+                oldest_tick = ring.Cache[i].LastUsedTick;
                 oldest = i;
             }
         }
         return oldest;
     }
 
-    void RefreshChunks(vec3 player_position, const Frustum& camera_frustum) {
-        CurrentTick++;
-
-        // Phase 1: rebuild the drawn list from the cache as it stood at the start of this call -
-        // deliberately BEFORE finalizing any generation that just completed (see phase 2 below),
-        // so a chunk never gets added to the drawn list in the same frame its GPU upload was
-        // queued. That upload's release/write/acquire chain hasn't had a chance to actually run
-        // yet at this point - sampling it this frame would race ahead of it. Waiting until next
-        // frame gives AcquirePending (called every frame from Renderer::Frame()) a full cycle to
-        // actually acquire it and for the draw's own wait-on-last-acquire to cover it correctly.
+    // Three-phase per-ring refresh: rebuild draw list / finalize a finished generation / kick off
+    // the next missing ones. Shared by ring 0 and every outer ring via `ring`'s own state and
+    // LODRing config (baked in by Init()). Returns true if this ring queued any completed chunk's
+    // slice this call - the caller batches this across every ring into one SubmitReleaseAndWrite()
+    // call per frame; a per-ring call point hit a real GPU-timing assertion failure once the pool
+    // let several rings each queue several chunks in close succession.
+    template<typename RingT>
+    bool RefreshRing(RingT& ring, vec3 player_position, const Frustum& camera_frustum, u64 current_tick) {
+        // Phase 1: rebuild this ring's slice of the shared draw list from its cache as it stood
+        // at the start of this call - deliberately BEFORE finalizing any generation that just
+        // completed (see phase 2 below), so a chunk never gets added to the drawn list in the
+        // same frame its GPU upload was queued. That upload's release/write/acquire chain hasn't
+        // had a chance to actually run yet at this point - sampling it this frame would race
+        // ahead of it. Waiting until next frame gives AcquirePending (called every frame from
+        // Renderer::Frame()) a full cycle to actually acquire it and for the draw's own
+        // wait-on-last-acquire to cover it correctly.
         ivec2 player_coord;
-        player_coord.x = static_cast<i32>(std::floor(player_position.x / ChunkScale));
-        player_coord.y = static_cast<i32>(std::floor(player_position.z / ChunkScale));
+        player_coord.x = static_cast<i32>(std::floor(player_position.x / ring.ChunkScale));
+        player_coord.y = static_cast<i32>(std::floor(player_position.z / ring.ChunkScale));
 
-        constexpr i32 radius = ExplorationRadius;
-        constexpr i32 r_squared = radius * radius;
+        i32 radius = static_cast<i32>(ring.ScanRadius);
+        i32 r_squared = radius * radius;
 
-        CurrentlyActiveChunks = 0;
-        ivec2 missing_position = { 0, 0 };
-        bool found_missing = false;
+        // The GenerationPoolSize best missing candidates found this pass, kept sorted ascending by
+        // priority (index 0 = best) as the scan runs - NOT the first GenerationPoolSize found in
+        // scan order. Visible (per the same frustum test used for cached chunks below) beats
+        // not-visible outright; ties within the same visibility go to the closer one - taking
+        // scan-order candidates instead meant a region late in the raster scan could sit
+        // unresolved for many frames even while directly in view.
+        struct PrioritizedMiss {
+            ivec2 Position;
+            bool Visible;
+            i64 DistSq;   // chunk-grid units, this ring's own scale - only compared within this ring
+        };
+        auto is_better = [](const PrioritizedMiss& a, const PrioritizedMiss& b) {
+            if (a.Visible != b.Visible) { return a.Visible; }
+            return a.DistSq < b.DistSq;
+        };
+        std::array<PrioritizedMiss, GenerationPoolSize> best_missing;
+        u32 best_count = 0;
         u32 culled_count = 0;
+        u32 drawn_count = 0;
+        u32 visible_missing_count = 0;
 
         for (i32 x = player_coord.x - radius; x <= player_coord.x + radius; x++) {
             for (i32 y = player_coord.y - radius; y <= player_coord.y + radius; y++) {
@@ -209,34 +259,92 @@ namespace TerrainManager {
                 i32 dy = y - player_coord.y;
                 if ((dx * dx) + (dy * dy) > r_squared) { continue; }
 
+                // Ring ownership is exclusive, not overlapping: skip anything already owned by a
+                // strictly-inner ring. Ring 0 has InnerRadius == 0, so this never skips anything
+                // for it. `world_dx`/`world_dy` measure this candidate's near corner at THIS
+                // ring's (coarser) ChunkScale against a smooth InnerRadius circle, but the inner
+                // ring's actual coverage is a lattice disc at its own (finer) scale and its own
+                // player_coord - the two disagree worst along the diagonals, where a candidate
+                // both rings believe the other owns ends up drawn by neither. Shrinking the
+                // exclusion radius by one chunk of this ring's own scale trades that gap for a
+                // thin band of double coverage near the seam instead.
+                if (ring.InnerRadius > 0.0) {
+                    f64 safe_inner_radius = ring.InnerRadius - ring.ChunkScale;
+                    if (safe_inner_radius > 0.0) {
+                        f64 world_dx = static_cast<f64>(dx) * ring.ChunkScale;
+                        f64 world_dy = static_cast<f64>(dy) * ring.ChunkScale;
+                        if ((world_dx * world_dx + world_dy * world_dy) < safe_inner_radius * safe_inner_radius) {
+                            continue;
+                        }
+                    }
+                }
+
                 ivec2 candidate = { x, y };
 
                 u32 cache_index = UINT32_MAX;
-                auto slot_it = PositionToSlot.find(PackPosition(candidate));
-                if (slot_it != PositionToSlot.end()) {
+                auto slot_it = ring.PositionToSlot.find(PackPosition(candidate));
+                if (slot_it != ring.PositionToSlot.end()) {
                     cache_index = slot_it->second;
                 }
 
                 if (cache_index != UINT32_MAX) {
                     // Cache hit - always mark recently used regardless of visibility, so turning
-                    // away from a chunk doesn't make it LRU-evict while it's still within
-                    // ExplorationRadius.
-                    Cache[cache_index].LastUsedTick = CurrentTick;
+                    // away from a chunk doesn't make it LRU-evict while it's still within this
+                    // ring's ExplorationRadius.
+                    ring.Cache[cache_index].LastUsedTick = current_tick;
 
-                    if (!CullingEnabled || Intersects(camera_frustum, ChunkBounds(candidate))) {
+                    if (!CullingEnabled || Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale))) {
                         ChunkDrawList[CurrentlyActiveChunks] = {
                             .WorldPos = candidate,
-                            .TextureLayer = cache_index,
-                            .padding = 0
+                            .TextureLayer = cache_index + ring.LayerOffset,
+                            .Scale = static_cast<f32>(ring.ChunkScale)
                         };
                         CurrentlyActiveChunks++;
+                        drawn_count++;
                     } else {
                         culled_count++;
                     }
-                } else if (!found_missing) {
-                    // Only ever kick off one generation per call - remember the first miss
-                    missing_position = candidate;
-                    found_missing = true;
+                } else {
+                    // Visible-but-missing counts regardless of already-in-flight status below -
+                    // an in-flight chunk is still visibly dark on screen until it actually finishes,
+                    // so it belongs in this "how many dark chunks are in view right now" stat too.
+                    bool visible = !CullingEnabled || Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale));
+                    if (visible) { visible_missing_count++; }
+
+                    bool already_in_flight = false;
+                    for (const PendingGeneration& gen : ring.GenerationPool) {
+                        if (gen.InFlight && gen.Position == candidate) {
+                            already_in_flight = true;
+                            break;
+                        }
+                    }
+
+                    if (!already_in_flight) {
+                        PrioritizedMiss candidate_info = {
+                            .Position = candidate,
+                            .Visible = visible,
+                            .DistSq = static_cast<i64>(dx) * dx + static_cast<i64>(dy) * dy
+                        };
+
+                        // Insertion into the small (K=GenerationPoolSize) sorted buffer - cheaper
+                        // and more legible than pulling in <algorithm> for a size this small.
+                        if (best_count < GenerationPoolSize) {
+                            u32 insert_at = best_count;
+                            while (insert_at > 0 && is_better(candidate_info, best_missing[insert_at - 1])) {
+                                best_missing[insert_at] = best_missing[insert_at - 1];
+                                insert_at--;
+                            }
+                            best_missing[insert_at] = candidate_info;
+                            best_count++;
+                        } else if (is_better(candidate_info, best_missing[GenerationPoolSize - 1])) {
+                            u32 insert_at = GenerationPoolSize - 1;
+                            while (insert_at > 0 && is_better(candidate_info, best_missing[insert_at - 1])) {
+                                best_missing[insert_at] = best_missing[insert_at - 1];
+                                insert_at--;
+                            }
+                            best_missing[insert_at] = candidate_info;
+                        }
+                    }
                 }
             }
         }
@@ -244,43 +352,52 @@ namespace TerrainManager {
         // Phase 2: finalize a generation that finished since last frame, landing it in the cache -
         // deliberately AFTER this call's drawn-list rebuild above, so it only becomes eligible to
         // be drawn starting next frame (see the comment on phase 1 for why).
-        DebugStats.DrawnLastFrame = CurrentlyActiveChunks;
-        DebugStats.CulledLastFrame = culled_count;
+        ring.DebugStats.DrawnLastFrame = drawn_count;
+        ring.DebugStats.CulledLastFrame = culled_count;
+        ring.DebugStats.VisibleMissingLastFrame = visible_missing_count;
 
-        if (Generation.InFlight && Generation.Done.load(std::memory_order_acquire)) {
-            std::memcpy(HeightmapData[Generation.TargetLayer], Generation.StagingData, sizeof(Heightmap));
+        // Queue every completed generation's slice - the caller submits once for the whole
+        // frame's batch across every ring (see the comment on this function).
+        bool any_finalized = false;
+        for (PendingGeneration& gen : ring.GenerationPool) {
+            if (!gen.InFlight || !gen.Done.load(std::memory_order_acquire)) { continue; }
 
-            DebugStats.ChunksGenerated++;
-            DebugStats.LastGenerationMs =
-                std::chrono::duration<f32, std::milli>(std::chrono::steady_clock::now() - GenerationStartTime).count();
+            std::memcpy(ring.HeightmapData[gen.TargetLayer], gen.StagingData, sizeof(Heightmap));
 
-            Cache[Generation.TargetLayer] = {
-                .Position = Generation.Position,
+            ring.DebugStats.ChunksGenerated++;
+            ring.DebugStats.LastGenerationMs =
+                std::chrono::duration<f32, std::milli>(std::chrono::steady_clock::now() - gen.StartTime).count();
+
+            ring.Cache[gen.TargetLayer] = {
+                .Position = gen.Position,
                 .Valid = true,
-                .LastUsedTick = CurrentTick
+                .LastUsedTick = current_tick
             };
-            PositionToSlot[PackPosition(Generation.Position)] = Generation.TargetLayer;
+            ring.PositionToSlot[PackPosition(gen.Position)] = gen.TargetLayer;
 
             GTerrainPass.Heightmap.QueueSlice(
-                Generation.TargetLayer,
-                &HeightmapData[Generation.TargetLayer],
+                gen.TargetLayer + ring.LayerOffset,
+                &ring.HeightmapData[gen.TargetLayer],
                 sizeof(Heightmap)
             );
-            GTransferPipe.SubmitReleaseAndWrite();
+            any_finalized = true;
 
-            // missing_position was computed before this finalization - if it's the position we
-            // just resolved, it's not actually missing anymore, so don't re-trigger for it.
-            if (found_missing && Generation.Position == missing_position) {
-                found_missing = false;
-            }
-
-            Generation.InFlight = false;
+            gen.InFlight = false;
         }
 
-        // Phase 3: kick off generation for the first missing position, if nothing is already in flight
-        if (found_missing && !Generation.InFlight) {
-            Generation.Position = missing_position;
-            Generation.TargetLayer = PickSlotToGenerateInto();
+        // Phase 3: kick off generation for the best-scoring missing positions found this pass, up
+        // to GenerationPoolSize concurrently instead of strictly one at a time.
+        for (u32 m = 0; m < best_count; m++) {
+            PendingGeneration* free_slot = nullptr;
+            for (PendingGeneration& gen : ring.GenerationPool) {
+                if (!gen.InFlight) { free_slot = &gen; break; }
+            }
+            if (!free_slot) { break; } // every pool slot busy - the rest wait for next frame
+
+            PendingGeneration& gen = *free_slot;
+            gen.Position = best_missing[m].Position;
+            gen.TargetLayer = PickSlotToGenerateInto(ring);
+            gen.WorldStep = ring.ChunkScale / static_cast<f64>(VerticesPerEdge - 1);
 
             // Invalidate the slot the instant it's claimed for reuse, not only once generation
             // finishes. Otherwise, for however many frames generation takes, this slot is still
@@ -288,42 +405,130 @@ namespace TerrainManager {
             // is still in range, it keeps getting drawn with data that's about to be silently
             // replaced by a completely unrelated position's terrain the moment finalize lands,
             // instead of cleanly showing as missing and getting regenerated on its own.
-            if (Cache[Generation.TargetLayer].Valid) {
-                PositionToSlot.erase(PackPosition(Cache[Generation.TargetLayer].Position));
+            if (ring.Cache[gen.TargetLayer].Valid) {
+                ring.PositionToSlot.erase(PackPosition(ring.Cache[gen.TargetLayer].Position));
 
-                EvictionLog[EvictionLogCursor] = {
-                    .EvictedPosition = Cache[Generation.TargetLayer].Position,
-                    .ReplacedByPosition = Generation.Position,
-                    .Slot = Generation.TargetLayer,
-                    .Tick = CurrentTick
+                ring.EvictionLog[ring.EvictionLogCursor] = {
+                    .EvictedPosition = ring.Cache[gen.TargetLayer].Position,
+                    .ReplacedByPosition = gen.Position,
+                    .Slot = gen.TargetLayer,
+                    .Tick = current_tick
                 };
-                EvictionLogCursor = (EvictionLogCursor + 1) % EvictionLogSize;
-                if (EvictionLogCount < EvictionLogSize) { EvictionLogCount++; }
-                DebugStats.Evictions++;
+                ring.EvictionLogCursor = (ring.EvictionLogCursor + 1) % EvictionLogSize;
+                if (ring.EvictionLogCount < EvictionLogSize) { ring.EvictionLogCount++; }
+                ring.DebugStats.Evictions++;
             }
-            Cache[Generation.TargetLayer].Valid = false;
+            ring.Cache[gen.TargetLayer].Valid = false;
 
-            Generation.Done.store(false, std::memory_order_relaxed);
-            Generation.InFlight = true;
-            GenerationStartTime = std::chrono::steady_clock::now();
-            DebugStats.GenerationsStarted++;
+            gen.Done.store(false, std::memory_order_relaxed);
+            gen.InFlight = true;
+            gen.StartTime = std::chrono::steady_clock::now();
+            ring.DebugStats.GenerationsStarted++;
 
-            TaskScheduler::SubmitTask(GenerateHeightmapTask, &Generation);
+            // The pool-slot reservation above prioritizes (Visible, DistSq) for *which* candidate
+            // gets a slot, but says nothing about the order TaskScheduler's worker threads actually
+            // run submitted work in. TaskPriority::High routes a currently-visible chunk into a
+            // separate, always-drained-first queue tier so it can't get stuck behind older,
+            // now-less-relevant submissions under a big enough burst.
+            TaskScheduler::SubmitTask(
+                GenerateHeightmapTask,
+                &gen,
+                best_missing[m].Visible ? TaskScheduler::TaskPriority::High : TaskScheduler::TaskPriority::Normal
+            );
         }
 
-        DebugStats.GenerationInFlight = Generation.InFlight;
-        DebugStats.InFlightPosition = Generation.Position;
-        DebugStats.InFlightSlot = Generation.TargetLayer;
+        u32 in_flight_count = 0;
+        for (const PendingGeneration& gen : ring.GenerationPool) { if (gen.InFlight) { in_flight_count++; } }
+        ring.DebugStats.GenerationsInFlight = in_flight_count;
+
+        return any_finalized;
     }
 
-    void WriteHeightmap(Heightmap& out, ivec2 position) {
+    void RefreshChunks(vec3 player_position, const Frustum& camera_frustum) {
+        CurrentTick++;
+        CurrentlyActiveChunks = 0;
+
+        // Batched into one submit call for the whole frame, across every ring - see the comment
+        // on RefreshRing for why a per-ring call point isn't safe at this volume.
+        bool any_finalized = RefreshRing(Ring0, player_position, camera_frustum, CurrentTick);
+        for (u32 i = 0; i < OuterRingCount; i++) {
+            any_finalized |= RefreshRing(OuterRings[i], player_position, camera_frustum, CurrentTick);
+        }
+
+        if (any_finalized) { GTransferPipe.SubmitReleaseAndWrite(); }
+    }
+
+    i32 FindRingForDistance(f64 horizontal_distance, f64& out_chunk_scale) {
+        if (horizontal_distance <= Ring0.OuterRadius) {
+            out_chunk_scale = Ring0.ChunkScale;
+            return 0;
+        }
+        for (u32 i = 0; i < OuterRingCount; i++) {
+            if (horizontal_distance <= OuterRings[i].OuterRadius) {
+                out_chunk_scale = OuterRings[i].ChunkScale;
+                return static_cast<i32>(i) + 1;
+            }
+        }
+        return -1;
+    }
+
+    // Shared by DiagnoseChunk for both ring types (Ring0State and OuterRingState are different
+    // template instantiations, but identical in every field this needs to read).
+    template<typename RingT>
+    ChunkDiagnostic DiagnoseChunkInRing(RingT& ring, u32 ring_index_for_layer, ivec2 chunk_pos, const Frustum& camera_frustum) {
+        ChunkDiagnostic diag;
+
+        auto found = ring.PositionToSlot.find(PackPosition(chunk_pos));
+        diag.InCacheMap = (found != ring.PositionToSlot.end());
+        if (diag.InCacheMap) {
+            u32 slot = found->second;
+            diag.CacheValid = ring.Cache[slot].Valid;
+            diag.LastUsedTick = ring.Cache[slot].LastUsedTick;
+            diag.GlobalLayer = ring.LayerOffset + slot;
+
+            if (diag.CacheValid) {
+                for (u32 i = 0; i < CurrentlyActiveChunks; i++) {
+                    if (ChunkDrawList[i].TextureLayer == diag.GlobalLayer) {
+                        diag.InDrawListThisFrame = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        for (const PendingGeneration& gen : ring.GenerationPool) {
+            if (gen.InFlight && gen.Position == chunk_pos) {
+                diag.InGenerationPool = true;
+                diag.GenerationDone = gen.Done.load(std::memory_order_relaxed);
+                break;
+            }
+        }
+
+        diag.IntersectsFrustum = Intersects(camera_frustum, ChunkBounds(chunk_pos, ring.ChunkScale));
+
+        (void)ring_index_for_layer; // kept as a parameter for symmetry/future use, not currently needed
+        return diag;
+    }
+
+    ChunkDiagnostic DiagnoseChunk(i32 ring_index, ivec2 chunk_pos, const Frustum& camera_frustum) {
+        if (ring_index == 0) {
+            return DiagnoseChunkInRing(Ring0, 0, chunk_pos, camera_frustum);
+        }
+        if (ring_index >= 1 && static_cast<u32>(ring_index - 1) < OuterRingCount) {
+            u32 outer_index = static_cast<u32>(ring_index - 1);
+            return DiagnoseChunkInRing(OuterRings[outer_index], static_cast<u32>(ring_index), chunk_pos, camera_frustum);
+        }
+        return {}; // invalid ring_index - caller error, return an all-false diagnostic rather than asserting
+    }
+
+    void WriteHeightmap(Heightmap& out, ivec2 position, f64 world_step) {
         i32 terrain_res = VerticesPerEdge;
 
         f32 global_x, global_z;
         for (i32 x = 0; x < terrain_res; x++) {
-            global_x = static_cast<f32>(x + ((terrain_res-1) * position.x));
+            global_x = static_cast<f32>(static_cast<f64>(x + ((terrain_res-1) * position.x)) * world_step);
             for (i32 z = 0; z < terrain_res; z++) {
-                global_z = static_cast<f32>(z + ((terrain_res-1) * position.y));
+                global_z = static_cast<f32>(static_cast<f64>(z + ((terrain_res-1) * position.y)) * world_step);
 
                 f32 cont = (ContinentalNoise.GetNoise(global_x, global_z) + 1.0f) * 0.5f;
                 f32 mount = (MountainNoise.GetNoise(global_x, global_z) + 1.0f) * 0.5f;
@@ -356,4 +561,5 @@ namespace TerrainManager {
             }
         }
     }
+
 }

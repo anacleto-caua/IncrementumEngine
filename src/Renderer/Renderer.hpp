@@ -78,7 +78,13 @@ private:
     // two owned members above.
     std::vector<Pass*> Passes;
 
-    SubmissionPile<QueueRole::Graphics> SubmissionPile;
+    // MAX_SUBMITS raised from the class template's default (32) to 64: this pile absorbs
+    // TransferPipe::AcquirePending()'s one-submission-per-pending-reacquire writes (folded in
+    // during Renderer::Frame(), before the frame's own draw-command submission) plus that
+    // guaranteed follow-up submission. A high-throughput streaming burst can fill this pile with
+    // re-acquires alone, leaving no room for the mandatory follow-up - bump this if a similar
+    // burst source overflows it again (distinct from TransferPipe's own internal submission piles).
+    SubmissionPile<QueueRole::Graphics, 64> SubmissionPile;
 
     struct FrameData {
         CommandBufferBlock FrameBlock;

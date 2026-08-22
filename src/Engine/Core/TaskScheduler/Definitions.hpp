@@ -6,6 +6,17 @@ namespace TaskScheduler {
     class TaskQueue;
     struct WorkerContext;
 
+    // Two-tier priority, not a real priority queue: SubmitTask() routes into one of two parallel
+    // sets of per-worker queues rather than reordering within one queue (moodycamel::ConcurrentQueue
+    // is a lock-free MPMC FIFO, not safe/cheap to reorder in place). Workers always drain their own
+    // High queue before Normal, and steal-scanning checks every thread's High queue before any
+    // thread's Normal queue. High is for work whose relevance was just computed this frame and
+    // shouldn't sit behind older, now-stale submissions.
+    enum class TaskPriority : u8 {
+        Normal,
+        High
+    };
+
     static constexpr i32 TASK_QUEUE_CAPACITY = 4096;
     static_assert([](){
         i32 n = TASK_QUEUE_CAPACITY;

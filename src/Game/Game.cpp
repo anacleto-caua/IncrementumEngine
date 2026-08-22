@@ -40,6 +40,11 @@ namespace Game {
             );
 
         MainCamera.Position = { 0, 75, 0 };
+        // Must reach at least TerrainManager::TotalCoverageRadius or the LOD ring system's outer
+        // rings get clipped/frustum-culled away regardless of streaming - see the comment on
+        // TotalCoverageRadius. The outermost ring's own ChunkScale as margin covers a chunk AABB's
+        // far corner extending slightly past the nominal radius.
+        MainCamera.FarPlane = static_cast<f32>(TerrainManager::TotalCoverageRadius + TerrainManager::OuterRingChunkScales.back());
         UpdateMatrices(MainCamera);
 
         INC_CHECK(Engine.Init(MainCamera), "couldn't create engine");

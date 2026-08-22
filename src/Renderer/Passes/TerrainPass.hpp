@@ -67,5 +67,12 @@ private:
     VkPipeline TerrainPipeline {};
     VkPipelineLayout TerrainPipelineLayout {};
 
+    // ImGui-toggleable, pushed to terrain.frag every frame (a push constant rather than a
+    // specialization constant specifically so it can flip without a pipeline rebuild) - swaps
+    // between the procedural grass/rock/snow terrain texture (default) and the flat per-chunk
+    // checker pattern that's been this codebase's debug view since before texturing existed,
+    // still useful for chunk-boundary/LOD debugging.
+    bool ShowChunkDebugColors = false;
+
     void OutTerrainData();
 };

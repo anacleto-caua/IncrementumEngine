@@ -65,10 +65,18 @@ public:
     void AcquirePending(QueueRole queue, PileT& pile) {
         CommandBufferBlock& cmd_block = SpecialCommandBufferBlocks[queue];
 
+        // SubmitCount reserves room for one MORE submission beyond this function's own writes -
+        // every real caller (Renderer::Frame(), LazySubmit()'s Stage 3) submits into "pile" via
+        // its own BeginSubmission()/EndSubmission() pair right after calling this, so filling the
+        // pile to exactly MaxSubmits here would leave that guaranteed follow-up submission with
+        // nowhere to go. Hit for real once a high-throughput streaming caller produced more
+        // pending re-acquires in one window than this reservation accounted for - the other three
+        // capacities don't have the same "one more guaranteed" caller pattern, so they keep their
+        // original, tighter bound.
         auto has_room = [](const PileT& p) {
             return
                 p.CmdCount    + 1 <= p.MaxCommandBuffers &&
-                p.SubmitCount + 1 <= p.MaxSubmits        &&
+                p.SubmitCount + 2 <= p.MaxSubmits        &&
                 p.WaitCount   + 1 <= p.MaxWaitSemaphores &&
                 p.SignalCount + 1 <= p.MaxSignalSemaphores;
         };
@@ -130,10 +138,17 @@ private:
     // Supposed to be harsher than the Vulkan limit of 65536 bytes to avoid bad usage
     [[maybe_unused]] static constexpr u64 BUFFER_UPDATE_SIZE_LIMIT = 30000;
 
-    // The parameters used for the main transmission pile
-    static constexpr u64 NORMAL_PILE_SUBMITS = 32;
+    // The parameters used for the main transmission pile. LazyWrite() drains PackageQueue into
+    // this pile every SubmitReleaseAndWrite() call and stops early once IsFull() trips, leaving
+    // the rest (and the images they target) stuck mid-transfer for extra frames - so this must be
+    // sized to fit a full streaming burst in one pass. Each TransferAcquireWriteRelease package
+    // uses 1 submit, 1 command buffer, 2 wait-semaphore entries, and 1 signal, so WAIT_SEMAPHORES
+    // must stay exactly 2x SUBMITS. Bump these together if a burst-sized caller starts overflowing
+    // this pile again - same class of capacity bug as AcquirePending's pile reservation above,
+    // just one stage earlier in the pipeline.
+    static constexpr u64 NORMAL_PILE_SUBMITS = 64;
     static constexpr u64 NORMAL_PILE_COMMAND_BUFFERS = 64;
-    static constexpr u64 NORMAL_PILE_WAIT_SEMAPHORES = 64;
+    static constexpr u64 NORMAL_PILE_WAIT_SEMAPHORES = 128;
     static constexpr u64 NORMAL_PILE_SIGNAL_SEMAPHORES = 64;
     using StandardSubmissionPile = SubmissionPile<
             QueueRole::Transfer,

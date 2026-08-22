@@ -19,29 +19,44 @@ namespace TaskScheduler {
     std::vector<std::thread> Workers;
     std::vector<WorkerContext> WorkerContexts;
     std::deque<TaskQueue> WorkersTaskQueues;
+    // Parallel set of queues for TaskPriority::High - see the comment on TaskPriority in
+    // Definitions.hpp for why this is two parallel queue sets rather than one reordered queue.
+    std::deque<TaskQueue> WorkersHighPriorityTaskQueues;
 
     void WorkerThreadLoop(u32 thread_index) {
         WorkerContext& context = WorkerContexts[thread_index];
         TaskQueue* queue = context.Queue;
+        TaskQueue* high_queue = &WorkersHighPriorityTaskQueues[thread_index];
 
         while (!StopSystem.load(std::memory_order_acquire)) {
             Task current_task;
             bool has_task = false;
 
-            // Try to pop a task from the self queue
-            has_task = queue->Pop(current_task);
-
-            // No self task, gotta steal
+            // Own High queue first, then own Normal queue.
+            has_task = high_queue->Pop(current_task);
             if (!has_task) {
-                // Pick a random thread to steal from
+                has_task = queue->Pop(current_task);
+            }
+
+            // Nothing of our own - steal, High queues across every other thread before any
+            // thread's Normal queue, so a High task waiting on a busy thread still gets picked up
+            // by an idle one ahead of any Normal work.
+            if (!has_task) {
+                for (u32 i = 0; i < NumThreads; ++i) {
+                    u32 victim_index = (thread_index + i) % NumThreads;
+                    if (victim_index == thread_index) continue;
+
+                    has_task = WorkersHighPriorityTaskQueues[victim_index].Steal(current_task);
+                    if (has_task) break;
+                }
+            }
+            if (!has_task) {
                 for (u32 i = 0; i < NumThreads; ++i) {
                     u32 victim_index = (thread_index + i) % NumThreads;
                     if (victim_index == thread_index) continue;
 
                     has_task = WorkersTaskQueues[victim_index].Steal(current_task);
-                    if (has_task) {
-                        break; // Successfully stole a task!
-                    }
+                    if (has_task) break;
                 }
             }
 
@@ -66,6 +81,7 @@ namespace TaskScheduler {
 
         WorkerContexts.resize(NumThreads);
         WorkersTaskQueues.resize(NumThreads);
+        WorkersHighPriorityTaskQueues.resize(NumThreads);
 
         for (u32 i = 0; i < NumThreads; i++) {
             WorkerContexts[i] = {
@@ -91,13 +107,21 @@ namespace TaskScheduler {
         }
     }
 
-    void SubmitTask(TaskEntryPoint entry_point, void* payload) {
+    void SubmitTask(TaskEntryPoint entry_point, void* payload, TaskPriority priority) {
         PendingTasks.fetch_add(1, std::memory_order_release);
 
-        // Basic Round-Robin distribution from the Main Thread
+        // Basic Round-Robin distribution from the Main Thread - separately per priority tier, so
+        // High submissions round-robin among themselves the same way Normal ones always have.
         static std::atomic<u32> next_queue{0};
-        u32 index = next_queue.fetch_add(1, std::memory_order_relaxed) % NumThreads;
-        WorkersTaskQueues[index].PushExternal({entry_point, payload});
+        static std::atomic<u32> next_high_queue{0};
+
+        if (priority == TaskPriority::High) {
+            u32 index = next_high_queue.fetch_add(1, std::memory_order_relaxed) % NumThreads;
+            WorkersHighPriorityTaskQueues[index].PushExternal({entry_point, payload});
+        } else {
+            u32 index = next_queue.fetch_add(1, std::memory_order_relaxed) % NumThreads;
+            WorkersTaskQueues[index].PushExternal({entry_point, payload});
+        }
 
         // Wake up ONE sleeping worker to handle this new task
         WakeCondition.notify_one();
@@ -112,10 +136,16 @@ namespace TaskScheduler {
             Task current_task;
             bool has_task = false;
 
-            // Main thread goes to steal
+            // Main thread goes to steal - High queues first, same ordering as WorkerThreadLoop.
             for (u32 i = 0; i < NumThreads; ++i) {
-                has_task = WorkersTaskQueues[i].Steal(current_task);
+                has_task = WorkersHighPriorityTaskQueues[i].Steal(current_task);
                 if (has_task) break;
+            }
+            if (!has_task) {
+                for (u32 i = 0; i < NumThreads; ++i) {
+                    has_task = WorkersTaskQueues[i].Steal(current_task);
+                    if (has_task) break;
+                }
             }
 
             if (has_task) {

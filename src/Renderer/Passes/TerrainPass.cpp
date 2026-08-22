@@ -25,7 +25,7 @@ IncResult TerrainPass::Init() {
         Image::CreateInfo heightmap_image_create_desc;
         heightmap_image_create_desc.Width = TerrainManager::VerticesPerEdge;
         heightmap_image_create_desc.Height = TerrainManager::VerticesPerEdge;
-        heightmap_image_create_desc.ArrayLayers = TerrainManager::MaxCachedChunks;
+        heightmap_image_create_desc.ArrayLayers = TerrainManager::TotalMaxCachedChunks;
         heightmap_image_create_desc.Format = HeightmapResource::Format;
         heightmap_image_create_desc.Usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         heightmap_image_create_desc.OwnerQueue = QueueRole::Graphics;
@@ -62,7 +62,7 @@ IncResult TerrainPass::Init() {
     // Buffer for chunk draw list
     {
         Buffer::CreateInfo chunk_instance_buffer_create_info = {
-            .Size = TerrainManager::MaxDrawnChunks * sizeof(TerrainManager::ChunkInstanceData),
+            .Size = TerrainManager::TotalMaxDrawnChunks * sizeof(TerrainManager::ChunkInstanceData),
             .Type = Buffer::Type::SSBO,
         };
 
@@ -127,12 +127,20 @@ IncResult TerrainPass::Init() {
         DescriptorManager::PerFrameLayout
     };
 
+    // Single uint32 toggle (terrain.frag's TerrainPushConstants::showDebugColors) - swaps between
+    // the procedural texture and the flat per-chunk debug checker at draw time, no pipeline
+    // rebuild needed.
+    VkPushConstantRange terrain_push_constant_range {};
+    terrain_push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    terrain_push_constant_range.offset = 0;
+    terrain_push_constant_range.size = sizeof(u32);
+
     VkPipelineLayoutCreateInfo terrain_pipeline_layout_create_info {};
     terrain_pipeline_layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     terrain_pipeline_layout_create_info.setLayoutCount = static_cast<u32>(pipeline_layouts.size());
     terrain_pipeline_layout_create_info.pSetLayouts = pipeline_layouts.data();
-    terrain_pipeline_layout_create_info.pPushConstantRanges = nullptr;
-    terrain_pipeline_layout_create_info.pushConstantRangeCount = 0;
+    terrain_pipeline_layout_create_info.pPushConstantRanges = &terrain_push_constant_range;
+    terrain_pipeline_layout_create_info.pushConstantRangeCount = 1;
 
     VK_CHECK(
         vkCreatePipelineLayout(
@@ -145,13 +153,7 @@ IncResult TerrainPass::Init() {
     );
 
     // Finally creating the terrain VkPipeline itself
-    std::array<VkDynamicState, 2> dynamic_states = {{ VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR}};
-
-    VkPipelineDynamicStateCreateInfo dynamic_state_create_info {};
-    dynamic_state_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamic_state_create_info.pNext = nullptr;
-    dynamic_state_create_info.dynamicStateCount = static_cast<u32>(dynamic_states.size());
-    dynamic_state_create_info.pDynamicStates = dynamic_states.data();
+    auto dynamic_state_create_info = PipelineDefaults::DefaultPipelineDynamicStateCreateInfo();
 
     VkPipelineRenderingCreateInfo rendering_create_info {};
     rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
@@ -192,9 +194,10 @@ IncResult TerrainPass::Init() {
     // Vertex shader
     VkPipelineShaderStageCreateInfo vert_shader;
     SpecializationBuilder vert_shader_spec_builder;
+    // constant_id 1 (GRID_SCALE) is deliberately unused now - chunk world-size varies per LOD
+    // ring, so it moved to a per-instance SSBO field (ChunkInstanceData::Scale) instead.
     vert_shader_spec_builder
         .AddConstant(0, TerrainManager::VerticesPerEdge)
-        .AddConstant(1, static_cast<f32>(TerrainManager::ChunkScale))
         .AddConstant(2, Config.HeightScale);
 
     INC_CHECK(
@@ -312,6 +315,9 @@ void TerrainPass::Render() {
         nullptr
     );
 
+    u32 show_debug_colors = ShowChunkDebugColors ? 1u : 0u;
+    vkCmdPushConstants(cmd, TerrainPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(u32), &show_debug_colors);
+
     vkCmdDrawIndexed(cmd, PlaneMeshResource::IndexCount, TerrainManager::CurrentlyActiveChunks, 0, 0, 0);
 }
 
@@ -359,136 +365,83 @@ IncResult TerrainPass::PlaneMeshResource::Upload() {
 void TerrainPass::OutTerrainData() {
     using namespace TerrainManager;
 
-    if (DebugPanel::BeginSection(DebugPanel::Section::Terrain)) {
-        u32 cached_count = 0;
-        for (u32 i = 0; i < MaxCachedChunks; i++) {
-            if (Cache[i].Valid) { cached_count++; }
-        }
+    if (!DebugPanel::BeginSection(DebugPanel::Section::Terrain)) { return; }
 
-        if (ImGui::BeginTable("TerrainResidency", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-            ImGui::TableSetupColumn("Metric");
-            ImGui::TableSetupColumn("Value");
+    ImGui::Checkbox("Frustum Culling", &CullingEnabled);
+    ImGui::Checkbox("Show Chunk Debug Colors", &ShowChunkDebugColors);
+    ImGui::Text("Total Drawn: %u / %u", CurrentlyActiveChunks, TotalMaxDrawnChunks);
+
+    // Collapsed by default even with the Terrain section open - this ring/chunk breakdown is the
+    // single most space-consuming panel of all of them.
+    if (ImGui::CollapsingHeader("Terrain Draw Data")) {
+        // Per-ring breakdown confirms outer rings stay bounded in chunk count even as effective
+        // draw distance grows, instead of just one opaque global total.
+        if (ImGui::BeginTable("TerrainRings", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("Ring");
+            ImGui::TableSetupColumn("ChunkScale");
+            ImGui::TableSetupColumn("Drawn");
+            ImGui::TableSetupColumn("Culled");
+            ImGui::TableSetupColumn("Dark");
+            ImGui::TableSetupColumn("Cached");
             ImGui::TableHeadersRow();
 
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn(); ImGui::Text("Drawn");
-            ImGui::TableNextColumn(); ImGui::Text("%u / %u", CurrentlyActiveChunks, MaxDrawnChunks);
+            // "Dark" = VisibleMissingLastFrame: in the frustum right now but not yet generated -
+            // measured directly, not inferred from Drawn/Culled/Cached.
+            auto ring_row = [](const char* name, f64 scale, u32 drawn, u32 max_drawn, u32 culled, u32 dark, u32 cached, u32 max_cached) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn(); ImGui::Text("%s", name);
+                ImGui::TableNextColumn(); ImGui::Text("%.0f", scale);
+                ImGui::TableNextColumn(); ImGui::Text("%u / %u", drawn, max_drawn);
+                ImGui::TableNextColumn(); ImGui::Text("%u", culled);
+                if (dark > 0) {
+                    ImGui::TableNextColumn(); ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%u", dark);
+                } else {
+                    ImGui::TableNextColumn(); ImGui::Text("0");
+                }
+                ImGui::TableNextColumn(); ImGui::Text("%u / %u", cached, max_cached);
+            };
 
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn(); ImGui::Text("Culled (frustum)");
-            ImGui::TableNextColumn(); ImGui::Text("%u", DebugStats.CulledLastFrame);
+            u32 ring0_cached = 0;
+            for (u32 i = 0; i < MaxCachedChunks; i++) { if (Ring0.Cache[i].Valid) { ring0_cached++; } }
+            ring_row("Ring 0", Ring0.ChunkScale, Ring0.DebugStats.DrawnLastFrame, MaxDrawnChunks,
+                     Ring0.DebugStats.CulledLastFrame, Ring0.DebugStats.VisibleMissingLastFrame, ring0_cached, MaxCachedChunks);
 
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn(); ImGui::Text("Cached");
-            ImGui::TableNextColumn(); ImGui::Text("%u / %u", cached_count, MaxCachedChunks);
+            const char* outer_ring_names[OuterRingCount] = { "Ring 1", "Ring 2", "Ring 3", "Ring 4" };
+            for (u32 i = 0; i < OuterRingCount; i++) {
+                u32 cached = 0;
+                for (u32 j = 0; j < OuterRingMaxCachedChunks; j++) { if (OuterRings[i].Cache[j].Valid) { cached++; } }
+                ring_row(outer_ring_names[i], OuterRings[i].ChunkScale, OuterRings[i].DebugStats.DrawnLastFrame,
+                         OuterRingMaxDrawnChunks, OuterRings[i].DebugStats.CulledLastFrame,
+                         OuterRings[i].DebugStats.VisibleMissingLastFrame, cached, OuterRingMaxCachedChunks);
+            }
 
             ImGui::EndTable();
         }
 
-        ImGui::Checkbox("Frustum Culling", &CullingEnabled);
-        ImGui::Separator();
-
-        if (ImGui::TreeNode("Streaming")) {
-            if (DebugStats.GenerationInFlight) {
+        if (ImGui::TreeNode("Ring 0 Streaming")) {
+            if (Ring0.DebugStats.GenerationsInFlight > 0) {
                 ImGui::TextColored(
                     ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
-                    "Generating (%d, %d) -> slot %u",
-                    DebugStats.InFlightPosition.x, DebugStats.InFlightPosition.y, DebugStats.InFlightSlot
+                    "Generating: %u / %u pool slots busy",
+                    Ring0.DebugStats.GenerationsInFlight, GenerationPoolSize
                 );
             } else {
                 ImGui::TextDisabled("Idle");
             }
 
-            ImGui::Text("Generated:  %llu", (unsigned long long)DebugStats.ChunksGenerated);
-            ImGui::Text("Started:    %llu", (unsigned long long)DebugStats.GenerationsStarted);
-            ImGui::Text("Evictions:  %llu", (unsigned long long)DebugStats.Evictions);
-            ImGui::Text("Last gen:   %.2f ms", static_cast<f64>(DebugStats.LastGenerationMs));
+            ImGui::Text("Generated:  %llu", (unsigned long long)Ring0.DebugStats.ChunksGenerated);
+            ImGui::Text("Started:    %llu", (unsigned long long)Ring0.DebugStats.GenerationsStarted);
+            ImGui::Text("Evictions:  %llu", (unsigned long long)Ring0.DebugStats.Evictions);
+            ImGui::Text("Last gen:   %.2f ms", static_cast<f64>(Ring0.DebugStats.LastGenerationMs));
 
             ImGui::TreePop();
         }
 
-        if (ImGui::TreeNode("Eviction Log")) {
-            if (EvictionLogCount == 0) {
-                ImGui::TextDisabled("[No evictions yet]");
-            } else if (ImGui::BeginTable("Evictions", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-                ImGui::TableSetupColumn("Tick");
-                ImGui::TableSetupColumn("Slot");
-                ImGui::TableSetupColumn("Evicted");
-                ImGui::TableSetupColumn("Replaced By");
-                ImGui::TableHeadersRow();
-
-                // Walk backwards from the cursor so the most recent eviction is listed first.
-                for (u32 i = 0; i < EvictionLogCount; i++) {
-                    u32 index = (EvictionLogCursor + EvictionLogSize - 1 - i) % EvictionLogSize;
-                    const auto& record = EvictionLog[index];
-
-                    ImGui::TableNextRow();
-                    ImGui::TableNextColumn(); ImGui::Text("%llu", (unsigned long long)record.Tick);
-                    ImGui::TableNextColumn(); ImGui::Text("%u", record.Slot);
-                    ImGui::TableNextColumn(); ImGui::Text("(%d, %d)", record.EvictedPosition.x, record.EvictedPosition.y);
-                    ImGui::TableNextColumn(); ImGui::Text("(%d, %d)", record.ReplacedByPosition.x, record.ReplacedByPosition.y);
-                }
-
-                ImGui::EndTable();
-            }
-
-            ImGui::TreePop();
-        }
-
-        ImGui::Separator();
-
-        // Iterate only up to the currently active chunks to save UI performance
-        for (u32 i = 0; i < CurrentlyActiveChunks; ++i)
-        {
-            const auto& draw_data = ChunkDrawList[i];
-            u32 cache_index = draw_data.TextureLayer;
-
-            // Create a unique tree node for each chunk using its index as the ID
-            if (ImGui::TreeNode((void*)(intptr_t)i, "Chunk [%u]", i))
-            {
-                // Draw Data
-                if (ImGui::TreeNode("Instance Draw Data"))
-                {
-                    ImGui::Text("World Pos:     (%d, %d)", draw_data.WorldPos.x, draw_data.WorldPos.y);
-                    ImGui::Text("Texture Layer: %u", draw_data.TextureLayer);
-                    ImGui::TextDisabled("Padding:       %u", draw_data.padding); // Disabled text color for padding
-                    ImGui::TreePop();
-                }
-
-                // Heightmap Streaming Status
-                if (ImGui::TreeNode("Cache Slot")) {
-
-                    const auto& slot = Cache[cache_index];
-
-                    ImGui::Text("Position: (%d, %d)", slot.Position.x, slot.Position.y);
-                    ImGui::Text("Last Used Tick: %llu", (unsigned long long)slot.LastUsedTick);
-
-                    if (slot.Valid) {
-                        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "Valid: True");
-                    } else {
-                        ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "Valid: False");
-                    }
-                    ImGui::TreePop();
-                }
-
-                // Heightmap Data Preview
-                if (ImGui::TreeNode("Heightmap Preview")) {
-                    const u32 edge = VerticesPerEdge;
-                    ImGui::Text("Grid Size: %u x %u", edge, edge);
-
-                    // Show a quick sample of the corners to verify data is loaded
-                    ImGui::BulletText("Top-Left [0][0]:     %u", HeightmapData[cache_index][0][0]);
-                    ImGui::BulletText("Top-Right [0][N]:    %u", HeightmapData[cache_index][0][edge - 1]);
-                    ImGui::BulletText("Bot-Left [N][0]:     %u", HeightmapData[cache_index][edge - 1][0]);
-                    ImGui::BulletText("Bot-Right [N][N]:    %u", HeightmapData[cache_index][edge - 1][edge - 1]);
-
-                    ImGui::TreePop();
-                }
-
-                ImGui::TreePop(); // End Chunk [i]
-            }
-        }
-
-        DebugPanel::EndSection();
+        // Per-chunk detail (Cache Slot / Heightmap Preview / Eviction Log, previously here for
+        // every chunk) is dropped for now in favor of the per-ring summary above, which is what
+        // actually validates the LOD design end to end - worth reintroducing scoped to one
+        // selected ring if per-chunk debugging is needed again later.
     }
+
+    DebugPanel::EndSection();
 }
