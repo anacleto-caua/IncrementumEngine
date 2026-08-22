@@ -30,10 +30,16 @@ public:
     // owner. Reached ambiently via the GRenderer alias in Game/Game.hpp, same as before.
     Renderer Renderer;
 
+    // Set at the top of Frame(), before Platform::Update()/Renderer.Frame() run - so anything
+    // called from deeper in that same call chain (e.g. SkyPass::Render()) can read this frame's
+    // DeltaTime ambiently (GEngine.CurrentFrame.DeltaTime) instead of needing it threaded through
+    // as a parameter, or falling back to real wall-clock time.
+    FrameInfo CurrentFrame;
+
     IncResult Init(Camera& camera);
     void Destroy();
 
-    FrameInfo Frame();
+    void Frame();
 
     bool ShouldClose();
     void RefreshConfig();

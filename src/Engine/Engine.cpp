@@ -41,7 +41,7 @@ void Engine::Destroy() {
     TaskScheduler::Destroy();
 }
 
-FrameInfo Engine::Frame() {
+void Engine::Frame() {
     // Paced before Tick(), not after the frame's work: Sleep() spins against the *previous*
     // Tick()'s start point, so waiting here covers the whole previous loop iteration - including
     // the game-side work that runs outside this function (TerrainManager::RefreshChunks() before
@@ -50,13 +50,10 @@ FrameInfo Engine::Frame() {
     // work as unpaced time added on top of the target and making the loop consistently overshoot.
     Timer.Sleep();
 
-    FrameInfo frame;
-    frame.DeltaTime = Timer.Tick();
+    CurrentFrame.DeltaTime = Timer.Tick();
 
     Platform::Update();
     Renderer.Frame();
-
-    return frame;
 }
 
 void Engine::ResizeEvent(i32 width, i32 height) {

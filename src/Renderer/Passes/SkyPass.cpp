@@ -156,8 +156,31 @@ void SkyPass::Render() {
 void SkyPass::OutSkyData() {
     if (ImGui::CollapsingHeader("Sky", ImGuiTreeNodeFlags_DefaultOpen)) {
         bool changed = false;
+
+        if (ImGui::Checkbox("Animate Sun", &AnimateSun) && AnimateSun) {
+            // Restart the phase from wherever the sun currently sits, rather than snapping to
+            // wherever the cycle "would have been" since Init() - avoids a visible pop when
+            // toggling this on after manually dragging the sliders.
+            ElapsedSeconds = 0.0f;
+        }
+        ImGui::SliderFloat("Day Length (s)", &DayLengthSeconds, 10.0f, 600.0f);
+
+        ImGui::BeginDisabled(AnimateSun);
         changed |= ImGui::SliderFloat("Sun Azimuth", &SunAzimuthDegrees, -180.0f, 180.0f);
         changed |= ImGui::SliderFloat("Sun Elevation", &SunElevationDegrees, 0.0f, 180.0f);
+        ImGui::EndDisabled();
+
+        if (AnimateSun) {
+            ElapsedSeconds += GEngine.CurrentFrame.DeltaTime;
+            f32 phase = std::fmod(ElapsedSeconds, DayLengthSeconds) / DayLengthSeconds * 6.28318530f;
+
+            SunAzimuthDegrees = math::degrees(phase) - 180.0f;
+            // abs(sin(phase)), not sin(phase) - keeps elevation in [Min, Max] for every phase
+            // instead of going negative (see the "why no real night" note on AnimateSun's
+            // declaration) - a stylized double-arc rather than a physically accurate day/night cycle.
+            SunElevationDegrees = MinElevationDegrees + (MaxElevationDegrees - MinElevationDegrees) * std::abs(std::sin(phase));
+            changed = true;
+        }
 
         if (changed) {
             f32 azimuth = math::radians(SunAzimuthDegrees);

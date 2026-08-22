@@ -66,15 +66,15 @@ namespace Game {
 
     void Run() {
         while (!Engine.ShouldClose()) {
-            FrameInfo frame = Engine.Frame();
+            Engine.Frame();
 
             // TODO: Idk if I should feed the camera here, maybe I should just get the renderer camera from inside this system, hum
             TerrainManager::RefreshChunks(MainCamera.Position, MainCamera.Frustum);
 
             Context.Frame();
 
-            PerfOverlay::Frame(frame.DeltaTime);
-            FlyByCamera::Update(frame.DeltaTime);
+            PerfOverlay::Frame(Engine.CurrentFrame.DeltaTime);
+            FlyByCamera::Update(Engine.CurrentFrame.DeltaTime);
         }
     }
 

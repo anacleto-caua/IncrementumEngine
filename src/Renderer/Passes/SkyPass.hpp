@@ -23,5 +23,16 @@ private:
     f32 SunAzimuthDegrees = 0.0f;
     f32 SunElevationDegrees = 0.0f;
 
+    // Optional automated day cycle, off by default. Elevation is kept non-negative (no "night"
+    // handling in atmosphere()), animated as abs(sin(phase)) so the sun sweeps overhead and dips
+    // toward the horizon without crossing it. Driven by GEngine.CurrentFrame.DeltaTime rather than
+    // wall-clock time, so it correctly stays frozen through anything that isn't simulated time
+    // (a held debugger breakpoint, a window drag-resize stall) instead of jumping forward on resume.
+    bool AnimateSun = true;
+    f32 DayLengthSeconds = 120.0f;
+    f32 MinElevationDegrees = 10.0f;
+    f32 MaxElevationDegrees = 80.0f;
+    f32 ElapsedSeconds = 0.0f;
+
     void OutSkyData();
 };
