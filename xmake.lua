@@ -36,15 +36,30 @@ rule("compile_shaders")
         end
 
         if glslc then
-            depend.on_changed(function ()
-                local outdir = path.directory(output_file)
-                if not os.exists(outdir) then
-                    os.mkdir(outdir)
-                end
-                if not os.exists(output_file) then
-                    os.touch(output_file)
-                end
+            local outdir = path.directory(output_file)
+            if not os.exists(outdir) then
+                os.mkdir(outdir)
+            end
 
+            -- depend.on_changed()'s cache isn't scoped by output_file's path, only by the source
+            -- file - so it's tracked per-source, not per-(source, target directory). Switching mode
+            -- or platform (a different target:targetdir(), e.g. debug -> releasedbg) changes
+            -- output_file without changing sourcefile, and the cache - having already seen this
+            -- exact source compile successfully once, for a *different* target directory - decides
+            -- nothing changed and skips the rebuild, leaving the new target directory missing the
+            -- .spv (or holding a stale one from whenever that directory last built) with no
+            -- warning. Hit for real twice switching to releasedbg mid-session, once for shaders
+            -- that predated any work this session and once for a shader added after the first fix.
+            -- Bypassing the cache whenever the actual expected output file doesn't exist yet closes
+            -- this for good, while still leaving depend.on_changed's normal caching in place for
+            -- the common case (output already exists, only recompiling on a real source change).
+            if not os.exists(output_file) then
+                os.vrunv(glslc, {sourcefile, "-o", output_file})
+                print("Compiling: " .. shader_name .. " -> " .. output_file)
+                return
+            end
+
+            depend.on_changed(function ()
                 os.vrunv(glslc, {sourcefile, "-o", output_file})
                 print("Compiling: " .. shader_name .. " -> " .. output_file)
             end, {files = sourcefile})
