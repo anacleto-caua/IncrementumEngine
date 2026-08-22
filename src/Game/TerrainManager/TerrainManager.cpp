@@ -14,6 +14,7 @@
 
 namespace TerrainManager {
     void WriteHeightmap(Heightmap& out, ivec2 position, f64 world_step);
+    void GeneratePropPlacements(PropPlacement& out, const Heightmap& heightmap, ivec2 position, f64 chunk_scale);
 
     FastNoiseLite ContinentalNoise;
     FastNoiseLite MountainNoise;
@@ -57,6 +58,14 @@ namespace TerrainManager {
         // Safe to write straight into the shared array: distinct slot per task, and nothing
         // else reads Ring0.HeightmapData until Init() returns (render loop hasn't started yet).
         WriteHeightmap(Ring0.HeightmapData[task->TargetLayer], task->Position, task->WorldStep);
+        // Same safety argument covers Ring0.Props - placements are derived from the heightmap
+        // just written, same slot, same "nothing reads it until Init() returns" window.
+        GeneratePropPlacements(
+            Ring0.Props[task->TargetLayer],
+            Ring0.HeightmapData[task->TargetLayer],
+            task->Position,
+            task->WorldStep * static_cast<f64>(VerticesPerEdge - 1)
+        );
         task->Counter->fetch_sub(1, std::memory_order_release);
     }
 
@@ -172,6 +181,12 @@ namespace TerrainManager {
     void GenerateHeightmapTask(void* payload, TaskScheduler::WorkerContext&) {
         PendingGeneration* generation = static_cast<PendingGeneration*>(payload);
         WriteHeightmap(generation->StagingData, generation->Position, generation->WorldStep);
+        GeneratePropPlacements(
+            generation->StagingProps,
+            generation->StagingData,
+            generation->Position,
+            generation->WorldStep * static_cast<f64>(VerticesPerEdge - 1)
+        );
         generation->Done.store(true, std::memory_order_release);
     }
 
@@ -363,6 +378,7 @@ namespace TerrainManager {
             if (!gen.InFlight || !gen.Done.load(std::memory_order_acquire)) { continue; }
 
             std::memcpy(ring.HeightmapData[gen.TargetLayer], gen.StagingData, sizeof(Heightmap));
+            ring.Props[gen.TargetLayer] = gen.StagingProps;
 
             ring.DebugStats.ChunksGenerated++;
             ring.DebugStats.LastGenerationMs =
@@ -562,4 +578,70 @@ namespace TerrainManager {
         }
     }
 
+    // Scatters props across one chunk, sampling the heightmap this same generation task just
+    // wrote (no GPU round-trip needed - this runs CPU-side, same worker thread, same slot).
+    // World position is derived with the *exact* formula terrain.vert uses to place a heightmap
+    // texel (texel (tx,tz) -> u=tx/(RES-1), v=tz/(RES-1) -> world.x = v*scale + WorldPos.x*scale,
+    // world.z = u*scale + WorldPos.y*scale) rather than re-deriving it independently, so props
+    // land exactly on the rendered surface regardless of which axis terrain.vert's u/v happen to
+    // be named after.
+    void GeneratePropPlacements(PropPlacement& out, const Heightmap& heightmap, ivec2 position, f64 chunk_scale) {
+        out.Count = 0;
+
+        // Deterministic per-chunk RNG - no persistence needed, terrain itself is fully procedural
+        // and regenerable, so props regenerate identically every time this chunk is (re)streamed.
+        u64 seed = (static_cast<u64>(static_cast<u32>(position.x)) << 32)
+                 ^ static_cast<u64>(static_cast<u32>(position.y))
+                 ^ 0x9E3779B97F4A7C15ULL;
+        std::mt19937 rng(static_cast<u32>(seed ^ (seed >> 32)));
+        std::uniform_real_distribution<f32> jitter(-0.4f, 0.4f);
+        std::uniform_real_distribution<f32> rotation_dist(0.0f, 6.28318530f);
+        std::uniform_real_distribution<f32> scale_dist(0.8f, 1.2f);
+
+        constexpr u32 GridDim = 5;  // 5x5 jittered grid = 25 candidates, capped at MaxPropsPerChunk
+        constexpr u32 LastTexel = VerticesPerEdge - 1;
+
+        for (u32 gx = 0; gx < GridDim && out.Count < MaxPropsPerChunk; gx++) {
+            for (u32 gz = 0; gz < GridDim && out.Count < MaxPropsPerChunk; gz++) {
+                f32 cell_u = (static_cast<f32>(gx) + 0.5f + jitter(rng)) / static_cast<f32>(GridDim);
+                f32 cell_v = (static_cast<f32>(gz) + 0.5f + jitter(rng)) / static_cast<f32>(GridDim);
+                cell_u = std::clamp(cell_u, 0.01f, 0.99f);
+                cell_v = std::clamp(cell_v, 0.01f, 0.99f);
+
+                // NOT heightmap[cell_u][cell_v] - the heightmap image is uploaded tightly-packed
+                // from Heightmap[x][z] (z fastest-varying), which makes the image's WIDTH axis
+                // ("u") address Heightmap's Z index and HEIGHT ("v") address X - the opposite of
+                // the naive expectation. terrain.vert's own u/v -> world.x/world.z swap cancels
+                // this out; this code has to replicate that same composition to sample the texel
+                // terrain.vert would for a given (u=cell_u, v=cell_v): Heightmap[X = v][Z = u].
+                u32 tx = static_cast<u32>(cell_v * static_cast<f32>(LastTexel));
+                u32 tz = static_cast<u32>(cell_u * static_cast<f32>(LastTexel));
+
+                f32 h_center = static_cast<f32>(heightmap[tx][tz]) / 65535.0f;
+                f32 h_dx = static_cast<f32>(heightmap[std::min(tx + 1, LastTexel)][tz]) / 65535.0f;
+                f32 h_dz = static_cast<f32>(heightmap[tx][std::min(tz + 1, LastTexel)]) / 65535.0f;
+
+                // Reject steep slopes (cliff faces) - crude finite-difference estimate, cheap and
+                // good enough for v1 (no real physical placement rules yet).
+                f32 slope = std::abs(h_dx - h_center) + std::abs(h_dz - h_center);
+                if (slope > 0.02f) { continue; }
+
+                f32 world_x = cell_v * static_cast<f32>(chunk_scale) + static_cast<f32>(position.x) * static_cast<f32>(chunk_scale);
+                f32 world_z = cell_u * static_cast<f32>(chunk_scale) + static_cast<f32>(position.y) * static_cast<f32>(chunk_scale);
+                f32 world_y = h_center * GTerrainPass.Config.HeightScale;
+
+                // Trees on gentle mid-elevation ground, rocks higher/steeper - reuses the height
+                // value already sampled instead of adding a new noise generator.
+                PropModel model = (h_center > 0.55f) ? PropModel::Rock : PropModel::Tree;
+
+                out.Instances[out.Count] = {
+                    .WorldPosition = { world_x, world_y, world_z },
+                    .YRotation = rotation_dist(rng),
+                    .Scale = scale_dist(rng),
+                    .Model = model
+                };
+                out.Count++;
+            }
+        }
+    }
 }

@@ -104,6 +104,33 @@ namespace TerrainManager {
 
     using Heightmap = u16[VerticesPerEdge][VerticesPerEdge];
 
+    // --- Props ---
+    // Which mesh a PropInstance uses - lives here (Game layer) rather than under Renderer/ since
+    // TerrainManager is what produces placement data and stamps this index into it; PropPass
+    // (Renderer layer) just interprets it as a table index, the same direction TerrainPass already
+    // depends on TerrainManager's types.
+    enum class PropModel : u32 {
+        Tree,
+        Rock,
+
+        _COUNT_
+    };
+
+    // Placeholder, not a considered value - retune once real prop art/density targets exist.
+    constexpr u32 MaxPropsPerChunk = 24;
+
+    struct PropInstance {
+        vec3 WorldPosition;
+        f32 YRotation = 0.0f;  // radians, Y-axis only - props don't need full 3-axis rotation
+        f32 Scale = 1.0f;
+        PropModel Model = PropModel::Tree;
+    };
+
+    struct PropPlacement {
+        std::array<PropInstance, MaxPropsPerChunk> Instances;
+        u32 Count = 0;
+    };
+
     // Per-drawn-chunk instance data uploaded to the GPU - mirrors the shader's ChunkDrawData struct.
     struct ChunkInstanceData {
         ivec2 WorldPos;
@@ -148,6 +175,10 @@ namespace TerrainManager {
     // One in-flight async heightmap generation - one slot of a ring's GenerationPool.
     struct PendingGeneration {
         Heightmap StagingData;             // worker writes here, never into the shared HeightmapData
+        PropPlacement StagingProps;        // worker writes here too - same lifetime as StagingData,
+                                            // finalized into ring.Props at the same point (props
+                                            // piggyback on the heightmap's generation/cache
+                                            // lifecycle, no second cache/LRU state machine)
         ivec2 Position = { 0, 0 };
         u32 TargetLayer = 0;
         f64 WorldStep = 1.0;               // this ring's world-space-per-texel step
@@ -181,6 +212,7 @@ namespace TerrainManager {
 
         std::array<CacheSlot, MaxCachedChunksV> Cache;
         std::array<Heightmap, MaxCachedChunksV> HeightmapData;
+        std::array<PropPlacement, MaxCachedChunksV> Props;  // parallel to HeightmapData, same index
         std::unordered_map<u64, u32> PositionToSlot;
         std::array<PendingGeneration, GenerationPoolSize> GenerationPool;
 
@@ -196,6 +228,21 @@ namespace TerrainManager {
 
     inline Ring0State Ring0;
     inline std::array<OuterRingState, OuterRingCount> OuterRings;
+
+    // Given a chunk's global heightmap-array layer (ChunkInstanceData::TextureLayer), returns that
+    // chunk's prop placement data. Layer offsets are ring 0's fixed layer count followed by
+    // equally-sized outer-ring blocks (see Init()'s layer_cursor), so which ring owns a layer - and
+    // its local slot - is closed-form arithmetic, not a search. Lets PropPass go straight from a
+    // drawn chunk's TextureLayer to its props without knowing the ring array split exists.
+    inline const PropPlacement& GetPropsForLayer(u32 global_layer) {
+        if (global_layer < MaxCachedChunks) {
+            return Ring0.Props[global_layer];
+        }
+        u32 offset = global_layer - MaxCachedChunks;
+        u32 ring_index = offset / OuterRingMaxCachedChunks;
+        u32 local_slot = offset % OuterRingMaxCachedChunks;
+        return OuterRings[ring_index].Props[local_slot];
+    }
 
     // Debug/validation toggle - lets frustum culling be disabled at runtime to sanity-check its
     // effect (e.g. via ImGui) without a rebuild.

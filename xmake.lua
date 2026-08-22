@@ -247,6 +247,16 @@ target("IncrementumEngine")
     add_files_with_extensions("shaders", {"vert", "frag", "comp"}, {rule = "compile_shaders"})
     add_files_if_matched("resources/**", {rule = "copy_assets"})
 
+    -- Prop models (assets/models/*.obj) are copied wholesale via after_build rather than
+    -- add_files+a custom rule: Wavefront's .obj extension collides with MSVC's compiled-object
+    -- extension on Windows, so add_files feeds them straight to the linker, failing with a
+    -- cryptic LNK1107 "invalid or corrupt file".
+    after_build(function (target)
+        if os.isdir("assets") then
+            os.cp("assets", path.join(target:targetdir(), "assets"))
+        end
+    end)
+
 target_end()
 
 

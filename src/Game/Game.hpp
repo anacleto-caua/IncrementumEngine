@@ -25,6 +25,7 @@ inline Engine& GEngine = Game::Engine;
 inline Renderer& GRenderer = GEngine.Renderer;
 inline TransferPipe& GTransferPipe = GRenderer.TransferPipe;
 inline TerrainPass& GTerrainPass = GRenderer.TerrainPass;
+inline PropPass& GPropPass = GRenderer.PropPass;
 inline SkyPass& GSkyPass = GRenderer.SkyPass;
 inline TextPass& GTextPass = GRenderer.TextPass;
 inline ImGuiPass& GImGuiPass = GRenderer.ImGuiPass;

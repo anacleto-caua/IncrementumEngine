@@ -13,9 +13,9 @@
 #include "Renderer/Vk/LeanVk.hpp"
 
 IncResult Renderer::Init() {
-    // Text after Sky: it writes no depth itself (screen-space overlay) and would get overdrawn by
-    // Sky's own background fill otherwise.
-    Passes = { &TerrainPass, &SkyPass, &TextPass, &ImGuiPass };
+    // Props before Sky, which only fills pixels nothing else wrote depth to; Text after Sky since
+    // it writes no depth itself (screen-space overlay) and would get overdrawn by Sky's fill otherwise.
+    Passes = { &TerrainPass, &PropPass, &SkyPass, &TextPass, &ImGuiPass };
 
     INC_CHECK(VkVault::Create(), "vulkan context creation failed");
     INC_CHECK(TransferPipe.Init(), "transfer pipe creation failed");

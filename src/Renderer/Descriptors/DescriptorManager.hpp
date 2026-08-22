@@ -6,7 +6,10 @@ namespace DescriptorManager {
 
     // Globally exposed Layouts
     inline VkDescriptorSetLayout GlobalLayout = VK_NULL_HANDLE;
-    inline VkDescriptorSetLayout PerFrameLayout = VK_NULL_HANDLE;
+    inline VkDescriptorSetLayout PerFrameLayout = VK_NULL_HANDLE;      // terrain's own Set 1
+    inline VkDescriptorSetLayout PropPerFrameLayout = VK_NULL_HANDLE;  // props' own Set 1 - see
+    // DescriptorMap::PropPerFrame below for why this is a second, separate layout object rather
+    // than more bindings added to PerFrameLayout above.
 
     IncResult Create();
     void Destroy();
@@ -40,6 +43,17 @@ namespace DescriptorMap {
 
         inline constexpr u32 Binding_ChunkDrawListSSBO = 0;  // rewritten every frame
         inline constexpr u32 Binding_HeightmapTexture = 1;   // streamed in per chunk, not per frame
+    }
+
+    // PropPass's own Set 1 - a second, separate descriptor set layout at the same Vulkan set
+    // INDEX (1), not more bindings folded into PerFrame above. Set indices are pipeline-layout-
+    // local, so two passes with two different VkPipelineLayouts (TerrainPass's TerrainPipelineLayout
+    // vs. PropPass's PropPipelineLayout) can each have their own "set 1" contents - terrain's Set 1
+    // set would otherwise need a valid entry for a binding it has no data for, or vice versa.
+    namespace PropPerFrame {
+        inline constexpr u32 SetIndex = 1;
+
+        inline constexpr u32 Binding_InstanceSSBO = 0;  // rewritten every frame, per model type
     }
 
     // ================================================

@@ -75,6 +75,31 @@ namespace DescriptorManager {
             "failed to create descriptor set layout"
         );
 
+        // =========================================================
+        // 3. Create the Prop Layout (also Set 1, a separate layout object - see the comment on
+        //    DescriptorMap::PropPerFrame)
+        // =========================================================
+        VkDescriptorSetLayoutBinding prop_instance_ssbo_binding = {
+            .binding = DescriptorMap::PropPerFrame::Binding_InstanceSSBO,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = ALL_SHADER_STAGES,
+            .pImmutableSamplers = nullptr
+        };
+
+        VkDescriptorSetLayoutCreateInfo prop_layout_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .bindingCount = 1,
+            .pBindings = &prop_instance_ssbo_binding
+        };
+
+        VK_CHECK(
+            vkCreateDescriptorSetLayout(VkVault::Device, &prop_layout_info, nullptr, &PropPerFrameLayout),
+            "failed to create descriptor set layout"
+        );
+
         // Create the whole engine descriptor pool
         std::array<VkDescriptorPoolSize, 3> pool_sizes = {{
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,            MAX_UBOS},
@@ -104,6 +129,7 @@ namespace DescriptorManager {
         if (Pool) { vkDestroyDescriptorPool(VkVault::Device, Pool, nullptr); }
         if (GlobalLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, GlobalLayout, nullptr); }
         if (PerFrameLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, PerFrameLayout, nullptr); }
+        if (PropPerFrameLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, PropPerFrameLayout, nullptr); }
     }
 
     VkDescriptorSet AllocateSet(VkDescriptorSetLayout layout) {

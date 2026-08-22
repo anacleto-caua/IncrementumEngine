@@ -16,6 +16,7 @@
 #include "Renderer/Vk/CommandBufferBlock.hpp"
 #include "Renderer/Resources/TransferPipe.hpp"
 #include "Renderer/Passes/TerrainPass.hpp"
+#include "Renderer/Passes/PropPass.hpp"
 #include "Renderer/Passes/SkyPass.hpp"
 #include "Renderer/Passes/TextPass.hpp"
 #include "Renderer/Passes/ImGuiPass.hpp"
@@ -68,6 +69,7 @@ public:
     // real members instead of raw pointers into globals declared elsewhere. Reached ambiently
     // via the GTerrainPass/GImGuiPass aliases in Game/Game.hpp.
     TerrainPass TerrainPass;
+    PropPass PropPass;
     SkyPass SkyPass;
     TextPass TextPass;
     ImGuiPass ImGuiPass;
