@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "Renderer/VkVault.hpp"
 
 namespace PipelineDefaults {
@@ -84,6 +86,21 @@ namespace PipelineDefaults {
             .attachmentCount = VkVault::ColorBlendAttachmentState.size(),
             .pAttachments = VkVault::ColorBlendAttachmentState.data(),
             .blendConstants = {0.0f, 0.0f, 0.0f, 0.0f}
+        };
+    }
+
+    // Every pass dynamically sets viewport/scissor per frame (the swapchain can resize) rather
+    // than baking them into the pipeline - shared here instead of duplicated per pass. Safe to
+    // return a pointer into the function-local `static` array below since static storage duration
+    // outlives the call.
+    inline const VkPipelineDynamicStateCreateInfo DefaultPipelineDynamicStateCreateInfo() {
+        static constexpr std::array<VkDynamicState, 2> DynamicStates = {{ VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR }};
+        return {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .dynamicStateCount = static_cast<u32>(DynamicStates.size()),
+            .pDynamicStates = DynamicStates.data()
         };
     }
 
