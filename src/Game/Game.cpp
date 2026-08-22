@@ -7,6 +7,7 @@
 #include "Engine/Core/PerfOverlay.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Game/TerrainManager/TerrainManager.hpp"
+#include "Game/TerrainDebugTools.hpp"
 
 namespace Game {
     enum class Action {
@@ -53,6 +54,7 @@ namespace Game {
         TerrainManager::Init();
 
         FlyByCamera::Bind(MainCamera);
+        TerrainDebugTools::Init(MainCamera);
 
         // Good taste stuff
         Context.BindKey(Action::ToggleFullscreen, Input::Key::F11);
@@ -80,6 +82,7 @@ namespace Game {
 
             PerfOverlay::Frame(Engine.CurrentFrame.DeltaTime);
             FlyByCamera::Update(Engine.CurrentFrame.DeltaTime);
+            TerrainDebugTools::Update(Engine.CurrentFrame.DeltaTime);
 
             // Simplest possible exercise of TextPass: a static bottom-left watermark. Real
             // HUD/label usage can call GTextPass.DrawText() from anywhere. Reads the window's own
