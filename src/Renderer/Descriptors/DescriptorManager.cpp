@@ -9,8 +9,12 @@ constexpr u32 MAX_SETS = Renderer::MAX_FRAMES_IN_FLIGHT * 50;
 constexpr u32 MAX_UBOS = Renderer::MAX_FRAMES_IN_FLIGHT * 10;
 constexpr u32 MAX_SAMPLERS = Renderer::MAX_FRAMES_IN_FLIGHT * 10;
 constexpr u32 MAX_SSBOS = Renderer::MAX_FRAMES_IN_FLIGHT * 10;
+constexpr u32 MAX_STORAGE_IMAGES = Renderer::MAX_FRAMES_IN_FLIGHT * 4;
 
-constexpr VkShaderStageFlags ALL_SHADER_STAGES = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+// Includes VK_SHADER_STAGE_COMPUTE_BIT so a compute pipeline can bind Set 0 (SceneGlobals) too -
+// not exercised by ComputeTestLayout below (that's its own standalone layout, never combined with
+// GlobalLayout), but closes the gap for a future compute job that wants scene globals.
+constexpr VkShaderStageFlags ALL_SHADER_STAGES = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
 namespace DescriptorManager {
     VkDescriptorPool Pool = VK_NULL_HANDLE;
@@ -100,11 +104,36 @@ namespace DescriptorManager {
             "failed to create descriptor set layout"
         );
 
+        // =========================================================
+        // 4. Create the Compute Test Layout (its own standalone Set 0)
+        // =========================================================
+        VkDescriptorSetLayoutBinding compute_test_buffer_binding = {
+            .binding = DescriptorMap::ComputeTest::Binding_TestBuffer,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, // only ever bound in a compute pipeline
+            .pImmutableSamplers = nullptr
+        };
+
+        VkDescriptorSetLayoutCreateInfo compute_test_layout_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .bindingCount = 1,
+            .pBindings = &compute_test_buffer_binding
+        };
+
+        VK_CHECK(
+            vkCreateDescriptorSetLayout(VkVault::Device, &compute_test_layout_info, nullptr, &ComputeTestLayout),
+            "failed to create descriptor set layout"
+        );
+
         // Create the whole engine descriptor pool
-        std::array<VkDescriptorPoolSize, 3> pool_sizes = {{
+        std::array<VkDescriptorPoolSize, 4> pool_sizes = {{
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,            MAX_UBOS},
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,    MAX_SAMPLERS },
-            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,            MAX_SSBOS}
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,            MAX_SSBOS},
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,             MAX_STORAGE_IMAGES}
         }};
 
         // maxSets needs to be large enough to hold every allocated set in the engine
@@ -130,6 +159,7 @@ namespace DescriptorManager {
         if (GlobalLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, GlobalLayout, nullptr); }
         if (PerFrameLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, PerFrameLayout, nullptr); }
         if (PropPerFrameLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, PropPerFrameLayout, nullptr); }
+        if (ComputeTestLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, ComputeTestLayout, nullptr); }
     }
 
     VkDescriptorSet AllocateSet(VkDescriptorSetLayout layout) {

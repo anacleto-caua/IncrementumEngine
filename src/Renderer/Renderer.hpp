@@ -15,6 +15,7 @@
 #include "Renderer/Vk/TimelineSemaphore.hpp"
 #include "Renderer/Vk/CommandBufferBlock.hpp"
 #include "Renderer/Resources/TransferPipe.hpp"
+#include "Renderer/Resources/ComputePipe.hpp"
 #include "Renderer/Passes/TerrainPass.hpp"
 #include "Renderer/Passes/PropPass.hpp"
 #include "Renderer/Passes/SkyPass.hpp"
@@ -151,8 +152,6 @@ private:
     void ResizeDepthBuffer(u32 width, u32 height);
 
 public:
-    // Owned, not an independent global - TransferPipe has real RAII sub-members (TimelineSemaphore,
-    // CommandBufferBlock), so its teardown order benefits from a guaranteed owner. Reached
-    // ambiently via the GTransferPipe alias in Game/Game.hpp, same as before.
     TransferPipe TransferPipe;
+    ComputePipe ComputePipe;
 };

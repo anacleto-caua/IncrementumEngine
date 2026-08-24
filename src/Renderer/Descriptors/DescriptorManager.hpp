@@ -10,6 +10,8 @@ namespace DescriptorManager {
     inline VkDescriptorSetLayout PropPerFrameLayout = VK_NULL_HANDLE;  // props' own Set 1 - see
     // DescriptorMap::PropPerFrame below for why this is a second, separate layout object rather
     // than more bindings added to PerFrameLayout above.
+    inline VkDescriptorSetLayout ComputeTestLayout = VK_NULL_HANDLE;   // ComputeTestDemo's own
+    // standalone Set 0 - a pure-compute pipeline has no graphics-frame Set 0 to share.
 
     IncResult Create();
     void Destroy();
@@ -61,6 +63,15 @@ namespace DescriptorMap {
     // ================================================
     namespace Material {
         inline constexpr u32 SetIndex = 2;
+    }
+
+    // ComputeTestDemo's own standalone pipeline layout (Set 0) - a pure-compute pipeline has no
+    // graphics-frame Set 0 to share with, so this doesn't reuse Global's SetIndex despite also
+    // being index 0 within its own, separate VkPipelineLayout.
+    namespace ComputeTest {
+        inline constexpr u32 SetIndex = 0;
+
+        inline constexpr u32 Binding_TestBuffer = 0;
     }
 }
 

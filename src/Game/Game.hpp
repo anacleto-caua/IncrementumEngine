@@ -24,6 +24,7 @@ namespace Game {
 inline Engine& GEngine = Game::Engine;
 inline Renderer& GRenderer = GEngine.Renderer;
 inline TransferPipe& GTransferPipe = GRenderer.TransferPipe;
+inline ComputePipe& GComputePipe = GRenderer.ComputePipe;
 inline TerrainPass& GTerrainPass = GRenderer.TerrainPass;
 inline PropPass& GPropPass = GRenderer.PropPass;
 inline SkyPass& GSkyPass = GRenderer.SkyPass;

@@ -7,6 +7,7 @@
 #include "Camera.hpp"
 #include "Passes/Pass.hpp"
 #include "Tools/DebugPanel.hpp"
+#include "Tools/ComputeTestDemo.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
 
@@ -19,6 +20,7 @@ IncResult Renderer::Init() {
 
     INC_CHECK(VkVault::Create(), "vulkan context creation failed");
     INC_CHECK(TransferPipe.Init(), "transfer pipe creation failed");
+    INC_CHECK(ComputePipe.Init(), "compute pipe creation failed");
     INC_CHECK(DescriptorManager::Create(), "descriptor manager creation failed");
 
     INC_CHECK(InitSwapchain(), "swapchain creation failed");
@@ -79,6 +81,9 @@ IncResult Renderer::Init() {
         INC_CHECK(pass->Init(), "pass initialization failed");
     }
 
+    // Wonky test for ComputePipe - needs DescriptorManager/ComputePipe
+    // INC_CHECK(ComputeTestDemo::Init(), "compute test demo initialization failed");
+
     return IncResult::SUCCESS;
 }
 
@@ -91,12 +96,15 @@ void Renderer::Destroy() {
         frame.ImageAvailable.Destroy();
     }
 
+    //ComputeTestDemo::Destroy();
+
     for (auto it = Passes.rbegin(); it != Passes.rend(); ++it) { (*it)->Destroy(); }
     DestroyGlobalDescriptors();
     DestroySwapchain();
     DestroyDepthBuffer();
     DescriptorManager::Destroy();
     TransferPipe.Destroy();
+    ComputePipe.Destroy();
 
     Buffers.DestroyAll();
     Images.DestroyAll();
@@ -261,6 +269,7 @@ void Renderer::Frame() {
 
     // Reclaim any command buffer pools whose prior work has actually finished on the GPU
     TransferPipe.TryReclaimCommandBuffers();
+    ComputePipe.TryReclaimCommandBuffers();
 
     // Fold pending image ownership acquires into this frame's own submission instead of paying for a second vkQueueSubmit2 -
     // done BEFORE the draw's own submission below so its ticket is known in time to wait on it there.

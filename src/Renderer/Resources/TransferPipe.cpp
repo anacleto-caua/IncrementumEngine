@@ -16,25 +16,7 @@ IncResult TransferPipe::Init() {
 
     INC_CHECK(LazySemaphore.Init(), "transfer pipe lazy semaphore creation failed");
 
-    SpecialSubmissionPiles.Initialize();
-    for (auto &pile : SpecialSubmissionPiles) {
-        pile.Reset();
-    }
-
-    SpecialCommandBufferBlocks.Initialize();
-    for (QueueRole role : VkVault::UniqueRoles) {
-        INC_CHECK(SpecialCommandBufferBlocks[role].Init(role), "special command buffer block creation failed");
-    }
-
-    SpecialBlockReclaim.Initialize();
-    LastAcquireForRole.Initialize();
-
-    AwaitingRelease.Initialize();
-    AwaitingAcquire.Initialize();
-    PendingImageTransfersTimelineStatus.Initialize();
-    for (u64& e : PendingImageTransfersTimelineStatus) {
-        e = 0;
-    }
+    INC_CHECK(OwnershipTracker.Init(), "transfer pipe ownership tracker creation failed");
 
     return IncResult::SUCCESS;
 }
@@ -49,22 +31,13 @@ void TransferPipe::Destroy() {
 
     TransferCommandBufferBlock.Destroy();
 
-    for (auto& block : SpecialCommandBufferBlocks) {
-        block.Destroy();
-    }
+    OwnershipTracker.Destroy();
 }
 
 Ticket TransferPipe::MakeTicket() {
     Ticket ticket = SignalSemaphores[CurrentSemaphore].CreateTicket();
     CurrentSemaphore = (CurrentSemaphore + 1) % PARALLEL_TRANSFERS_COUNT;
     return ticket;
-}
-
-void TransferPipe::SubmitToRole(SpecialSubmissionPile& pile, QueueRole role, VkFence execution_fence) {
-    if (pile.SubmitCount > 0) {
-        VK_OUT(vkQueueSubmit2(VkVault::Queues[role].Queue, static_cast<u32>(pile.SubmitCount), pile.Submits.data(), execution_fence), "pile submission failed");
-        pile.Reset();
-    }
 }
 
 // Just write all packages, I need a version of this that controls how much it writes
@@ -136,7 +109,7 @@ void TransferPipe::LazyWrite() {
 
                     Image* target_image = Images.Get(write_info.DstImage);
 
-                    if (write_info.TransferStatusWaitOn >= PendingImageTransfersTimelineStatus[target_image->OwnerQueue]) {
+                    if (write_info.TransferStatusWaitOn >= OwnershipTracker.ReleaseStatus(target_image->OwnerQueue)) {
                         // This item hasn't actually been released yet - break out of the whole
                         // while loop, we need a specific queue to transfer.
                         could_write_package = false;
@@ -229,7 +202,8 @@ void TransferPipe::LazyWrite() {
                     TransferSubmissionPile.EndSubmission();
 
                     // Only now is this item actually ready for the owner queue to re-acquire
-                    AwaitingAcquire[target_image->OwnerQueue].push(
+                    OwnershipTracker.PushAwaitingAcquire(
+                        target_image->OwnerQueue,
                         {
                             .Image = write_info.DstImage,
                             .Released = write_info.ReleasedTicket,
@@ -254,59 +228,6 @@ void TransferPipe::LazyWrite() {
     }
 }
 
-// Stage 1: release everything awaiting release for "queue" into one shared command buffer,
-// then hand each item off to AwaitingAcquire once Transfer is free to pick it up.
-void TransferPipe::ReleasePending(QueueRole queue) {
-    SpecialSubmissionPile& pile = SpecialSubmissionPiles[queue];
-    CommandBufferBlock& cmd_block = SpecialCommandBufferBlocks[queue];
-
-    VkCommandBuffer release_command = cmd_block.GetNext();
-    LeanVk::BeginCommand(release_command);
-
-    pile.BeginSubmission();
-
-    while (pile.SignalCount < pile.MaxSignalSemaphores && !AwaitingRelease[queue].empty()) {
-        ImageOwnershipTransfer transfer = AwaitingRelease[queue].front();
-        AwaitingRelease[queue].pop();
-        PendingImageTransfersTimelineStatus[queue] += 1;
-
-        Image* image_value = Images.Get(transfer.Image);
-
-        VkImageSubresourceRange subresource_range {};
-        subresource_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        subresource_range.baseMipLevel = 0;
-        subresource_range.levelCount = 1;
-        subresource_range.baseArrayLayer = transfer.TargetLayer;
-        subresource_range.layerCount = 1;
-
-        VkImageMemoryBarrier2 release_to_transfer {};
-        release_to_transfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        release_to_transfer.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT; // Whatever the owner queue was doing
-        release_to_transfer.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
-        release_to_transfer.dstStageMask = VK_PIPELINE_STAGE_2_NONE; // Required for release
-        release_to_transfer.dstAccessMask = 0;                       // Required for release
-        release_to_transfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        release_to_transfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        release_to_transfer.srcQueueFamilyIndex = VkVault::Queues[queue].FamilyIndex;
-        release_to_transfer.dstQueueFamilyIndex = VkVault::Queues[QueueRole::Transfer].FamilyIndex;
-        release_to_transfer.image = image_value->Handle;
-        release_to_transfer.subresourceRange = subresource_range;
-
-        VkDependencyInfo dep_release {};
-        dep_release.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dep_release.imageMemoryBarrierCount = 1;
-        dep_release.pImageMemoryBarriers = &release_to_transfer;
-        vkCmdPipelineBarrier2(release_command, &dep_release);
-
-        pile.SignalTicket(transfer.Released);
-        SpecialBlockReclaim[queue] = { transfer.Released, true };
-    }
-
-    LeanVk::EndCommand(release_command);
-    pile.AddCommand(release_command);
-    pile.EndSubmission();
-}
-
 // Stages 1+2 only: release anything newly queued, then let the Transfer queue acquire,
 // write, and release it back. Non-blocking, no reset - safe to call off the render loop
 // whenever new streaming data is queued. The caller doesn't need to do anything else;
@@ -314,9 +235,9 @@ void TransferPipe::ReleasePending(QueueRole queue) {
 // the GPU actually gets to it.
 void TransferPipe::SubmitReleaseAndWrite() {
     for (QueueRole role : VkVault::UniqueRoles) {
-        while (!AwaitingRelease[role].empty()) {
-            ReleasePending(role);
-            SubmitToRole(SpecialSubmissionPiles[role], role);
+        while (OwnershipTracker.HasPendingRelease(role)) {
+            OwnershipTracker.ReleasePending(role, QueueRole::Transfer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            OwnershipTracker.SubmitReleases(role);
         }
     }
 
@@ -329,9 +250,11 @@ void TransferPipe::LazySubmit() {
 
     // Stage 3: re-acquire everything the Transfer queue just handed back
     for (QueueRole role : VkVault::UniqueRoles) {
-        while (HasDataToAcquire(role)) {
-            AcquirePending(role, SpecialSubmissionPiles[role]);
-            SubmitToRole(SpecialSubmissionPiles[role], role);
+        while (OwnershipTracker.HasDataToAcquire(role)) {
+            OwnershipTracker.RunAndSubmitAcquirePending(
+                role, QueueRole::Transfer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT
+            );
         }
     }
 
@@ -343,10 +266,7 @@ void TransferPipe::LazySubmit() {
 
     TransferCommandBufferBlock.Reset();
     TransferBlockReclaim.Valid = false;
-    for (QueueRole role : VkVault::UniqueRoles) {
-        SpecialCommandBufferBlocks[role].Reset();
-        SpecialBlockReclaim[role].Valid = false;
-    }
+    OwnershipTracker.TryReclaimCommandBuffers();
 
     /**
      * Step the layers only if the lazy write ended because of the current layer being emptied
@@ -365,36 +285,11 @@ void TransferPipe::TryReclaimCommandBuffers() {
         TransferBlockReclaim.Valid = false;
     }
 
-    for (QueueRole role : VkVault::UniqueRoles) {
-        ReclaimTracker& tracker = SpecialBlockReclaim[role];
-        if (tracker.Valid && tracker.LastTicket.IsFinished()) {
-            SpecialCommandBufferBlocks[role].Reset();
-            tracker.Valid = false;
-        }
-    }
-}
-
-void TransferPipe::MarkSpecialBlockUsed(QueueRole role, Ticket ticket) {
-    SpecialBlockReclaim[role] = { ticket, true };
-    LastAcquireForRole[role] = { ticket, true };
+    OwnershipTracker.TryReclaimCommandBuffers();
 }
 
 bool TransferPipe::GetLastAcquireTicket(QueueRole role, Ticket& out_ticket) {
-    ReclaimTracker& tracker = LastAcquireForRole[role];
-    if (!tracker.Valid) { return false; }
-    out_ticket = tracker.LastTicket;
-    return true;
-}
-
-bool TransferPipe::HasDataToAcquire(QueueRole queue) {
-    return !(AwaitingAcquire[queue].empty());
-}
-
-// Use this right before submiting
-ImageOwnershipTransfer TransferPipe::PopAwaitingAcquire(QueueRole queue) {
-    ImageOwnershipTransfer transfer = AwaitingAcquire[queue].front();
-    AwaitingAcquire[queue].pop();
-    return transfer;
+    return OwnershipTracker.GetLastAcquireTicket(role, out_ticket);
 }
 
 Ticket TransferPipe::QueueBufferUpdate(BufferId dst, u64 offset, u64 size, void* src) {
@@ -458,9 +353,10 @@ Ticket TransferPipe::QueueImageSliceUpload(ImageId dst, u32 target_layer, const 
     Image* image_value = Images.Get(dst);
     QueueRole owner = image_value->OwnerQueue;
 
-    u64 timeline_acquisition_dependancy = PendingImageTransfersTimelineStatus[owner] + AwaitingRelease[owner].size();
+    u64 timeline_acquisition_dependancy = OwnershipTracker.PendingReleaseDependency(owner);
 
-    AwaitingRelease[owner].push(
+    OwnershipTracker.QueueRelease(
+        owner,
         {
             .Image = dst,
             .Released = image_released_ticket,
