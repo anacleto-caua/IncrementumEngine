@@ -8,6 +8,8 @@
 #include "Pass.hpp"
 #include "Renderer/RendererConstants.hpp"
 #include "Renderer/Resources/Buffer.hpp"
+#include "Renderer/Resources/Image.hpp"
+#include "Renderer/Resources/ImageView.hpp"
 #include "Game/TerrainManager/TerrainManager.hpp"
 
 // Instanced prop drawing (trees, rocks, ...) scattered across terrain chunks. Shaped like
@@ -57,6 +59,16 @@ private:
     VkPipeline PropPipeline {};
     VkPipelineLayout PropPipelineLayout {};
 
+    // v1 texturing: one procedural checkerboard shared by every model, sampled via world-space
+    // planar UV (inWorldPos.xz) in prop.frag rather than real per-vertex UVs - neither placeholder
+    // .obj has texture coordinates yet (see ModelLoader.hpp), so this is a stand-in to prove the
+    // sampling path end to end, not the final textured-prop pipeline. Swap for real UVs (and drop
+    // the planar projection) once real, UV-authored prop art replaces the placeholders.
+    ImageId TextureImage;
+    ImageViewId TextureView;
+    VkSampler TextureSampler = VK_NULL_HANDLE;
+
     IncResult LoadModel(TerrainManager::PropModel model, const char* path, vec3 base_color);
+    IncResult CreateTexture();
     void OutPropData();
 };

@@ -11,8 +11,70 @@
 #include "Renderer/Vk/ShaderBuilder.hpp"
 #include "Renderer/Vk/PipelineDefaults.hpp"
 #include "Renderer/Tools/DebugPanel.hpp"
+#include "Renderer/Resources/ImageView.hpp"
 #include "Renderer/Resources/ModelLoader.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
+
+// Procedural checkerboard, no image asset involved - v1 stand-in texture (see PropPass.hpp's
+// TextureImage comment). Magenta/black is the conventional "missing texture" pattern, chosen so
+// this stand-in reads as obviously placeholder rather than a deliberate art choice. Nearest-
+// filtered on purpose so the checker squares stay crisp rather than blurring at tile boundaries.
+IncResult PropPass::CreateTexture() {
+    constexpr u32 Size = 64;
+    constexpr u32 TileSize = 8;
+
+    std::vector<u8> pixels(static_cast<size_t>(Size) * Size * 4);
+    for (u32 y = 0; y < Size; y++) {
+        for (u32 x = 0; x < Size; x++) {
+            bool magenta = ((x / TileSize) + (y / TileSize)) % 2 == 0;
+
+            size_t offset = (static_cast<size_t>(y) * Size + x) * 4;
+            pixels[offset + 0] = magenta ? 255 : 0;
+            pixels[offset + 1] = 0;
+            pixels[offset + 2] = magenta ? 255 : 0;
+            pixels[offset + 3] = 255;
+        }
+    }
+
+    Image::CreateInfo texture_image_info;
+    texture_image_info.Width = Size;
+    texture_image_info.Height = Size;
+    texture_image_info.Format = VK_FORMAT_R8G8B8A8_UNORM;
+    texture_image_info.Usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    texture_image_info.OwnerQueue = QueueRole::Graphics;
+    texture_image_info.UsageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    INC_CHECK(Images.Add(texture_image_info, TextureImage), "prop texture image creation failed");
+    Image* texture_image_value = Images.Get(TextureImage);
+    auto texture_image_view_info = FillImageViewCreateInfo(texture_image_value);
+    INC_CHECK(ImageViews.Add(texture_image_view_info, TextureView), "prop texture image view creation failed");
+
+    VkSamplerCreateInfo texture_sampler_info {};
+    texture_sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    texture_sampler_info.magFilter = VK_FILTER_NEAREST;
+    texture_sampler_info.minFilter = VK_FILTER_NEAREST;
+    texture_sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    texture_sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    texture_sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    texture_sampler_info.anisotropyEnable = VK_FALSE;
+    texture_sampler_info.maxAnisotropy = 1.0f;
+    texture_sampler_info.unnormalizedCoordinates = VK_FALSE;
+    texture_sampler_info.compareEnable = VK_FALSE;
+    texture_sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+    texture_sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    texture_sampler_info.mipLodBias = 0.0f;
+    texture_sampler_info.minLod = 0.0f;
+    texture_sampler_info.maxLod = 0.0f;
+
+    VK_CHECK(
+        vkCreateSampler(VkVault::Device, &texture_sampler_info, nullptr, &TextureSampler),
+        "prop texture sampler creation failed"
+    );
+
+    GTransferPipe.QueueImageSliceUpload(TextureImage, 0, pixels.data(), pixels.size());
+
+    return IncResult::SUCCESS;
+}
 
 IncResult PropPass::LoadModel(TerrainManager::PropModel model, const char* path, vec3 base_color) {
     ModelLoader::Model cpu_model;
@@ -48,6 +110,7 @@ IncResult PropPass::Init() {
     // blocking wait is fine (same posture as TerrainPass::PlaneMeshResource::Upload()).
     INC_CHECK(LoadModel(TerrainManager::PropModel::Tree, "assets/models/tree.obj", vec3(0.30f, 0.45f, 0.15f)), "tree model load failed");
     INC_CHECK(LoadModel(TerrainManager::PropModel::Rock, "assets/models/rock.obj", vec3(0.45f, 0.43f, 0.40f)), "rock model load failed");
+    INC_CHECK(CreateTexture(), "prop texture creation failed");
     GTransferPipe.LazySubmit();
 
     // Per-model, per-frame-in-flight instance SSBO + descriptor set
@@ -68,6 +131,12 @@ IncResult PropPass::Init() {
                 DescriptorSets[model].data()
             );
 
+            auto texture_view_value = ImageViews.Get(TextureView);
+            VkDescriptorImageInfo texture_descriptor {};
+            texture_descriptor.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            texture_descriptor.imageView = texture_view_value->Handle;
+            texture_descriptor.sampler = TextureSampler;
+
             for (u32 frame = 0; frame < RendererConstants::MAX_FRAMES_IN_FLIGHT; frame++) {
                 auto instance_buffer_value = Buffers.Get(InstanceBuffers[model][frame]);
                 VkDescriptorBufferInfo instance_buffer_descriptor {};
@@ -75,15 +144,22 @@ IncResult PropPass::Init() {
                 instance_buffer_descriptor.offset = 0;
                 instance_buffer_descriptor.range = instance_buffer_value->Size;
 
-                VkWriteDescriptorSet instance_ssbo_write {};
-                instance_ssbo_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                instance_ssbo_write.dstSet = DescriptorSets[model][frame];
-                instance_ssbo_write.dstBinding = DescriptorMap::PropPerFrame::Binding_InstanceSSBO;
-                instance_ssbo_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-                instance_ssbo_write.descriptorCount = 1;
-                instance_ssbo_write.pBufferInfo = &instance_buffer_descriptor;
+                std::array<VkWriteDescriptorSet, 2> writes {};
+                writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                writes[0].dstSet = DescriptorSets[model][frame];
+                writes[0].dstBinding = DescriptorMap::PropPerFrame::Binding_InstanceSSBO;
+                writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                writes[0].descriptorCount = 1;
+                writes[0].pBufferInfo = &instance_buffer_descriptor;
 
-                vkUpdateDescriptorSets(VkVault::Device, 1, &instance_ssbo_write, 0, nullptr);
+                writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                writes[1].dstSet = DescriptorSets[model][frame];
+                writes[1].dstBinding = DescriptorMap::PropPerFrame::Binding_Texture;
+                writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                writes[1].descriptorCount = 1;
+                writes[1].pImageInfo = &texture_descriptor;
+
+                vkUpdateDescriptorSets(VkVault::Device, static_cast<u32>(writes.size()), writes.data(), 0, nullptr);
             }
 
             StagingInstances[model].reserve(MaxInstancesPerModel);
@@ -195,6 +271,10 @@ void PropPass::Destroy() {
 
     if (PropPipeline) { vkDestroyPipeline(VkVault::Device, PropPipeline, nullptr); }
     if (PropPipelineLayout) { vkDestroyPipelineLayout(VkVault::Device, PropPipelineLayout, nullptr); }
+
+    if (TextureSampler) { vkDestroySampler(VkVault::Device, TextureSampler, nullptr); }
+    ImageViews.Del(TextureView);
+    Images.Del(TextureImage);
 }
 
 void PropPass::FrameSensibleTransfers() {

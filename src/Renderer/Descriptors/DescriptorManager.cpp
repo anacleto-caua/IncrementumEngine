@@ -91,12 +91,22 @@ namespace DescriptorManager {
             .pImmutableSamplers = nullptr
         };
 
+        VkDescriptorSetLayoutBinding prop_texture_binding = {
+            .binding = DescriptorMap::PropPerFrame::Binding_Texture,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, // only prop.frag samples it
+            .pImmutableSamplers = nullptr
+        };
+
+        std::array<VkDescriptorSetLayoutBinding, 2> prop_bindings = { prop_instance_ssbo_binding, prop_texture_binding };
+
         VkDescriptorSetLayoutCreateInfo prop_layout_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             .pNext = nullptr,
             .flags = 0,
-            .bindingCount = 1,
-            .pBindings = &prop_instance_ssbo_binding
+            .bindingCount = static_cast<u32>(prop_bindings.size()),
+            .pBindings = prop_bindings.data()
         };
 
         VK_CHECK(

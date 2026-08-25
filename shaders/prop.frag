@@ -11,6 +11,8 @@ layout(set = 0, binding = 0) uniform SceneGlobalsData {
     SceneGlobals data;
 } sceneGlobalsData;
 
+layout(set = 1, binding = 1) uniform sampler2DArray propTexture;
+
 layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec3 inColor;
 layout(location = 2) in vec3 inWorldPos;
@@ -29,7 +31,14 @@ void main() {
     float ambient = 0.35;
     float diffuse = ndotl * 0.65;
 
-    vec3 litColor = inColor * (ambient + diffuse);
+    // World-space planar UV (not real per-vertex UVs - see PropPass.hpp's TextureImage comment):
+    // neither placeholder .obj carries texture coordinates yet, so this stands in until real,
+    // UV-authored prop art replaces them.
+    vec2 uv = inWorldPos.xz * 0.2;
+    vec3 texColor = texture(propTexture, vec3(uv, 0.0)).rgb;
+
+    vec3 albedo = inColor * texColor;
+    vec3 litColor = albedo * (ambient + diffuse);
 
     // Same distance fog terrain.frag applies, same constants - props fading at a different rate
     // than the ground they sit on would look wrong. See terrain.frag's own note for why/how tuned.

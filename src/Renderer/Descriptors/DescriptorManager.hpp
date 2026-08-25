@@ -56,6 +56,7 @@ namespace DescriptorMap {
         inline constexpr u32 SetIndex = 1;
 
         inline constexpr u32 Binding_InstanceSSBO = 0;  // rewritten every frame, per model type
+        inline constexpr u32 Binding_Texture = 1;       // shared across every model, set once at Init()
     }
 
     // ================================================
