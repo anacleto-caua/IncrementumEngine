@@ -423,7 +423,7 @@ void TerrainPass::OutTerrainData() {
                 ImGui::TextColored(
                     ImVec4(1.0f, 0.8f, 0.2f, 1.0f),
                     "Generating: %u / %u pool slots busy",
-                    Ring0.DebugStats.GenerationsInFlight, GenerationPoolSize
+                    Ring0.DebugStats.GenerationsInFlight, Ring0GenerationPoolSize
                 );
             } else {
                 ImGui::TextDisabled("Idle");

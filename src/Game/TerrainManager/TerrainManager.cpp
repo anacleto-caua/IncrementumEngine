@@ -231,7 +231,7 @@ namespace TerrainManager {
     // call per frame; a per-ring call point hit a real GPU-timing assertion failure once the pool
     // let several rings each queue several chunks in close succession.
     template<typename RingT>
-    bool RefreshRing(RingT& ring, vec3 player_position, const Frustum& camera_frustum, u64 current_tick) {
+    bool RefreshRing(RingT& ring, vec3 player_position, const Frustum& camera_frustum, u64 current_tick, u32& draw_cursor) {
         // Phase 1: rebuild this ring's slice of the shared draw list from its cache as it stood
         // at the start of this call - deliberately BEFORE finalizing any generation that just
         // completed (see phase 2 below), so a chunk never gets added to the drawn list in the
@@ -247,10 +247,10 @@ namespace TerrainManager {
         i32 radius = static_cast<i32>(ring.ScanRadius);
         i32 r_squared = radius * radius;
 
-        // The GenerationPoolSize best missing candidates found this pass, kept sorted ascending by
-        // priority (index 0 = best) as the scan runs - NOT the first GenerationPoolSize found in
-        // scan order. Visible (per the same frustum test used for cached chunks below) beats
-        // not-visible outright; ties within the same visibility go to the closer one - taking
+        // The ring's own PoolCapacity best missing candidates found this pass, kept sorted
+        // ascending by priority (index 0 = best) as the scan runs - NOT the first PoolCapacity
+        // found in scan order. Visible (per the same frustum test used for cached chunks below)
+        // beats not-visible outright; ties within the same visibility go to the closer one - taking
         // scan-order candidates instead meant a region late in the raster scan could sit
         // unresolved for many frames even while directly in view.
         struct PrioritizedMiss {
@@ -262,7 +262,7 @@ namespace TerrainManager {
             if (a.Visible != b.Visible) { return a.Visible; }
             return a.DistSq < b.DistSq;
         };
-        std::array<PrioritizedMiss, GenerationPoolSize> best_missing;
+        std::array<PrioritizedMiss, RingT::PoolCapacity> best_missing;
         u32 best_count = 0;
         u32 culled_count = 0;
         u32 drawn_count = 0;
@@ -276,19 +276,26 @@ namespace TerrainManager {
 
                 // Ring ownership is exclusive, not overlapping: skip anything already owned by a
                 // strictly-inner ring. Ring 0 has InnerRadius == 0, so this never skips anything
-                // for it. `world_dx`/`world_dy` measure this candidate's near corner at THIS
-                // ring's (coarser) ChunkScale against a smooth InnerRadius circle, but the inner
-                // ring's actual coverage is a lattice disc at its own (finer) scale and its own
-                // player_coord - the two disagree worst along the diagonals, where a candidate
-                // both rings believe the other owns ends up drawn by neither. Shrinking the
-                // exclusion radius by one chunk of this ring's own scale trades that gap for a
+                // for it. `world_x`/`world_z` are this candidate's true, absolute near-corner world
+                // position, compared against a smooth InnerRadius circle centered on the player's
+                // actual continuous position - NOT `dx`/`dy * ring.ChunkScale`, which would measure
+                // distance from the CORNER of this ring's own floor()'d player_coord chunk instead
+                // of from the player itself, silently adding up to one full ring.ChunkScale of
+                // error per axis depending on where the player sits within that chunk (a real,
+                // previously-unaccounted error source on top of the one below). The inner ring's
+                // actual coverage is also a lattice disc at its own (finer) scale and its own
+                // player_coord, which disagrees with a smooth circle worst along the diagonals -
+                // a candidate both rings believe the other owns ends up drawn by neither. Shrinking
+                // the exclusion radius by one chunk of this ring's own scale trades that gap for a
                 // thin band of double coverage near the seam instead.
                 if (ring.InnerRadius > 0.0) {
                     f64 safe_inner_radius = ring.InnerRadius - ring.ChunkScale;
                     if (safe_inner_radius > 0.0) {
-                        f64 world_dx = static_cast<f64>(dx) * ring.ChunkScale;
-                        f64 world_dy = static_cast<f64>(dy) * ring.ChunkScale;
-                        if ((world_dx * world_dx + world_dy * world_dy) < safe_inner_radius * safe_inner_radius) {
+                        f64 world_x = static_cast<f64>(x) * ring.ChunkScale;
+                        f64 world_z = static_cast<f64>(y) * ring.ChunkScale;
+                        f64 true_dx = world_x - static_cast<f64>(player_position.x);
+                        f64 true_dz = world_z - static_cast<f64>(player_position.z);
+                        if ((true_dx * true_dx + true_dz * true_dz) < safe_inner_radius * safe_inner_radius) {
                             continue;
                         }
                     }
@@ -307,14 +314,19 @@ namespace TerrainManager {
                     // away from a chunk doesn't make it LRU-evict while it's still within this
                     // ring's ExplorationRadius.
                     ring.Cache[cache_index].LastUsedTick = current_tick;
+                    bool intersects = Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale));
 
-                    if (!CullingEnabled || Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale))) {
-                        ChunkDrawList[CurrentlyActiveChunks] = {
+                    if (
+                        (!CullingEnabled || intersects) &&
+                        (draw_cursor < TotalMaxDrawnChunks)
+                        ) {
+                        ChunkDrawList[draw_cursor] = {
                             .WorldPos = candidate,
                             .TextureLayer = cache_index + ring.LayerOffset,
                             .Scale = static_cast<f32>(ring.ChunkScale)
                         };
                         CurrentlyActiveChunks++;
+                        draw_cursor++;
                         drawn_count++;
                     } else {
                         culled_count++;
@@ -341,9 +353,9 @@ namespace TerrainManager {
                             .DistSq = static_cast<i64>(dx) * dx + static_cast<i64>(dy) * dy
                         };
 
-                        // Insertion into the small (K=GenerationPoolSize) sorted buffer - cheaper
+                        // Insertion into the small (K=RingT::PoolCapacity) sorted buffer - cheaper
                         // and more legible than pulling in <algorithm> for a size this small.
-                        if (best_count < GenerationPoolSize) {
+                        if (best_count < RingT::PoolCapacity) {
                             u32 insert_at = best_count;
                             while (insert_at > 0 && is_better(candidate_info, best_missing[insert_at - 1])) {
                                 best_missing[insert_at] = best_missing[insert_at - 1];
@@ -351,8 +363,8 @@ namespace TerrainManager {
                             }
                             best_missing[insert_at] = candidate_info;
                             best_count++;
-                        } else if (is_better(candidate_info, best_missing[GenerationPoolSize - 1])) {
-                            u32 insert_at = GenerationPoolSize - 1;
+                        } else if (is_better(candidate_info, best_missing[RingT::PoolCapacity - 1])) {
+                            u32 insert_at = RingT::PoolCapacity - 1;
                             while (insert_at > 0 && is_better(candidate_info, best_missing[insert_at - 1])) {
                                 best_missing[insert_at] = best_missing[insert_at - 1];
                                 insert_at--;
@@ -464,11 +476,11 @@ namespace TerrainManager {
         CurrentTick++;
         CurrentlyActiveChunks = 0;
 
-        // Batched into one submit call for the whole frame, across every ring - see the comment
-        // on RefreshRing for why a per-ring call point isn't safe at this volume.
-        bool any_finalized = RefreshRing(Ring0, player_position, camera_frustum, CurrentTick);
+        u32 draw_cursor = 0;
+
+        bool any_finalized = RefreshRing(Ring0, player_position, camera_frustum, CurrentTick, draw_cursor);
         for (u32 i = 0; i < OuterRingCount; i++) {
-            any_finalized |= RefreshRing(OuterRings[i], player_position, camera_frustum, CurrentTick);
+            any_finalized |= RefreshRing(OuterRings[i], player_position, camera_frustum, CurrentTick, draw_cursor);
         }
 
         if (any_finalized) { GTransferPipe.SubmitReleaseAndWrite(); }

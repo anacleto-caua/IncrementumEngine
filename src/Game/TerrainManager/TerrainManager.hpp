@@ -4,14 +4,21 @@
 #include <chrono>
 #include <unordered_map>
 
-#include "Core/Frustum.hpp"
 #include "Core/Math.hpp"
+#include "Core/Frustum.hpp"
 
 /**
  * A lot of the constants here should match something in the terrain shaders,
  * so keep an eye out for it since there's no reflection.
  */
 namespace TerrainManager {
+    // Per-drawn-chunk instance data uploaded to the GPU - mirrors the shader's ChunkDrawData struct.
+    struct ChunkInstanceData {
+        ivec2 WorldPos;
+        u32 TextureLayer;
+        f32 Scale;   // this chunk's ring's ChunkScale
+    };
+
     // --- Mesh / world scale ---
     constexpr u32 VerticesPerEdge = 64;
 
@@ -78,6 +85,12 @@ namespace TerrainManager {
     constexpr u32 TotalMaxDrawnChunks = MaxDrawnChunks + OuterRingCount * OuterRingMaxDrawnChunks;
     constexpr u32 TotalMaxCachedChunks = MaxCachedChunks + OuterRingCount * OuterRingMaxCachedChunks;
 
+    // This would be bigger than a Vulkan vkCmdBufferUpdate size limit
+    static_assert(
+        TotalMaxDrawnChunks * sizeof(ChunkInstanceData) <= 65000,
+        "TotalMaxDrawnChunks is way bigger(or close) to the limit given to a vkCmdBufferUpdate by the Vulkan API"
+    );
+
     // TotalMaxCachedChunks is the heightmap array's ArrayLayers count (TerrainPass.cpp) - Vulkan
     // caps this per-format (VK_FORMAT_R16_UNORM measured at 2048 on tested hardware). 1900 leaves
     // margin below that for less capable hardware - if this fires, reduce
@@ -131,13 +144,6 @@ namespace TerrainManager {
         u32 Count = 0;
     };
 
-    // Per-drawn-chunk instance data uploaded to the GPU - mirrors the shader's ChunkDrawData struct.
-    struct ChunkInstanceData {
-        ivec2 WorldPos;
-        u32 TextureLayer;
-        f32 Scale;   // this chunk's ring's ChunkScale
-    };
-
     // How many of ChunkDrawList's entries are actually populated this frame, across every ring -
     // dynamic, since a chunk that's still generating simply isn't in the drawn set yet.
     inline u32 CurrentlyActiveChunks = 0;
@@ -189,16 +195,33 @@ namespace TerrainManager {
 
     // How many chunks a single ring can generate concurrently - a player moving fast enough brings
     // multiple positions into range within the same few frames, so a single in-flight generation
-    // per ring left the rest sitting as visible holes until each prior one finished.
+    // per ring left the rest sitting as visible holes until each prior one finished. This is the
+    // outer rings' pool size; ring 0 uses its own, larger Ring0GenerationPoolSize below.
     constexpr u32 GenerationPoolSize = 8;
+
+    // Ring 0's chunks are the smallest in world units (100, vs. 200-1600 for the outer rings), so
+    // at a given travel speed the player crosses ring 0's grid far more often than any outer
+    // ring's - ring 0 needs a proportionally higher concurrent-generation throughput to keep up
+    // under sustained fast movement, not just the same pool size as every other ring. Confirmed via
+    // terrain_debug_log.txt: under a sustained high-speed sprint, ring 0's Dark count climbed into
+    // the hundreds while every outer ring stayed near 0, even though all rings shared the same
+    // GenerationPoolSize=8 - the bottleneck was ring 0's pool capacity, not misprioritization
+    // within it (TaskScheduler already has spare worker capacity, see "11." in
+    // plans/terrain_lod.md). Sized to keep the worst-case total in-flight generation count across
+    // every ring (Ring0GenerationPoolSize + OuterRingCount * GenerationPoolSize) comfortably under
+    // TransferPipe's/Renderer's submission-pile capacities (64 each, see plans/terrain_lod.md "10.").
+    constexpr u32 Ring0GenerationPoolSize = 16;
 
     // One ring's complete streaming/cache state. Templated on its own
     // MaxDrawnChunks/MaxCachedChunks so every ring stays exactly as tightly, statically sized as
-    // ring 0 always was - no heap-allocated or worst-case-shared arrays.
-    template<u32 MaxDrawnChunksV, u32 MaxCachedChunksV>
+    // ring 0 always was - no heap-allocated or worst-case-shared arrays. Also templated on its own
+    // generation pool size (defaulted to the outer rings' shared value) since ring 0 needs a
+    // larger one - see Ring0GenerationPoolSize above.
+    template<u32 MaxDrawnChunksV, u32 MaxCachedChunksV, u32 GenerationPoolSizeV = GenerationPoolSize>
     struct RingState {
         static constexpr u32 DrawnCapacity = MaxDrawnChunksV;
         static constexpr u32 CachedCapacity = MaxCachedChunksV;
+        static constexpr u32 PoolCapacity = GenerationPoolSizeV;
 
         f64 ChunkScale = 0.0;
         // How far this ring's own candidate loop scans (chunk-grid units, this ring's own scale).
@@ -214,7 +237,7 @@ namespace TerrainManager {
         std::array<Heightmap, MaxCachedChunksV> HeightmapData;
         std::array<PropPlacement, MaxCachedChunksV> Props;  // parallel to HeightmapData, same index
         std::unordered_map<u64, u32> PositionToSlot;
-        std::array<PendingGeneration, GenerationPoolSize> GenerationPool;
+        std::array<PendingGeneration, GenerationPoolSizeV> GenerationPool;
 
         std::array<EvictionRecord, EvictionLogSize> EvictionLog{};
         u32 EvictionLogCount = 0;
@@ -223,7 +246,7 @@ namespace TerrainManager {
         Stats DebugStats;
     };
 
-    using Ring0State = RingState<MaxDrawnChunks, MaxCachedChunks>;
+    using Ring0State = RingState<MaxDrawnChunks, MaxCachedChunks, Ring0GenerationPoolSize>;
     using OuterRingState = RingState<OuterRingMaxDrawnChunks, OuterRingMaxCachedChunks>;
 
     inline Ring0State Ring0;
