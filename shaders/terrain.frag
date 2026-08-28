@@ -89,7 +89,7 @@ void main()
 
     // If within 1.0 pixel of the line, draw it
     // 1.0 = Center of line, 0.0 = Background
-    float intensity = 1.0 - min(line, 1.0);
+    float debugGrid = pc.showDebugColors != 0 ? 1.0 - min(line, 1.0) : 0.0;
 
     // Same Lambertian diffuse + ambient model prop.frag uses, for visual consistency between
     // terrain and props - SunDirection already points FROM the scene TOWARD the sun (see
@@ -107,7 +107,7 @@ void main()
     // Background = baseColor, shaded by terrain lighting
     // Line = White (vec3(1.0)) - left unshaded so the debug grid stays a clean, unambiguous
     // reference regardless of lighting (still useful for chunk-boundary/LOD debugging).
-    vec3 finalColor = mix(baseColor * lighting, vec3(1.0), intensity);
+    vec3 finalColor = mix(baseColor * lighting, vec3(1.0), debugGrid);
 
     // Distance fog hides the pop where the streamed terrain disk ends and SkyPass's own
     // near-black background fill begins; density tuned by eye against TotalCoverageRadius
