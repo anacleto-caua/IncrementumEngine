@@ -55,6 +55,11 @@ namespace Input {
     inline float MouseXDelta = 0;
     inline float MouseYDelta = 0;
 
+    // MouseScrollX will only apply to weird stuff like trackpads and shift-scroll
+    inline float MouseScrollX = 0;
+    // Positive : away from user
+    inline float MouseScrollY = 0;
+
     void CaptureMouse();
     void FreeMouse();
 

@@ -223,6 +223,8 @@ namespace Input {
     void ClearFrameEdges() {
         MouseEdges.Clear();
         KeyEdges.Clear();
+        MouseScrollX = 0;
+        MouseScrollY = 0;
     }
 
     void ProcessEvent(const SDL_Event& event) {
@@ -252,6 +254,10 @@ namespace Input {
                     break;
                 }
             }
+        } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+            f32 sign = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0f : 1.0f;
+            MouseScrollX += sign * event.wheel.x;
+            MouseScrollY += sign * event.wheel.y;
         }
     }
 }
