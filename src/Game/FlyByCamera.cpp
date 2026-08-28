@@ -6,7 +6,7 @@
 
 namespace FlyByCamera {
     static constexpr f32 SPEED = 20;
-    static constexpr f32 RUNNING_MULT = 3;
+    f32 RunningMultplier = 1.0f;
 
     static constexpr f32 PITCH_SENSIBILITY = .1f;
     static constexpr f32 YAW_SENSIBILITY = .1f;
@@ -86,6 +86,11 @@ namespace FlyByCamera {
             FrameMovement.y = -1;
         }
 
+        RunningMultplier += Input::MouseScrollY;
+        if (RunningMultplier <= 0.0f) {
+            RunningMultplier = 0.1f;
+        }
+
         if (FrameMovement != vec3::ZERO) {
             FrameMovement = normalize(FrameMovement);
 
@@ -100,7 +105,7 @@ namespace FlyByCamera {
                 (vec3::UP * FrameMovement.y);
             AllignedMovement = normalize(AllignedMovement);
 
-            TrackedCamera->Position += AllignedMovement * SPEED * delta_time * ( IsRunning ? RUNNING_MULT : 1 );
+            TrackedCamera->Position += AllignedMovement * SPEED * delta_time * ( IsRunning ? RunningMultplier : 1 );
             FrameMovement = vec3::ZERO;
             IsDirty = true;
         }
