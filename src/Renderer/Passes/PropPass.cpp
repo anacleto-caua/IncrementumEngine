@@ -12,7 +12,7 @@
 #include "Renderer/Vk/PipelineDefaults.hpp"
 #include "Renderer/Tools/DebugPanel.hpp"
 #include "Renderer/Resources/ImageView.hpp"
-#include "Renderer/Resources/ModelLoader.hpp"
+#include "Renderer/Tools/ModelLoader.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
 
 // Procedural checkerboard, no image asset involved - v1 stand-in texture (see PropPass.hpp's

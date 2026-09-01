@@ -7,7 +7,6 @@
 #include "Camera.hpp"
 #include "Passes/Pass.hpp"
 #include "Tools/DebugPanel.hpp"
-#include "Tools/ComputeTestDemo.hpp"
 #include "Engine/Core/Window.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
 

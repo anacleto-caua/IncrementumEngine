@@ -2,7 +2,7 @@
 
 #include <queue>
 
-#include "Image.hpp"
+#include "Renderer/Resources/Image.hpp"
 #include "Renderer/Vk/LeanVk.hpp"
 #include "Renderer/Vk/SubmissionPile.hpp"
 #include "Renderer/Vk/TimelineSemaphore.hpp"

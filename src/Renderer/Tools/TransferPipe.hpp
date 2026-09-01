@@ -2,13 +2,13 @@
 
 #include <queue>
 
-#include "Image.hpp"
-#include "Buffer.hpp"
-#include "RingBuffer.hpp"
 #include "ImageOwnershipTracker.hpp"
 #include "Renderer/Vk/SubmissionPile.hpp"
 #include "Renderer/Vk/TimelineSemaphore.hpp"
 #include "Renderer/Vk/CommandBufferBlock.hpp"
+#include "Renderer/Resources/Image.hpp"
+#include "Renderer/Resources/Buffer.hpp"
+#include "Renderer/Resources/RingBuffer.hpp"
 
 class TransferPipe {
 public:

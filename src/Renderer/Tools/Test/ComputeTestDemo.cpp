@@ -8,7 +8,7 @@
 #include "Renderer/VkVault.hpp"
 #include "Renderer/Vk/ShaderBuilder.hpp"
 #include "Renderer/Resources/Buffer.hpp"
-#include "Renderer/Resources/ComputePipe.hpp"
+#include "Renderer/Tools/ComputePipe.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
 
 namespace ComputeTestDemo {
