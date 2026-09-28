@@ -418,16 +418,13 @@ void Renderer::Frame() {
         SubmissionPile.WaitForTicket(last_acquire_ticket, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
     }
 
-    // Both signals need an explicit ALL_COMMANDS stage mask: SubmissionPile's default is
-    // STAGE_2_NONE, which puts none of this submission's work in the signal's first
-    // synchronization scope - i.e. present (and the CPU's frame-slot reuse wait below) were
-    // formally ordered after nothing. Synchronization validation flagged it as
-    // SYNC-HAZARD-PRESENT-AFTER-WRITE on the swapchain images.
-    SubmissionPile.SignalBinarySemaphore(SwapchainImages[FrameContext.ImageViewIndex].RenderFinished, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+    // Default (ALL_COMMANDS) stage masks - present and the CPU's frame-slot reuse wait must be
+    // ordered after every bit of this submission's work (see SubmissionPile::DefaultSemaphoreStage).
+    SubmissionPile.SignalBinarySemaphore(SwapchainImages[FrameContext.ImageViewIndex].RenderFinished);
 
     // Hm, seems to be a bad data accesing pattern
     u64 signal_value = ++FrameSemaphore.LastPromissedValue;
-    SubmissionPile.SignalTimeline(FrameSemaphore, signal_value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
+    SubmissionPile.SignalTimeline(FrameSemaphore, signal_value);
 
     SubmissionPile.EndSubmission();
 

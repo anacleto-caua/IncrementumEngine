@@ -86,9 +86,20 @@ struct SubmissionPile {
         CmdCount++;
     }
 
+    // Default stage mask for every semaphore wait/signal below: ALL_COMMANDS (valid on every queue
+    // family, including transfer-only ones). It used to be STAGE_2_NONE, which for a *signal* puts
+    // none of the submission's work in its first synchronization scope and for a *wait* blocks
+    // none of it - so nearly every semaphore in the engine was formally ordering nothing.
+    // Synchronization validation caught it twice: SYNC-HAZARD-PRESENT-AFTER-WRITE (frame
+    // present/timeline signals) and SYNC-HAZARD-WRITE-AFTER-WRITE between the Graphics- and
+    // Transfer-queue ownership barriers of every streamed image (ImageOwnershipTracker's release/
+    // acquire hand-offs). Pass a narrower stage only where it's actually known to be sufficient
+    // (e.g. Renderer's swapchain-acquire wait at COLOR_ATTACHMENT_OUTPUT).
+    static constexpr VkPipelineStageFlags2 DefaultSemaphoreStage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+
     // Timeline Semaphores
 
-    void WaitSemaphore(const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void WaitSemaphore(const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = DefaultSemaphoreStage) {
         assert(WaitCount < MaxWaitSemaphores && "max wait semaphores on a pile reached");
         WaitSemaphores[WaitCount] = {
             VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
@@ -98,7 +109,7 @@ struct SubmissionPile {
     }
 
 
-    void SignalSemaphore(const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void SignalSemaphore(const VkSemaphore semaphore, const u64 value, VkPipelineStageFlags2 stage = DefaultSemaphoreStage) {
         assert(SignalCount < MaxSignalSemaphores && "max signal semaphores count on a pile reached");
         SignalSemaphores[SignalCount] = {
             VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
@@ -108,40 +119,40 @@ struct SubmissionPile {
     }
 
 
-    void WaitTimeline(const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void WaitTimeline(const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = DefaultSemaphoreStage) {
         WaitSemaphore( semaphore.Semaphore, value, stage);
     }
 
 
-    void SignalTimeline(const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void SignalTimeline(const TimelineSemaphore& semaphore, const u64 value, VkPipelineStageFlags2 stage = DefaultSemaphoreStage) {
         SignalSemaphore( semaphore.Semaphore, value, stage);
     }
 
     // Timeline Semaphores Ticket
 
-    void WaitPrepareForTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void WaitPrepareForTicket(const Ticket ticket, VkPipelineStageFlags2 stage = DefaultSemaphoreStage) {
         WaitTimeline( *ticket.TargetSemaphore, ticket.Value-1, stage);
     }
 
 
-    void WaitForTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void WaitForTicket(const Ticket ticket, VkPipelineStageFlags2 stage = DefaultSemaphoreStage) {
         WaitTimeline( *ticket.TargetSemaphore, ticket.Value, stage);
     }
 
 
-    void SignalTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void SignalTicket(const Ticket ticket, VkPipelineStageFlags2 stage = DefaultSemaphoreStage) {
         SignalTimeline( *ticket.TargetSemaphore, ticket.Value, stage);
     }
 
 
-    void WaitAndSignalTicket(const Ticket ticket, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void WaitAndSignalTicket(const Ticket ticket, VkPipelineStageFlags2 stage = DefaultSemaphoreStage) {
         WaitPrepareForTicket( ticket, stage); // Guarantee all previously required work has been done
         SignalTicket( ticket, stage);
     }
 
     // Binary Semaphores
 
-    void WaitBinarySemaphore(const BinarySemaphore& semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void WaitBinarySemaphore(const BinarySemaphore& semaphore, VkPipelineStageFlags2 stage = DefaultSemaphoreStage) {
         assert(WaitCount < MaxWaitSemaphores && "max wait semaphores on a pile reached");
         WaitSemaphores[WaitCount] = {
             VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
@@ -151,7 +162,7 @@ struct SubmissionPile {
     }
 
 
-    void SignalBinarySemaphore(const BinarySemaphore& semaphore, VkPipelineStageFlags2 stage = VK_PIPELINE_STAGE_2_NONE) {
+    void SignalBinarySemaphore(const BinarySemaphore& semaphore, VkPipelineStageFlags2 stage = DefaultSemaphoreStage) {
         assert(SignalCount < MaxSignalSemaphores && "max signal semaphores count on a pile reached");
         SignalSemaphores[SignalCount] = {
             VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, nullptr,
