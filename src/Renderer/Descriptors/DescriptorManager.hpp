@@ -12,6 +12,8 @@ namespace DescriptorManager {
     // than more bindings added to PerFrameLayout above.
     inline VkDescriptorSetLayout ComputeTestLayout = VK_NULL_HANDLE;   // ComputeTestDemo's own
     // standalone Set 0 - a pure-compute pipeline has no graphics-frame Set 0 to share.
+    inline VkDescriptorSetLayout PostLayout = VK_NULL_HANDLE;          // PostPass's own Set 0 -
+    // the resolved HDR scene color it tonemaps; needs nothing from the scene's Set 0.
 
     IncResult Create();
     void Destroy();
@@ -73,6 +75,14 @@ namespace DescriptorMap {
         inline constexpr u32 SetIndex = 0;
 
         inline constexpr u32 Binding_TestBuffer = 0;
+    }
+
+    // PostPass's own standalone pipeline layout (Set 0), same reasoning as ComputeTest above: a
+    // fullscreen tonemap pass reads only the resolved scene color, not the scene's SceneGlobals.
+    namespace Post {
+        inline constexpr u32 SetIndex = 0;
+
+        inline constexpr u32 Binding_SceneColor = 0;
     }
 }
 

@@ -59,10 +59,14 @@ rule("compile_shaders")
                 return
             end
 
+            -- Shared #include files (shaders/include/*.glsl) count as dependencies of every stage
+            -- shader - editing one must recompile everything that might include it, and the
+            -- cache has no include-graph awareness of its own.
+            local dependency_files = table.join({sourcefile}, os.files(path.join(path.directory(sourcefile), "include", "*.glsl")))
             depend.on_changed(function ()
                 os.vrunv(glslc, {sourcefile, "-o", output_file})
                 print("Compiling: " .. shader_name .. " -> " .. output_file)
-            end, {files = sourcefile})
+            end, {files = dependency_files})
         else
             print("Warning: glslc not found. Skipping: " .. shader_name)
         end

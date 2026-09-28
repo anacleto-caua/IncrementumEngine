@@ -40,19 +40,13 @@ IncResult SkyPass::Init() {
 
     auto dynamic_state_create_info = PipelineDefaults::DefaultPipelineDynamicStateCreateInfo();
 
-    VkPipelineRenderingCreateInfo rendering_create_info {};
-    rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    rendering_create_info.pNext = nullptr;
-    rendering_create_info.colorAttachmentCount = static_cast<u32>(VkVault::ColorAttachmentFormats.size());
-    rendering_create_info.pColorAttachmentFormats = VkVault::ColorAttachmentFormats.data();
-    rendering_create_info.depthAttachmentFormat = Renderer::DepthBufferFormat;
-    rendering_create_info.stencilAttachmentFormat = Renderer::DepthBufferFormat;
+    auto rendering_create_info = PipelineDefaults::SceneRenderingCreateInfo();
 
     auto vertex_input_state = PipelineDefaults::DefaultPipelineVertexInputStateCreateInfo();
     auto input_assembly_state = PipelineDefaults::DefaultPipelineInputAssemblyStateCreateInfo();
     auto viewport_state = PipelineDefaults::DefaultPipelineViewportStateCreateInfo();
     auto rasterization_state = PipelineDefaults::DefaultPipelineRasterizationStateCreateInfo();
-    auto multisample_state = PipelineDefaults::DefaultPipelineMultisampleStateCreateInfo();
+    auto multisample_state = PipelineDefaults::SceneMultisampleStateCreateInfo();
     auto colorblend_state = PipelineDefaults::DefaultPipelineColorBlendStateCreateInfo();
 
     // Sky must never write depth (it's drawn at the far plane, behind everything already drawn)

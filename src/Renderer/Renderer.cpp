@@ -13,9 +13,13 @@
 #include "Renderer/Vk/LeanVk.hpp"
 
 IncResult Renderer::Init() {
-    // Props before Sky, which only fills pixels nothing else wrote depth to; Text after Sky since
-    // it writes no depth itself (screen-space overlay) and would get overdrawn by Sky's fill otherwise.
-    Passes = { &TerrainPass, &PropPass, &SkyPass, &TextPass, &ImGuiPass };
+    // Scene: props before Sky, which only fills pixels nothing else wrote depth to.
+    // Overlay: PostPass first (it overwrites every swapchain pixel with the tonemapped scene),
+    // then Text/ImGui blended on top - screen-space, so they stay crisp and un-tonemapped.
+    ScenePasses = { &TerrainPass, &PropPass, &SkyPass };
+    OverlayPasses = { &PostPass, &TextPass, &ImGuiPass };
+    Passes = ScenePasses;
+    Passes.insert(Passes.end(), OverlayPasses.begin(), OverlayPasses.end());
 
     INC_CHECK(VkVault::Create(), "vulkan context creation failed");
     INC_CHECK(TransferPipe.Init(), "transfer pipe creation failed");
@@ -47,30 +51,68 @@ IncResult Renderer::Init() {
         .minDepth = 0.0f, .maxDepth = 1.0f
     };
 
-    ColorAttachment = {};
-    ColorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    ColorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
-    ColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    ColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    ColorAttachment.clearValue.color = { .float32 = { 0.1f, 0.1f, 0.1f, 1.0f } };
+    // 4x MSAA is guaranteed by the spec for color/depth framebuffers in general, but the depth
+    // FORMAT's own multisample support is per-format - check rather than fail obscurely later.
+    {
+        VkImageFormatProperties depth_props {};
+        vkGetPhysicalDeviceImageFormatProperties(
+            VkVault::PhysicalDevice, DepthBufferFormat, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, 0, &depth_props
+        );
+        if ((depth_props.sampleCounts & RendererConstants::SceneSampleCount) == 0) {
+            analog::critical("depth format does not support the scene's MSAA sample count");
+            return IncResult::FAIL;
+        }
+    }
 
-    INC_CHECK(InitDepthBuffer(SwapchainExtent.width, SwapchainExtent.height), "depth buffer creation failed");
-    DepthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    DepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    DepthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    DepthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    DepthAttachment.clearValue.depthStencil = { 1.0f, 0 };
+    INC_CHECK(InitSceneTargets(SwapchainExtent.width, SwapchainExtent.height), "scene targets creation failed");
 
-    RenderingInfo = {};
-    RenderingInfo.renderArea = {
-        .offset = { 0, 0 },
-        .extent = SwapchainExtent
-    };
-    RenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    RenderingInfo.layerCount = 1;
-    RenderingInfo.colorAttachmentCount = 1;
-    RenderingInfo.pColorAttachments = &ColorAttachment;
-    RenderingInfo.pDepthAttachment = &DepthAttachment;
+    // Scene scope: the MSAA color is only ever resolved, never read back, so its own contents
+    // are dropped at the end (STORE_OP_DONT_CARE) - the resolve still happens.
+    SceneColorAttachment = {};
+    SceneColorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    SceneColorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    SceneColorAttachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+    SceneColorAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    SceneColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    SceneColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    SceneColorAttachment.clearValue.color = { .float32 = { 0.1f, 0.1f, 0.1f, 1.0f } };
+
+    SceneDepthAttachment = {};
+    SceneDepthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    SceneDepthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    SceneDepthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    SceneDepthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    SceneDepthAttachment.clearValue.depthStencil = { 1.0f, 0 };
+
+    // Image views are (re)filled by InitSceneTargets(); only the static shape lives here.
+    SceneColorAttachment.imageView = ImageViews.Get(SceneColorMsaaView)->Handle;
+    SceneColorAttachment.resolveImageView = ImageViews.Get(SceneColorResolvedView)->Handle;
+    SceneDepthAttachment.imageView = ImageViews.Get(DepthBufferImageView)->Handle;
+
+    SceneRenderingInfo = {};
+    SceneRenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    SceneRenderingInfo.renderArea = { .offset = { 0, 0 }, .extent = SwapchainExtent };
+    SceneRenderingInfo.layerCount = 1;
+    SceneRenderingInfo.colorAttachmentCount = 1;
+    SceneRenderingInfo.pColorAttachments = &SceneColorAttachment;
+    SceneRenderingInfo.pDepthAttachment = &SceneDepthAttachment;
+
+    // Overlay scope: PostPass overwrites every pixel, so the swapchain's previous contents are
+    // irrelevant (LOAD_OP_DONT_CARE) - no depth attachment at all.
+    OverlayColorAttachment = {};
+    OverlayColorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    OverlayColorAttachment.imageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
+    OverlayColorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    OverlayColorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+    OverlayRenderingInfo = {};
+    OverlayRenderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    OverlayRenderingInfo.renderArea = { .offset = { 0, 0 }, .extent = SwapchainExtent };
+    OverlayRenderingInfo.layerCount = 1;
+    OverlayRenderingInfo.colorAttachmentCount = 1;
+    OverlayRenderingInfo.pColorAttachments = &OverlayColorAttachment;
+    OverlayRenderingInfo.pDepthAttachment = nullptr;
 
     // Other essential rendering things
     INC_CHECK(InitGlobalDescriptors(), "global descriptors creation failed");
@@ -100,7 +142,7 @@ void Renderer::Destroy() {
     for (auto it = Passes.rbegin(); it != Passes.rend(); ++it) { (*it)->Destroy(); }
     DestroyGlobalDescriptors();
     DestroySwapchain();
-    DestroyDepthBuffer();
+    DestroySceneTargets();
     DescriptorManager::Destroy();
     TransferPipe.Destroy();
     ComputePipe.Destroy();
@@ -184,35 +226,65 @@ void Renderer::Frame() {
         );
     }
 
-    VkImageMemoryBarrier rendering_barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = 0,
-        .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = SwapchainImages[FrameContext.ImageViewIndex].Image,
-        .subresourceRange {
+    // ---- Scene scope: HDR + 4x MSAA, resolved into SceneColorResolvedImage on end ----
+    {
+        // Every scene target is fully cleared (or resolve-overwritten) this frame, so each goes
+        // from UNDEFINED (contents discarded). The source scope covers the previous frame's use
+        // of these same single-instance images - earlier in this queue's submission order:
+        // MSAA color/depth writes (WAW) and PostPass's read of the resolved image (WAR).
+        auto color_range = VkImageSubresourceRange {
             .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        }
-    };
-    VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    vkCmdPipelineBarrier(
-        FrameContext.DrawCommand,
-        src_stage, dst_stage,
-        0, 0, nullptr, 0, nullptr, 1,
-        &rendering_barrier
-    );
+            .baseMipLevel = 0, .levelCount = 1,
+            .baseArrayLayer = 0, .layerCount = 1
+        };
+        std::array<VkImageMemoryBarrier, 3> scene_barriers = {{
+            {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .pNext = nullptr,
+                .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = Images.Get(SceneColorMsaaImage)->Handle,
+                .subresourceRange = color_range
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .pNext = nullptr,
+                .srcAccessMask = 0, // last use was a read - execution dependency alone covers WAR
+                .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = Images.Get(SceneColorResolvedImage)->Handle,
+                .subresourceRange = color_range
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .pNext = nullptr,
+                .srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = Images.Get(DepthBufferImage)->Handle,
+                .subresourceRange = DepthBufferRange
+            }
+        }};
+        vkCmdPipelineBarrier(
+            FrameContext.DrawCommand,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            0, 0, nullptr, 0, nullptr,
+            static_cast<u32>(scene_barriers.size()), scene_barriers.data()
+        );
+    }
 
-    ColorAttachment.imageView = SwapchainImages[FrameContext.ImageViewIndex].ImageView;
-    vkCmdBeginRendering(FrameContext.DrawCommand, &RenderingInfo);
+    vkCmdBeginRendering(FrameContext.DrawCommand, &SceneRenderingInfo);
     vkCmdSetViewport(FrameContext.DrawCommand, 0, 1, &Viewport);
     vkCmdSetScissor(FrameContext.DrawCommand, 0, 1, &Scissor);
 
@@ -231,7 +303,64 @@ void Renderer::Frame() {
     // Actual frame begins
 
     DebugPanel::DrawToolbar();
-    for (Pass* pass : Passes) { pass->Render(); }
+    for (Pass* pass : ScenePasses) { pass->Render(); }
+
+    vkCmdEndRendering(FrameContext.DrawCommand);
+
+    // ---- Overlay scope: tonemap onto the swapchain, then screen-space UI ----
+    {
+        std::array<VkImageMemoryBarrier, 2> overlay_barriers = {{
+            {
+                // Resolve writes happen in the color-attachment-output stage.
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .pNext = nullptr,
+                .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                .newLayout = Images.Get(SceneColorResolvedImage)->UsageLayout,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = Images.Get(SceneColorResolvedImage)->Handle,
+                .subresourceRange = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0, .levelCount = 1,
+                    .baseArrayLayer = 0, .layerCount = 1
+                }
+            },
+            {
+                // Swapchain image: srcStage must include COLOR_ATTACHMENT_OUTPUT so this chains
+                // with the acquire semaphore's wait stage in the submission below.
+                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                .pNext = nullptr,
+                .srcAccessMask = 0,
+                .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = SwapchainImages[FrameContext.ImageViewIndex].Image,
+                .subresourceRange = {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0, .levelCount = 1,
+                    .baseArrayLayer = 0, .layerCount = 1
+                }
+            }
+        }};
+        vkCmdPipelineBarrier(
+            FrameContext.DrawCommand,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            0, 0, nullptr, 0, nullptr,
+            static_cast<u32>(overlay_barriers.size()), overlay_barriers.data()
+        );
+    }
+
+    OverlayColorAttachment.imageView = SwapchainImages[FrameContext.ImageViewIndex].ImageView;
+    vkCmdBeginRendering(FrameContext.DrawCommand, &OverlayRenderingInfo);
+    vkCmdSetViewport(FrameContext.DrawCommand, 0, 1, &Viewport);
+    vkCmdSetScissor(FrameContext.DrawCommand, 0, 1, &Scissor);
+
+    for (Pass* pass : OverlayPasses) { pass->Render(); }
 
     // Actual frame ends
 
@@ -289,11 +418,16 @@ void Renderer::Frame() {
         SubmissionPile.WaitForTicket(last_acquire_ticket, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
     }
 
-    SubmissionPile.SignalBinarySemaphore(SwapchainImages[FrameContext.ImageViewIndex].RenderFinished);
+    // Both signals need an explicit ALL_COMMANDS stage mask: SubmissionPile's default is
+    // STAGE_2_NONE, which puts none of this submission's work in the signal's first
+    // synchronization scope - i.e. present (and the CPU's frame-slot reuse wait below) were
+    // formally ordered after nothing. Synchronization validation flagged it as
+    // SYNC-HAZARD-PRESENT-AFTER-WRITE on the swapchain images.
+    SubmissionPile.SignalBinarySemaphore(SwapchainImages[FrameContext.ImageViewIndex].RenderFinished, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 
     // Hm, seems to be a bad data accesing pattern
     u64 signal_value = ++FrameSemaphore.LastPromissedValue;
-    SubmissionPile.SignalTimeline(FrameSemaphore, signal_value);
+    SubmissionPile.SignalTimeline(FrameSemaphore, signal_value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT);
 
     SubmissionPile.EndSubmission();
 
@@ -318,7 +452,20 @@ void Renderer::Resize(i32 width, i32 height) {
     u32 uh = static_cast<u32>(height);
     vkDeviceWaitIdle(VkVault::Device);
     ResizeSwapchain(uw, uh);
-    ResizeDepthBuffer(uw, uh);
+
+    DestroySceneTargets();
+    if (InitSceneTargets(SwapchainExtent.width, SwapchainExtent.height) != IncResult::SUCCESS) {
+        analog::critical("scene targets recreation failed on resize");
+        return;
+    }
+    SceneColorAttachment.imageView = ImageViews.Get(SceneColorMsaaView)->Handle;
+    SceneColorAttachment.resolveImageView = ImageViews.Get(SceneColorResolvedView)->Handle;
+    SceneDepthAttachment.imageView = ImageViews.Get(DepthBufferImageView)->Handle;
+    PostPass.RebindSceneColor();
+}
+
+VkImageView Renderer::GetResolvedSceneColorView() {
+    return ImageViews.Get(SceneColorResolvedView)->Handle;
 }
 
 void Renderer::BindCamera(Camera* camera) {
@@ -453,10 +600,8 @@ IncResult Renderer::ResizeSwapchain(u32 width, u32 height) {
     Scissor.extent = SwapchainExtent;
     Viewport.width = static_cast<float>(SwapchainExtent.width);
     Viewport.height = static_cast<float>(SwapchainExtent.height);
-    RenderingInfo.renderArea = {
-        .offset = { 0, 0 },
-        .extent = SwapchainExtent
-    };
+    SceneRenderingInfo.renderArea = { .offset = { 0, 0 }, .extent = SwapchainExtent };
+    OverlayRenderingInfo.renderArea = { .offset = { 0, 0 }, .extent = SwapchainExtent };
 
     INC_CHECK(RecreateSwapchain(SwapchainHandle), "failed to recreate the swapchain on a resize event w:{} - h:{}", width, height);
 
@@ -527,77 +672,57 @@ void Renderer::CleanupSwapchainImages() {
     }
 }
 
-IncResult Renderer::InitDepthBuffer(u32 width, u32 height) {
-    Image::CreateInfo image_create_info {};
-    image_create_info.Width = width;
-    image_create_info.Height = height;
-    image_create_info.Format = DepthBufferFormat;
-    image_create_info.Usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    image_create_info.UsageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+IncResult Renderer::InitSceneTargets(u32 width, u32 height) {
+    // MSAA color: rendered into and resolved, never sampled - TRANSIENT lets tile-based GPUs
+    // keep it on-chip entirely.
+    Image::CreateInfo msaa_color_info {};
+    msaa_color_info.Width = width;
+    msaa_color_info.Height = height;
+    msaa_color_info.Format = RendererConstants::SceneColorFormat;
+    msaa_color_info.Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+    msaa_color_info.Samples = RendererConstants::SceneSampleCount;
+    msaa_color_info.OwnerQueue = QueueRole::Graphics;
+    msaa_color_info.UsageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    INC_CHECK(Images.Add(msaa_color_info, SceneColorMsaaImage), "scene MSAA color image creation failed");
+    // Plain 2D views (FillImageViewCreateInfo defaults to 2D_ARRAY) - PostPass samples the
+    // resolved one through a sampler2D, which requires a matching 2D view type.
+    VkImageViewCreateInfo msaa_view_info = FillImageViewCreateInfo(Images.Get(SceneColorMsaaImage));
+    msaa_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    INC_CHECK(ImageViews.Add(msaa_view_info, SceneColorMsaaView), "scene MSAA color view creation failed");
 
-    INC_CHECK(Images.Add(image_create_info, DepthBufferImage), "depth buffer image creation failed");
-    Image* depth_image_value = Images.Get(DepthBufferImage);
-    depth_image_value->Format = DepthBufferFormat;
+    // Resolved color: its resting layout is the one PostPass samples it in.
+    Image::CreateInfo resolved_color_info = msaa_color_info;
+    resolved_color_info.Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    resolved_color_info.Samples = VK_SAMPLE_COUNT_1_BIT;
+    resolved_color_info.UsageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    INC_CHECK(Images.Add(resolved_color_info, SceneColorResolvedImage), "scene resolved color image creation failed");
+    VkImageViewCreateInfo resolved_view_info = FillImageViewCreateInfo(Images.Get(SceneColorResolvedImage));
+    resolved_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    INC_CHECK(ImageViews.Add(resolved_view_info, SceneColorResolvedView), "scene resolved color view creation failed");
 
-    // Despite having a creation format the image still starts as a _UNDEFINED, so transit it a first time
-    CommandBufferBlock setup_block;
-    INC_CHECK(setup_block.Init(QueueRole::Graphics), "depth buffer setup command buffer block creation failed");
+    Image::CreateInfo depth_info {};
+    depth_info.Width = width;
+    depth_info.Height = height;
+    depth_info.Format = DepthBufferFormat;
+    depth_info.Usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    depth_info.Samples = RendererConstants::SceneSampleCount;
+    depth_info.OwnerQueue = QueueRole::Graphics;
+    depth_info.UsageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    INC_CHECK(Images.Add(depth_info, DepthBufferImage), "depth buffer image creation failed");
 
-    VkCommandBuffer cmd = setup_block.GetNext();
-    LeanVk::BeginCommand(cmd);
-
-    VkImageMemoryBarrier barrier {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = 0,
-        .dstAccessMask = 0,
-        .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
-        .newLayout = depth_image_value->UsageLayout,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = depth_image_value->Handle,
-        .subresourceRange = DepthBufferRange
-    };
-    VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-
-    vkCmdPipelineBarrier(
-        cmd,
-        src_stage, dst_stage,
-        0, 0, nullptr, 0, nullptr, 1,
-        &barrier
-    );
-
-    LeanVk::EndCommand(cmd);
-
-    // `::` needed: this class's own `SubmissionPile` member shadows the template type name.
-    ::SubmissionPile<QueueRole::Graphics, 1, 1, 0, 0> one_shot_pile;
-    one_shot_pile.BeginSubmission();
-    one_shot_pile.AddCommand(cmd);
-    one_shot_pile.EndSubmission();
-    one_shot_pile.Submit();
-
-    vkQueueWaitIdle(VkVault::Queues[QueueRole::Graphics].Queue);
-    setup_block.Destroy();
-
-    VkImageViewCreateInfo image_view_create_info = FillImageViewCreateInfo(depth_image_value);
-    image_view_create_info.subresourceRange = DepthBufferRange;
-
-    INC_CHECK(ImageViews.Add(image_view_create_info, DepthBufferImageView), "depth buffer image view creation failed");
-    DepthAttachment.imageView = ImageViews.Get(DepthBufferImageView)->Handle;
+    VkImageViewCreateInfo depth_view_info = FillImageViewCreateInfo(Images.Get(DepthBufferImage));
+    depth_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    depth_view_info.subresourceRange = DepthBufferRange;
+    INC_CHECK(ImageViews.Add(depth_view_info, DepthBufferImageView), "depth buffer image view creation failed");
 
     return IncResult::SUCCESS;
 }
 
-void Renderer::DestroyDepthBuffer() {
-    Images.Del(DepthBufferImage);
+void Renderer::DestroySceneTargets() {
+    ImageViews.Del(SceneColorMsaaView);
+    Images.Del(SceneColorMsaaImage);
+    ImageViews.Del(SceneColorResolvedView);
+    Images.Del(SceneColorResolvedImage);
     ImageViews.Del(DepthBufferImageView);
-}
-
-void Renderer::ResizeDepthBuffer(u32 width, u32 height) {
     Images.Del(DepthBufferImage);
-    ImageViews.Del(DepthBufferImageView);
-    if (InitDepthBuffer(width, height) != IncResult::SUCCESS) {
-        analog::critical("depth buffer recreation failed on resize");
-    }
 }

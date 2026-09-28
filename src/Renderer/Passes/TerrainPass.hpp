@@ -20,7 +20,10 @@
 // codebase's existing Game/Renderer cross-layer reads (e.g. TerrainPass.cpp already reads
 // TerrainManager's globals the same way, just in the other direction).
 struct TerrainPassConfig {
-    f32 HeightScale = 210.0f;
+    // World units at normalized height 1.0. Tall enough for real mountain ranges to read against
+    // a ~16000-unit view (210 made everything look like rolling hills); R16 heightmaps still
+    // resolve ~0.014 units per step at this scale.
+    f32 HeightScale = 900.0f;
 };
 
 class TerrainPass : public Pass {

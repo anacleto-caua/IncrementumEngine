@@ -13,22 +13,19 @@
 #include "Engine/Core/TaskScheduler/TaskScheduler.hpp"
 
 namespace TerrainManager {
-    void WriteHeightmap(Heightmap& out, ivec2 position, f64 world_step);
+    void WriteHeightmap(Heightmap& out, ivec2 position, f64 world_step, const GeneratorParams& params);
     void GeneratePropPlacements(PropPlacement& out, const Heightmap& heightmap, ivec2 position, f64 chunk_scale);
 
-    FastNoiseLite ContinentalNoise;
-    FastNoiseLite MountainNoise;
-    FastNoiseLite DetailNoise;
+    // Terrain generator noise - configured once in Init(), read-only afterwards (worker threads
+    // sample these concurrently; FastNoiseLite's GetNoise/DomainWarp are const-safe).
+    FastNoiseLite ContinentWarp;     // domain warp bending coastlines/ranges into organic shapes
+    FastNoiseLite ContinentalNoise;  // ocean vs land and broad plateau height, very low frequency
+    FastNoiseLite RangeNoise;        // where mountain massifs sit (broad regions, not every hill)
+    FastNoiseLite MountainNoise;     // single-octave base - ErodedFbm() sums its octaves by hand
+    FastNoiseLite HillNoise;         // gentle rolling relief on open land
 
-    // Cache position lookup: Phase 1 of RefreshRing() needs "is this grid position resident, and
-    // if so in which slot" for every candidate in a ring's exploration circle, every frame - a
-    // linear scan of a ring's Cache for each candidate would be O(drawn * cached) per ring per
-    // frame. Keeping each ring's own map in lockstep with its Cache (updated at the same two
-    // points Cache's Position/Valid change: finalize and eviction-kickoff) makes each lookup O(1)
-    // instead.
-    u64 PackPosition(ivec2 position) {
-        return (static_cast<u64>(static_cast<u32>(position.x)) << 32) | static_cast<u32>(position.y);
-    }
+    f32 Elevation(f32 world_x, f32 world_z, f32 min_wavelength, const GeneratorParams& params);
+
 
     // World-space bounds of a chunk, for frustum culling. Y uses the full [0, HeightScale] range
     // the shader declares rather than this chunk's actual min/max height - conservative (never
@@ -57,7 +54,7 @@ namespace TerrainManager {
         InitGenTask* task = static_cast<InitGenTask*>(payload);
         // Safe to write straight into the shared array: distinct slot per task, and nothing
         // else reads Ring0.HeightmapData until Init() returns (render loop hasn't started yet).
-        WriteHeightmap(Ring0.HeightmapData[task->TargetLayer], task->Position, task->WorldStep);
+        WriteHeightmap(Ring0.HeightmapData[task->TargetLayer], task->Position, task->WorldStep, Generator);
         // Same safety argument covers Ring0.Props - placements are derived from the heightmap
         // just written, same slot, same "nothing reads it until Init() returns" window.
         GeneratePropPlacements(
@@ -70,20 +67,43 @@ namespace TerrainManager {
     }
 
     void Init() {
+        // Frequencies are in world units (1 / wavelength): continents span thousands of units to
+        // fill the ~16000-unit view, massifs ~4000, mountain base ~2500, hills ~300.
+        //
+        // Warp is kept moderate on purpose: a strong warp (tried: amp 1300, 3 progressive octaves)
+        // compresses space in places, squeezing the range mask's rise into a few hundred units
+        // and producing sheer "wall" mountains.
+        ContinentWarp.SetDomainWarpType(FastNoiseLite::DomainWarpType_OpenSimplex2);
+        ContinentWarp.SetFractalType(FastNoiseLite::FractalType_DomainWarpProgressive);
+        ContinentWarp.SetFractalOctaves(2);
+        ContinentWarp.SetFrequency(0.00025f);
+        // Unit amplitude: Elevation() scales the resulting displacement by
+        // GeneratorParams::WarpStrength itself, so the strength stays live-tunable without
+        // touching this (shared, read-only-after-Init) noise object.
+        ContinentWarp.SetDomainWarpAmp(1.0f);
+
         ContinentalNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
         ContinentalNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
         ContinentalNoise.SetFractalOctaves(5);
-        ContinentalNoise.SetFrequency(0.002f);
+        ContinentalNoise.SetFrequency(0.00022f);
+        ContinentalNoise.SetSeed(1337);
+
+        RangeNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+        RangeNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
+        RangeNoise.SetFractalOctaves(2);
+        RangeNoise.SetFrequency(0.00025f);
+        RangeNoise.SetSeed(4242);
 
         MountainNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
-        MountainNoise.SetFractalType(FastNoiseLite::FractalType_Ridged);
-        MountainNoise.SetFractalOctaves(6);
-        MountainNoise.SetFrequency(0.015f);
+        MountainNoise.SetFractalType(FastNoiseLite::FractalType_None);
+        MountainNoise.SetFrequency(1.0f); // ErodedFbm() scales coordinates itself, per octave
+        MountainNoise.SetSeed(9001);
 
-        DetailNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
-        DetailNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
-        DetailNoise.SetFractalOctaves(4);
-        DetailNoise.SetFrequency(0.08f);
+        HillNoise.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+        HillNoise.SetFractalType(FastNoiseLite::FractalType_FBm);
+        HillNoise.SetFractalOctaves(3);
+        HillNoise.SetFrequency(0.0033f);
+        HillNoise.SetSeed(777);
 
         // --- Ring geometry: fixed for the whole run, computed once here ---
         Ring0.ChunkScale = ChunkScale;
@@ -180,7 +200,7 @@ namespace TerrainManager {
 
     void GenerateHeightmapTask(void* payload, TaskScheduler::WorkerContext&) {
         PendingGeneration* generation = static_cast<PendingGeneration*>(payload);
-        WriteHeightmap(generation->StagingData, generation->Position, generation->WorldStep);
+        WriteHeightmap(generation->StagingData, generation->Position, generation->WorldStep, generation->Params);
         GeneratePropPlacements(
             generation->StagingProps,
             generation->StagingData,
@@ -253,13 +273,19 @@ namespace TerrainManager {
         // beats not-visible outright; ties within the same visibility go to the closer one - taking
         // scan-order candidates instead meant a region late in the raster scan could sit
         // unresolved for many frames even while directly in view.
+        //
+        // Stale chunks (cached, but generated under an older GeneratorEpoch - see Regenerate())
+        // compete for the same pool slots, ranked just below a truly missing chunk of the same
+        // visibility: a dark hole always beats refreshing terrain that's already on screen.
         struct PrioritizedMiss {
             ivec2 Position;
             bool Visible;
+            bool Stale;
             i64 DistSq;   // chunk-grid units, this ring's own scale - only compared within this ring
         };
         auto is_better = [](const PrioritizedMiss& a, const PrioritizedMiss& b) {
             if (a.Visible != b.Visible) { return a.Visible; }
+            if (a.Stale != b.Stale) { return !a.Stale; }
             return a.DistSq < b.DistSq;
         };
         std::array<PrioritizedMiss, RingT::PoolCapacity> best_missing;
@@ -267,6 +293,38 @@ namespace TerrainManager {
         u32 culled_count = 0;
         u32 drawn_count = 0;
         u32 visible_missing_count = 0;
+
+        auto consider_for_generation = [&](ivec2 candidate, bool visible, bool stale, i32 dx, i32 dy) {
+            for (const PendingGeneration& gen : ring.GenerationPool) {
+                if (gen.InFlight && gen.Position == candidate) { return; }
+            }
+
+            PrioritizedMiss candidate_info = {
+                .Position = candidate,
+                .Visible = visible,
+                .Stale = stale,
+                .DistSq = static_cast<i64>(dx) * dx + static_cast<i64>(dy) * dy
+            };
+
+            // Insertion into the small (K=RingT::PoolCapacity) sorted buffer - cheaper and more
+            // legible than pulling in <algorithm> for a size this small.
+            if (best_count < RingT::PoolCapacity) {
+                u32 insert_at = best_count;
+                while (insert_at > 0 && is_better(candidate_info, best_missing[insert_at - 1])) {
+                    best_missing[insert_at] = best_missing[insert_at - 1];
+                    insert_at--;
+                }
+                best_missing[insert_at] = candidate_info;
+                best_count++;
+            } else if (is_better(candidate_info, best_missing[RingT::PoolCapacity - 1])) {
+                u32 insert_at = RingT::PoolCapacity - 1;
+                while (insert_at > 0 && is_better(candidate_info, best_missing[insert_at - 1])) {
+                    best_missing[insert_at] = best_missing[insert_at - 1];
+                    insert_at--;
+                }
+                best_missing[insert_at] = candidate_info;
+            }
+        };
 
         for (i32 x = player_coord.x - radius; x <= player_coord.x + radius; x++) {
             for (i32 y = player_coord.y - radius; y <= player_coord.y + radius; y++) {
@@ -331,6 +389,10 @@ namespace TerrainManager {
                     } else {
                         culled_count++;
                     }
+
+                    if (ring.Cache[cache_index].Epoch != GeneratorEpoch) {
+                        consider_for_generation(candidate, !CullingEnabled || intersects, true, dx, dy);
+                    }
                 } else {
                     // Visible-but-missing counts regardless of already-in-flight status below -
                     // an in-flight chunk is still visibly dark on screen until it actually finishes,
@@ -338,40 +400,7 @@ namespace TerrainManager {
                     bool visible = !CullingEnabled || Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale));
                     if (visible) { visible_missing_count++; }
 
-                    bool already_in_flight = false;
-                    for (const PendingGeneration& gen : ring.GenerationPool) {
-                        if (gen.InFlight && gen.Position == candidate) {
-                            already_in_flight = true;
-                            break;
-                        }
-                    }
-
-                    if (!already_in_flight) {
-                        PrioritizedMiss candidate_info = {
-                            .Position = candidate,
-                            .Visible = visible,
-                            .DistSq = static_cast<i64>(dx) * dx + static_cast<i64>(dy) * dy
-                        };
-
-                        // Insertion into the small (K=RingT::PoolCapacity) sorted buffer - cheaper
-                        // and more legible than pulling in <algorithm> for a size this small.
-                        if (best_count < RingT::PoolCapacity) {
-                            u32 insert_at = best_count;
-                            while (insert_at > 0 && is_better(candidate_info, best_missing[insert_at - 1])) {
-                                best_missing[insert_at] = best_missing[insert_at - 1];
-                                insert_at--;
-                            }
-                            best_missing[insert_at] = candidate_info;
-                            best_count++;
-                        } else if (is_better(candidate_info, best_missing[RingT::PoolCapacity - 1])) {
-                            u32 insert_at = RingT::PoolCapacity - 1;
-                            while (insert_at > 0 && is_better(candidate_info, best_missing[insert_at - 1])) {
-                                best_missing[insert_at] = best_missing[insert_at - 1];
-                                insert_at--;
-                            }
-                            best_missing[insert_at] = candidate_info;
-                        }
-                    }
+                    consider_for_generation(candidate, visible, false, dx, dy);
                 }
             }
         }
@@ -396,10 +425,20 @@ namespace TerrainManager {
             ring.DebugStats.LastGenerationMs =
                 std::chrono::duration<f32, std::milli>(std::chrono::steady_clock::now() - gen.StartTime).count();
 
+            // A stale-chunk regeneration lands in a fresh slot while the old one was still being
+            // drawn (this very frame included - phase 1 already ran). The old slot is orphaned
+            // rather than freed: it stays Valid with its current LastUsedTick but leaves
+            // PositionToSlot, so nothing draws it from next frame on, and LRU only reclaims it once
+            // it's genuinely the oldest slot - instead of PickSlotToGenerateInto() grabbing it (as
+            // an invalid slot) immediately and uploading over a layer frames in flight may still
+            // be sampling.
+            ring.PositionToSlot.erase(PackPosition(gen.Position));
+
             ring.Cache[gen.TargetLayer] = {
                 .Position = gen.Position,
                 .Valid = true,
-                .LastUsedTick = current_tick
+                .LastUsedTick = current_tick,
+                .Epoch = gen.Epoch
             };
             ring.PositionToSlot[PackPosition(gen.Position)] = gen.TargetLayer;
 
@@ -426,6 +465,8 @@ namespace TerrainManager {
             gen.Position = best_missing[m].Position;
             gen.TargetLayer = PickSlotToGenerateInto(ring);
             gen.WorldStep = ring.ChunkScale / static_cast<f64>(VerticesPerEdge - 1);
+            gen.Params = Generator;
+            gen.Epoch = GeneratorEpoch;
 
             // Invalidate the slot the instant it's claimed for reuse, not only once generation
             // finishes. Otherwise, for however many frames generation takes, this slot is still
@@ -434,7 +475,13 @@ namespace TerrainManager {
             // replaced by a completely unrelated position's terrain the moment finalize lands,
             // instead of cleanly showing as missing and getting regenerated on its own.
             if (ring.Cache[gen.TargetLayer].Valid) {
-                ring.PositionToSlot.erase(PackPosition(ring.Cache[gen.TargetLayer].Position));
+                // Only unmap if the map still points here - an orphaned stale slot (see phase 2)
+                // shares its Position with the fresh slot that replaced it, and that mapping must
+                // survive this eviction.
+                auto mapped = ring.PositionToSlot.find(PackPosition(ring.Cache[gen.TargetLayer].Position));
+                if (mapped != ring.PositionToSlot.end() && mapped->second == gen.TargetLayer) {
+                    ring.PositionToSlot.erase(mapped);
+                }
 
                 ring.EvictionLog[ring.EvictionLogCursor] = {
                     .EvictedPosition = ring.Cache[gen.TargetLayer].Position,
@@ -470,6 +517,10 @@ namespace TerrainManager {
         ring.DebugStats.GenerationsInFlight = in_flight_count;
 
         return any_finalized;
+    }
+
+    void Regenerate() {
+        GeneratorEpoch++;
     }
 
     void RefreshChunks(vec3 player_position, const Frustum& camera_frustum) {
@@ -549,8 +600,144 @@ namespace TerrainManager {
         return {}; // invalid ring_index - caller error, return an all-false diagnostic rather than asserting
     }
 
-    void WriteHeightmap(Heightmap& out, ivec2 position, f64 world_step) {
+    f32 SmoothStep(f32 edge0, f32 edge1, f32 x) {
+        f32 t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    }
+
+    // Mountain shape: gradient FBm with derivative-based damping (Inigo Quilez's "erosion" FBm).
+    // Each octave is divided by 1 + k*|slope so far|^2, so fine detail survives on crests and
+    // valley floors but is suppressed on steep flanks - broad masses with smooth, gullied slopes.
+    // Fully local (no neighborhood simulation), so chunk borders stay seamless. Returns ~[0,1].
+    //
+    // Two tuned-by-measurement details (see notes/terrain_generation.md):
+    //  - The damping slope accumulates each octave's gradient weighted by its amplitude*frequency,
+    //    i.e. the terrain's ACTUAL accumulated slope. Accumulating raw per-octave gradients (IQ's
+    //    shader form) lets fine octaves flip the damping on/off every few units, which showed up as
+    //    small crease/scratch artifacts all over the mountains.
+    //  - Plain (not ridged) noise: ridged 1-|n| has a one-sample-wide cusp along every crest, which
+    //    produced both knife-edge "wall" ridges and single-vertex needle spikes.
+    //
+    // Octaves approaching `min_wavelength` fade out (rather than hard-cutting) so an outer LOD ring,
+    // sampling at up to ~25 units per texel, doesn't alias noise it can't represent. Amplitudes are
+    // fixed per octave, so dropping fine octaves never rescales the mountain as a whole.
+    f32 ErodedFbm(f32 x, f32 z, f32 min_wavelength, f32 base_wavelength, f32 slope_damping) {
+        constexpr u32 Octaves = 8;
+        constexpr f32 Gain = 0.45f;
+        constexpr f32 Epsilon = 0.01f;       // finite-difference step, in noise-space units
+
+        f32 sum = 0.0f;
+        f32 amplitude = 0.5f;
+        f32 frequency = 1.0f / base_wavelength;
+        f32 slope_x = 0.0f;
+        f32 slope_z = 0.0f;
+
+        for (u32 i = 0; i < Octaves; i++) {
+            f32 lod_fade = SmoothStep(min_wavelength, 2.0f * min_wavelength, 1.0f / frequency);
+            if (lod_fade <= 0.0f) { break; }
+
+            // Per-octave offset decorrelates octaves (otherwise they all share the origin's feature).
+            f32 offset = static_cast<f32>(i) * 31.7f;
+            f32 px = x * frequency + offset;
+            f32 pz = z * frequency - offset;
+
+            f32 n = MountainNoise.GetNoise(px, pz);
+            f32 grad_x = (MountainNoise.GetNoise(px + Epsilon, pz) - n) / Epsilon;
+            f32 grad_z = (MountainNoise.GetNoise(px, pz + Epsilon) - n) / Epsilon;
+
+            f32 slope_weight = amplitude * frequency * base_wavelength;
+            slope_x += grad_x * slope_weight;
+            slope_z += grad_z * slope_weight;
+
+            sum += amplitude * lod_fade * n / (1.0f + slope_damping * (slope_x * slope_x + slope_z * slope_z));
+
+            amplitude *= Gain;
+            frequency *= 2.0f;
+        }
+        // 0.75 (not a larger scale + clamp): clamping here flattened the tallest peaks into discs.
+        return std::clamp(sum * 0.75f + 0.5f, 0.0f, 1.0f);
+    }
+
+    // Normalized [0,1] terrain height at one world position. Layered, largest to smallest:
+    //   continents - warped very-low-frequency noise decides ocean vs land and broad plateau height
+    //   hills      - gentle, low-amplitude rolling relief on land. There is deliberately NO
+    //                high-frequency noise on open ground - that is what made plains look pitted.
+    //   mountains  - ErodedFbm() masked to broad massifs. The mask ramps over thousands of units, so
+    //                mountains rise out of foothills instead of standing up as sheer walls.
+    f32 Elevation(f32 world_x, f32 world_z, f32 min_wavelength, const GeneratorParams& params) {
+        // Seed = a large per-seed offset into the same noise field, rather than reseeding the
+        // FastNoiseLite objects - those are shared with worker threads and stay read-only after
+        // Init(). Offsets stay under ~40000 units so f32 coordinates keep sub-centimetre precision.
+        if (params.Seed != 0) {
+            u32 seed = static_cast<u32>(params.Seed);
+            world_x += static_cast<f32>((seed * 7919u) % 80000u) - 40000.0f;
+            world_z += static_cast<f32>((seed * 104729u) % 80000u) - 40000.0f;
+        }
+
+        f32 wx = world_x;
+        f32 wz = world_z;
+        ContinentWarp.DomainWarp(wx, wz);
+        wx = world_x + (wx - world_x) * params.WarpStrength;
+        wz = world_z + (wz - world_z) * params.WarpStrength;
+
+        // LandBias keeps most of the world above water - ocean only where the noise dips well
+        // below zero.
+        f32 continent = ContinentalNoise.GetNoise(wx, wz) + params.LandBias;
+        f32 inland = SmoothStep(0.02f, 0.45f, continent);
+        f32 base = SeaLevel + continent * 0.13f;
+
+        f32 range = RangeNoise.GetNoise(wx, wz) + params.MountainCoverage;
+        f32 massif = SmoothStep(-0.3f, 0.7f, range) * inland;
+        // Foothills: hills swell as they approach a massif, so mountains rise out of rougher ground
+        // instead of popping straight out of a flat plain.
+        f32 foothill = SmoothStep(-0.35f, 0.1f, range) * inland;
+
+        f32 hills = (HillNoise.GetNoise(world_x, world_z) * 0.5f + 0.5f)
+                  * (0.012f + 0.03f * foothill)
+                  * (0.3f + 0.7f * inland)
+                  * params.HillAmount;
+
+        f32 mountains = 0.0f;
+        if (massif > 0.0f) {
+            f32 peaks = ErodedFbm(world_x, world_z, min_wavelength, params.MountainWavelength, params.ErosionStrength);
+
+            // Peak sharpness, two parts (measured: no needles, >60 deg slopes stay ~1-2%):
+            //  - a steeper power curve on the peak value: shoulders drop relative to the summit,
+            //    normalized at p = 0.8 so a typical summit keeps its height;
+            //  - a soft-crested ridge line added only high up (weighted by peaks^2). Soft crest =
+            //    sqrt(n^2 + c^2) - c instead of |n|: the hard cusp of |n| is exactly what produced
+            //    single-vertex needles before (see notes/terrain_generation.md).
+            f32 sharpen = 2.5f * params.PeakSharpness;
+            f32 shaped = std::pow(peaks, 2.0f + sharpen) / std::pow(0.8f, sharpen);
+            f32 crest = 0.0f;
+            if (params.PeakSharpness > 0.0f) {
+                f32 crest_frequency = 1.0f / (params.MountainWavelength * 0.3f);
+                f32 n = MountainNoise.GetNoise(world_x * crest_frequency + 500.0f, world_z * crest_frequency - 500.0f);
+                constexpr f32 CrestSoftness = 0.1f;
+                f32 soft_abs = std::sqrt(n * n + CrestSoftness * CrestSoftness) - CrestSoftness;
+                crest = (1.0f - soft_abs) * (1.0f - soft_abs);
+            }
+
+            f32 raw = massif * std::sqrt(massif)
+                    * (0.2f + 0.8f * shaped + params.PeakSharpness * 0.3f * crest * peaks * peaks);
+            // Soft ceiling (1 - e^-kx, normalized to reach MountainHeight at raw = 1) instead of a
+            // hard clamp, so the very tallest peaks round off rather than flatten.
+            constexpr f32 Softness = 2.2f;
+            mountains = params.MountainHeight * (1.0f - std::exp(-Softness * raw)) / (1.0f - std::exp(-Softness));
+        }
+
+        return std::clamp(base + hills + mountains, 0.0f, 1.0f);
+    }
+
+    f32 SampleSurfaceHeight(f32 world_x, f32 world_z) {
+        f32 elevation = std::max(Elevation(world_x, world_z, 0.0f, Generator), SeaLevel);
+        return elevation * GTerrainPass.Config.HeightScale;
+    }
+
+    void WriteHeightmap(Heightmap& out, ivec2 position, f64 world_step, const GeneratorParams& params) {
         i32 terrain_res = VerticesPerEdge;
+        // Noise finer than ~2 texels can't be represented at this ring's sample spacing.
+        f32 min_wavelength = static_cast<f32>(world_step * 2.0);
 
         f32 global_x, global_z;
         for (i32 x = 0; x < terrain_res; x++) {
@@ -558,34 +745,8 @@ namespace TerrainManager {
             for (i32 z = 0; z < terrain_res; z++) {
                 global_z = static_cast<f32>(static_cast<f64>(z + ((terrain_res-1) * position.y)) * world_step);
 
-                f32 cont = (ContinentalNoise.GetNoise(global_x, global_z) + 1.0f) * 0.5f;
-                f32 mount = (MountainNoise.GetNoise(global_x, global_z) + 1.0f) * 0.5f;
-                f32 detail = (DetailNoise.GetNoise(global_x, global_z) + 1.0f) * 0.5f;
-
-                cont = std::pow(cont, 1.5f);
-
-                f32 mountain_mask = 0.0f;
-                if (cont > 0.45f) {
-                    mountain_mask = (cont - 0.45f) / 0.55f;
-                    mountain_mask = mountain_mask * mountain_mask * (3.0f - 2.0f * mountain_mask);
-                }
-
-                f32 detail_mask = .05f;
-                if (mountain_mask <= 0.5f) {
-                    detail_mask = 3.0f * ((.05f - mountain_mask)*.05f);
-                }
-
-                f32 elevation = (cont * 0.30f) + (mount * mountain_mask * 0.65f) + (detail * detail_mask);
-
-                if (elevation <= 0.0) {
-                    elevation = 0.0;
-                } else if (elevation >= 1.0) {
-                    elevation = 1.0;
-                }
-
-                f32 remapped = elevation * 65535.0f;
-                u16 end_value = static_cast<u16>(remapped);
-                out[x][z] = end_value;
+                f32 elevation = Elevation(global_x, global_z, min_wavelength, params);
+                out[x][z] = static_cast<u16>(elevation * 65535.0f);
             }
         }
     }
@@ -633,10 +794,14 @@ namespace TerrainManager {
                 f32 h_dx = static_cast<f32>(heightmap[std::min(tx + 1, LastTexel)][tz]) / 65535.0f;
                 f32 h_dz = static_cast<f32>(heightmap[tx][std::min(tz + 1, LastTexel)]) / 65535.0f;
 
-                // Reject steep slopes (cliff faces) - crude finite-difference estimate, cheap and
-                // good enough for v1 (no real physical placement rules yet).
-                f32 slope = std::abs(h_dx - h_center) + std::abs(h_dz - h_center);
-                if (slope > 0.02f) { continue; }
+                // Nothing grows underwater or on the beach right at the waterline.
+                if (h_center < SeaLevel + 0.008f) { continue; }
+
+                // Reject steep slopes (cliff faces) - rise over run in WORLD units, so the threshold
+                // stays meaningful regardless of HeightScale or which ring's texel spacing this is.
+                f32 texel_world_size = static_cast<f32>(chunk_scale) / static_cast<f32>(LastTexel);
+                f32 rise = (std::abs(h_dx - h_center) + std::abs(h_dz - h_center)) * GTerrainPass.Config.HeightScale;
+                if (rise / texel_world_size > 0.55f) { continue; }
 
                 f32 world_x = cell_v * static_cast<f32>(chunk_scale) + static_cast<f32>(position.x) * static_cast<f32>(chunk_scale);
                 f32 world_z = cell_u * static_cast<f32>(chunk_scale) + static_cast<f32>(position.y) * static_cast<f32>(chunk_scale);

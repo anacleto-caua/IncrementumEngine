@@ -155,19 +155,13 @@ IncResult TerrainPass::Init() {
     // Finally creating the terrain VkPipeline itself
     auto dynamic_state_create_info = PipelineDefaults::DefaultPipelineDynamicStateCreateInfo();
 
-    VkPipelineRenderingCreateInfo rendering_create_info {};
-    rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    rendering_create_info.pNext = nullptr;
-    rendering_create_info.colorAttachmentCount = static_cast<u32>(VkVault::ColorAttachmentFormats.size());
-    rendering_create_info.pColorAttachmentFormats = VkVault::ColorAttachmentFormats.data();
-    rendering_create_info.depthAttachmentFormat = Renderer::DepthBufferFormat;
-    rendering_create_info.stencilAttachmentFormat = Renderer::DepthBufferFormat;
+    auto rendering_create_info = PipelineDefaults::SceneRenderingCreateInfo();
 
     auto vertex_input_state = PipelineDefaults::DefaultPipelineVertexInputStateCreateInfo();
     auto input_assembly_state = PipelineDefaults::DefaultPipelineInputAssemblyStateCreateInfo();
     auto viewport_state = PipelineDefaults::DefaultPipelineViewportStateCreateInfo();
     auto rasterization_state = PipelineDefaults::DefaultPipelineRasterizationStateCreateInfo();
-    auto multisample_state = PipelineDefaults::DefaultPipelineMultisampleStateCreateInfo();
+    auto multisample_state = PipelineDefaults::SceneMultisampleStateCreateInfo();
     auto depth_stencil_state = PipelineDefaults::DefaultPipelineDepthStencilStateCreateInfo();
     auto colorblend_state = PipelineDefaults::DefaultPipelineColorBlendStateCreateInfo();
 
@@ -198,7 +192,8 @@ IncResult TerrainPass::Init() {
     // ring, so it moved to a per-instance SSBO field (ChunkInstanceData::Scale) instead.
     vert_shader_spec_builder
         .AddConstant(0, TerrainManager::VerticesPerEdge)
-        .AddConstant(2, Config.HeightScale);
+        .AddConstant(2, Config.HeightScale)
+        .AddConstant(3, TerrainManager::SeaLevel);
 
     INC_CHECK(
         CreateShaderStage(
@@ -215,7 +210,10 @@ IncResult TerrainPass::Init() {
     VkPipelineShaderStageCreateInfo frag_shader;
     SpecializationBuilder frag_shader_spec_builder;
     frag_shader_spec_builder
-        .AddConstant(0, static_cast<f32>(TerrainManager::VerticesPerEdge - 1));
+        .AddConstant(0, static_cast<f32>(TerrainManager::VerticesPerEdge - 1))
+        .AddConstant(2, Config.HeightScale)
+        .AddConstant(3, TerrainManager::SeaLevel)
+        .AddConstant(10, static_cast<f32>(TerrainManager::TotalCoverageRadius));
 
     INC_CHECK(
         CreateShaderStage(
@@ -370,6 +368,60 @@ void TerrainPass::OutTerrainData() {
     ImGui::Checkbox("Frustum Culling", &CullingEnabled);
     ImGui::Checkbox("Show Chunk Debug Colors", &ShowChunkDebugColors);
     ImGui::Text("Total Drawn: %u / %u", CurrentlyActiveChunks, TotalMaxDrawnChunks);
+
+    // Live generator tuning. Edits only take effect through Regenerate() - automatically when a
+    // slider is released (not every drag tick, which would restart the whole world's regeneration
+    // continuously), or on demand with the button. Already-streamed terrain keeps drawing until
+    // its replacement lands, nearest/visible first.
+    if (ImGui::CollapsingHeader("Terrain Generator", ImGuiTreeNodeFlags_DefaultOpen)) {
+        static bool auto_regenerate = true;
+        bool changed = false;
+        auto track = [&changed]() { changed |= ImGui::IsItemDeactivatedAfterEdit(); };
+
+        ImGui::SliderFloat("Peak Sharpness", &Generator.PeakSharpness, 0.0f, 2.5f, "%.2f"); track();
+        ImGui::SliderFloat("Mountain Height", &Generator.MountainHeight, 0.1f, 0.85f, "%.2f"); track();
+        ImGui::SliderFloat("Mountain Coverage", &Generator.MountainCoverage, -0.5f, 0.5f, "%.2f"); track();
+        ImGui::SliderFloat("Mountain Size", &Generator.MountainWavelength, 800.0f, 6000.0f, "%.0f units"); track();
+        ImGui::SliderFloat("Erosion", &Generator.ErosionStrength, 0.0f, 10.0f, "%.1f"); track();
+        ImGui::SliderFloat("Hills", &Generator.HillAmount, 0.0f, 4.0f, "%.2f"); track();
+        ImGui::SliderFloat("Land vs Ocean", &Generator.LandBias, -0.3f, 0.6f, "%.2f"); track();
+        ImGui::SliderFloat("Coastline Warp", &Generator.WarpStrength, 0.0f, 2000.0f, "%.0f units"); track();
+        ImGui::InputInt("Seed", &Generator.Seed); track();
+
+        ImGui::Checkbox("Regenerate on release", &auto_regenerate);
+        ImGui::SameLine();
+        bool regenerate = ImGui::Button("Regenerate");
+        ImGui::SameLine();
+        if (ImGui::Button("Defaults")) {
+            Generator = GeneratorParams{};
+            regenerate = true;
+        }
+
+        if (regenerate || (changed && auto_regenerate)) {
+            Regenerate();
+        }
+
+        // Stale = still drawing terrain from an older GeneratorEpoch. Only slots PositionToSlot
+        // still maps count - an orphaned, already-replaced slot keeps its old Epoch but is never
+        // drawn again (see TerrainManager.cpp's finalize step).
+        u32 stale = 0;
+        auto count_stale = [&stale](const auto& ring) {
+            for (u32 i = 0; i < ring.Cache.size(); i++) {
+                const CacheSlot& slot = ring.Cache[i];
+                if (!slot.Valid || slot.Epoch == GeneratorEpoch) { continue; }
+                auto mapped = ring.PositionToSlot.find(PackPosition(slot.Position));
+                if (mapped != ring.PositionToSlot.end() && mapped->second == i) { stale++; }
+            }
+        };
+        count_stale(Ring0);
+        for (const auto& ring : OuterRings) { count_stale(ring); }
+
+        if (stale > 0) {
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "Regenerating: %u chunks left", stale);
+        } else {
+            ImGui::TextDisabled("Up to date");
+        }
+    }
 
     // Collapsed by default even with the Terrain section open - this ring/chunk breakdown is the
     // single most space-consuming panel of all of them.

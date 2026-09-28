@@ -3,8 +3,57 @@
 #include <array>
 
 #include "Renderer/VkVault.hpp"
+#include "Renderer/RendererConstants.hpp"
 
 namespace PipelineDefaults {
+    // --- Render-target shape. Every pipeline is drawn into exactly one of two rendering scopes
+    // per frame (see Renderer::Frame()), and its rendering-create-info + multisample state must
+    // match that scope's attachments exactly. ---
+
+    // Scene scope: HDR, multisampled color + multisampled depth (TerrainPass/PropPass/SkyPass).
+    inline VkPipelineRenderingCreateInfo SceneRenderingCreateInfo() {
+        static constexpr VkFormat ColorFormat = RendererConstants::SceneColorFormat;
+        return {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            .pNext = nullptr,
+            .viewMask = 0,
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = &ColorFormat,
+            .depthAttachmentFormat = RendererConstants::DepthBufferFormat,
+            .stencilAttachmentFormat = RendererConstants::DepthBufferFormat
+        };
+    }
+
+    // Overlay scope: the swapchain image itself, single-sampled, no depth attachment at all
+    // (PostPass/TextPass/ImGuiPass - all screen-space).
+    inline VkPipelineRenderingCreateInfo OverlayRenderingCreateInfo() {
+        return {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+            .pNext = nullptr,
+            .viewMask = 0,
+            .colorAttachmentCount = static_cast<u32>(VkVault::ColorAttachmentFormats.size()),
+            .pColorAttachmentFormats = VkVault::ColorAttachmentFormats.data(),
+            .depthAttachmentFormat = VK_FORMAT_UNDEFINED,
+            .stencilAttachmentFormat = VK_FORMAT_UNDEFINED
+        };
+    }
+
+    // No per-sample shading: MSAA's job here is geometric edges; running every fragment shader
+    // (the sky's raymarch included) 4x per pixel would cost far more than it buys.
+    inline const VkPipelineMultisampleStateCreateInfo SceneMultisampleStateCreateInfo() {
+        return {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .rasterizationSamples = RendererConstants::SceneSampleCount,
+            .sampleShadingEnable = VK_FALSE,
+            .minSampleShading = 1.0f,
+            .pSampleMask = nullptr,
+            .alphaToCoverageEnable = VK_FALSE,
+            .alphaToOneEnable = VK_FALSE
+        };
+    }
+
     inline const VkPipelineVertexInputStateCreateInfo DefaultPipelineVertexInputStateCreateInfo() {
         return {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,

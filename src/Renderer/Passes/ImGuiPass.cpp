@@ -7,6 +7,7 @@
 
 #include "Game/Game.hpp"
 #include "Renderer/VkVault.hpp"
+#include "Renderer/Vk/PipelineDefaults.hpp"
 #include "Engine/Core/WindowSDL.hpp"
 #include "Renderer/Tools/DebugPanel.hpp"
 
@@ -26,15 +27,8 @@ IncResult ImGuiPass::Init() {
 
     ImGui_ImplSDL3_InitForVulkan(Window::SdlWindow);
 
-    VkPipelineRenderingCreateInfoKHR pipeline_rendering_create_info = {
-        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
-        .pNext = nullptr,
-        .viewMask = {},
-        .colorAttachmentCount = VkVault::ColorAttachmentFormats.size(),
-        .pColorAttachmentFormats = VkVault::ColorAttachmentFormats.data(),
-        .depthAttachmentFormat = Renderer::DepthBufferFormat,
-        .stencilAttachmentFormat = Renderer::DepthBufferFormat
-    };
+    // Overlay scope: drawn straight onto the swapchain after PostPass, no depth attachment.
+    VkPipelineRenderingCreateInfoKHR pipeline_rendering_create_info = PipelineDefaults::OverlayRenderingCreateInfo();
 
     ImGui_ImplVulkan_PipelineInfo pipeline_info {};
     pipeline_info.PipelineRenderingCreateInfo = pipeline_rendering_create_info;
@@ -75,6 +69,8 @@ void ImGuiPass::Render() {
         ImGui::Text("Swapchain: %u x %u (%u images)", GRenderer.Swapchain.Width, GRenderer.Swapchain.Height, GRenderer.Swapchain.ImageCount);
         ImGui::Text("Frame in flight: %u / %u", GRenderer.FrameContext.FrameInFlightIndex, Renderer::MAX_FRAMES_IN_FLIGHT);
         ImGui::Text("Sun Direction: (%.2f, %.2f, %.2f)", static_cast<f64>(GRenderer.SunDirection.x), static_cast<f64>(GRenderer.SunDirection.y), static_cast<f64>(GRenderer.SunDirection.z));
+        ImGui::Text("Scene target: RGBA16F HDR, %ux MSAA", static_cast<u32>(RendererConstants::SceneSampleCount));
+        ImGui::SliderFloat("Exposure", &GPostPass.Exposure, 0.1f, 4.0f, "%.2f");
 
         // Was console-log-only until now (VkVault.cpp's own TODO asked for this) - which queue
         // roles happen to share a physical queue family is GPU/driver-dependent, so seeing it live

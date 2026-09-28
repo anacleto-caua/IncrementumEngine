@@ -12,6 +12,7 @@ struct Image {
         u32 ArrayLayers = 1;
         VkFormat Format = VK_FORMAT_R8G8B8A8_SRGB;
         VkImageUsageFlags Usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        VkSampleCountFlagBits Samples = VK_SAMPLE_COUNT_1_BIT;  // > 1 only for MSAA render targets
         QueueRole OwnerQueue = QueueRole::Transfer;
         VkImageLayout UsageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     };
@@ -40,7 +41,7 @@ struct ImagePool {
         image_create_info.extent.depth = 1;
         image_create_info.format = create_info.Format;
         image_create_info.imageType = VK_IMAGE_TYPE_2D;
-        image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
+        image_create_info.samples = create_info.Samples;
         image_create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
         image_create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         image_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;

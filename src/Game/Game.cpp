@@ -53,6 +53,11 @@ namespace Game {
 
         TerrainManager::Init();
 
+        // Spawn a fixed distance above whatever the generator put at the origin, rather than at a
+        // hardcoded height that could land underwater or inside a mountain.
+        MainCamera.Position.y = TerrainManager::SampleSurfaceHeight(MainCamera.Position.x, MainCamera.Position.z) + 60.0f;
+        UpdateMatrices(MainCamera);
+
         FlyByCamera::Bind(MainCamera);
         TerrainDebugTools::Init(MainCamera);
 

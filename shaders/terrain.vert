@@ -25,14 +25,18 @@ layout(std430, set = 1, binding = 0) readonly buffer ChunkBuffer {
 
 layout(location = 0) out vec2 texCoord;
 layout(location = 1) out vec3 debugColor;
-layout(location = 2) out vec3 outNormal;
+layout(location = 2) flat out uint outTextureLayer;
 layout(location = 3) out vec3 outWorldPos;
+layout(location = 4) flat out float outChunkScale;
+layout(location = 5) out float outWaterDepth;
 
 // Mock data, should be filled by using specialization
 layout(constant_id = 0) const int RESOLUTION = 64;
 // constant_id 1 deliberately unused - GRID_SCALE moved to a per-instance field (currentChunk.scale)
 // since chunk world-size now varies per LOD ring.
 layout(constant_id = 2) const float HEIGHT_SCALE = 210;
+// TerrainManager::SeaLevel (normalized) - the water surface.
+layout(constant_id = 3) const float SEA_LEVEL = 0.12;
 
 void main() {
     ChunkDrawData currentChunk = chunkLinkDataBuffer.chunks[gl_InstanceIndex];
@@ -50,25 +54,25 @@ void main() {
     float localX = u * currentChunk.scale;
     float localZ = v * currentChunk.scale;
 
-    float height = texture(heightmapSampler, vec3(u, v, float(currentChunk.TextureLayer))).r;
-    vec3 finalWorldPos = vec3(localZ + chunkOffsetX, height * HEIGHT_SCALE, localX + chunkOffsetZ);
+    // texelFetch, not texture(): each vertex maps 1:1 onto one heightmap texel, and a LINEAR
+    // sample at u = x/(RES-1) lands off the texel centers ((x+0.5)/RES), blending neighbor heights
+    // into every vertex.
+    float height = texelFetch(heightmapSampler, ivec3(xIndex, zIndex, int(currentChunk.TextureLayer)), 0).r;
+    // Terrain below sea level renders as a flat water surface at SEA_LEVEL; the true seafloor depth
+    // below it is passed on so terrain.frag can tint deep water darker than shallows.
+    float seaLevelY = SEA_LEVEL * HEIGHT_SCALE;
+    float terrainY = height * HEIGHT_SCALE;
+    outWaterDepth = seaLevelY - terrainY;
+    vec3 finalWorldPos = vec3(localZ + chunkOffsetX, max(terrainY, seaLevelY), localX + chunkOffsetZ);
 
     gl_Position = sceneGlobalsData.data.ViewProjection * vec4(finalWorldPos, 1.0);
     outWorldPos = finalWorldPos;
 
-    // Surface normal via finite difference against neighboring heightmap texels - one texel step
-    // in each grid direction, the same grid the mesh itself is built from. Tangent directions
-    // mirror finalWorldPos's own u/v -> world.x/world.z mapping exactly (not re-derived
-    // independently), so the normal stays consistent with the actual rendered surface regardless
-    // of which axis u/v happen to be named after.
-    float texelStep = 1.0 / float(RESOLUTION - 1);
-    float heightU = texture(heightmapSampler, vec3(min(u + texelStep, 1.0), v, float(currentChunk.TextureLayer))).r;
-    float heightV = texture(heightmapSampler, vec3(u, min(v + texelStep, 1.0), float(currentChunk.TextureLayer))).r;
-
-    float worldStep = currentChunk.scale * texelStep;
-    vec3 tangentU = vec3(0.0, (heightU - height) * HEIGHT_SCALE, worldStep);
-    vec3 tangentV = vec3(worldStep, (heightV - height) * HEIGHT_SCALE, 0.0);
-    outNormal = normalize(cross(tangentU, tangentV));
+    // Normals are computed per pixel in terrain.frag (from the same heightmap), not here - a
+    // per-vertex normal interpolated across a whole triangle loses all shading detail below
+    // triangle size.
+    outTextureLayer = currentChunk.TextureLayer;
+    outChunkScale = currentChunk.scale;
 
     bool checker = ((currentChunk.WorldPos.x + currentChunk.WorldPos.y) % 2) == 0;
     debugColor = checker ? vec3(0.8, 0.2, 0.2) : vec3(0.2, 0.2, 0.8);

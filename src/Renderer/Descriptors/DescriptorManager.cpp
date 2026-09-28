@@ -138,6 +138,30 @@ namespace DescriptorManager {
             "failed to create descriptor set layout"
         );
 
+        // =========================================================
+        // 5. Create the Post Layout (PostPass's own standalone Set 0)
+        // =========================================================
+        VkDescriptorSetLayoutBinding post_scene_color_binding = {
+            .binding = DescriptorMap::Post::Binding_SceneColor,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT, // only post.frag reads it
+            .pImmutableSamplers = nullptr
+        };
+
+        VkDescriptorSetLayoutCreateInfo post_layout_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .bindingCount = 1,
+            .pBindings = &post_scene_color_binding
+        };
+
+        VK_CHECK(
+            vkCreateDescriptorSetLayout(VkVault::Device, &post_layout_info, nullptr, &PostLayout),
+            "failed to create descriptor set layout"
+        );
+
         // Create the whole engine descriptor pool
         std::array<VkDescriptorPoolSize, 4> pool_sizes = {{
             { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,            MAX_UBOS},
@@ -170,6 +194,7 @@ namespace DescriptorManager {
         if (PerFrameLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, PerFrameLayout, nullptr); }
         if (PropPerFrameLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, PropPerFrameLayout, nullptr); }
         if (ComputeTestLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, ComputeTestLayout, nullptr); }
+        if (PostLayout) { vkDestroyDescriptorSetLayout(VkVault::Device, PostLayout, nullptr); }
     }
 
     VkDescriptorSet AllocateSet(VkDescriptorSetLayout layout) {

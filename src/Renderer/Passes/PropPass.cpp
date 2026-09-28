@@ -10,6 +10,7 @@
 #include "Renderer/VkVault.hpp"
 #include "Renderer/Vk/ShaderBuilder.hpp"
 #include "Renderer/Vk/PipelineDefaults.hpp"
+#include "Renderer/Vk/ShaderSpecializationBuilder.hpp"
 #include "Renderer/Tools/DebugPanel.hpp"
 #include "Renderer/Resources/ImageView.hpp"
 #include "Renderer/Tools/ModelLoader.hpp"
@@ -206,17 +207,12 @@ IncResult PropPass::Init() {
 
     auto dynamic_state_create_info = PipelineDefaults::DefaultPipelineDynamicStateCreateInfo();
 
-    VkPipelineRenderingCreateInfo rendering_create_info {};
-    rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    rendering_create_info.colorAttachmentCount = static_cast<u32>(VkVault::ColorAttachmentFormats.size());
-    rendering_create_info.pColorAttachmentFormats = VkVault::ColorAttachmentFormats.data();
-    rendering_create_info.depthAttachmentFormat = Renderer::DepthBufferFormat;
-    rendering_create_info.stencilAttachmentFormat = Renderer::DepthBufferFormat;
+    auto rendering_create_info = PipelineDefaults::SceneRenderingCreateInfo();
 
     auto input_assembly_state = PipelineDefaults::DefaultPipelineInputAssemblyStateCreateInfo();
     auto viewport_state = PipelineDefaults::DefaultPipelineViewportStateCreateInfo();
     auto rasterization_state = PipelineDefaults::DefaultPipelineRasterizationStateCreateInfo();
-    auto multisample_state = PipelineDefaults::DefaultPipelineMultisampleStateCreateInfo();
+    auto multisample_state = PipelineDefaults::SceneMultisampleStateCreateInfo();
     auto depth_stencil_state = PipelineDefaults::DefaultPipelineDepthStencilStateCreateInfo();
     auto colorblend_state = PipelineDefaults::DefaultPipelineColorBlendStateCreateInfo();
 
@@ -243,6 +239,10 @@ IncResult PropPass::Init() {
 
     VkPipelineShaderStageCreateInfo frag_shader;
     INC_CHECK(CreateShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, "shaders/prop.frag.spv", shader_buffer, frag_shader), "prop fragment shader creation failed");
+    // FOG_END - same value TerrainPass feeds terrain.frag, so props fog at the ground's own rate.
+    SpecializationBuilder frag_shader_spec_builder;
+    frag_shader_spec_builder.AddConstant(10, static_cast<f32>(TerrainManager::TotalCoverageRadius));
+    frag_shader.pSpecializationInfo = frag_shader_spec_builder.Build();
 
     shader_stages.push_back(vert_shader);
     shader_stages.push_back(frag_shader);

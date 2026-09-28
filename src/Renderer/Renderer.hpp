@@ -19,6 +19,7 @@
 #include "Renderer/Passes/PropPass.hpp"
 #include "Renderer/Passes/SkyPass.hpp"
 #include "Renderer/Passes/TextPass.hpp"
+#include "Renderer/Passes/PostPass.hpp"
 #include "Renderer/Passes/ImGuiPass.hpp"
 
 struct Camera;
@@ -65,19 +66,30 @@ public:
     void Resize(i32 width, i32 height);
     void BindCamera(Camera* camera);
 
+    // The single-sample resolve target PostPass reads - recreated on resize (PostPass is told via
+    // RebindSceneColor(), so never cache this handle across frames).
+    VkImageView GetResolvedSceneColorView();
+
     // Owned, not independent globals - completes the same ownership shape as TransferPipe below:
     // real members instead of raw pointers into globals declared elsewhere. Reached ambiently
     // via the GTerrainPass/GImGuiPass aliases in Game/Game.hpp.
     TerrainPass TerrainPass;
     PropPass PropPass;
     SkyPass SkyPass;
+    PostPass PostPass;
     TextPass TextPass;
     ImGuiPass ImGuiPass;
 
 private:
-    // Ordered list - this order IS the render order. Adding a pass is one line here, not
-    // three edits across Init()/Destroy()/Frame(). Populated in Init() with addresses of the
-    // two owned members above.
+    // Ordered lists - this order IS the render order. Adding a pass is one line in Init(), not
+    // three edits across Init()/Destroy()/Frame(). Each frame has two rendering scopes:
+    //  - ScenePasses draw into the HDR, multisampled scene targets (their pipelines use
+    //    PipelineDefaults::Scene* state);
+    //  - OverlayPasses draw onto the swapchain after the scene is resolved (Overlay* state),
+    //    starting with PostPass's tonemap.
+    // Passes = both, concatenated in that order - what Init()/Destroy()/transfers loop over.
+    std::vector<Pass*> ScenePasses;
+    std::vector<Pass*> OverlayPasses;
     std::vector<Pass*> Passes;
 
     // MAX_SUBMITS raised from the class template's default (32) to 64: this pile absorbs
@@ -109,12 +121,14 @@ private:
     IncResult InitGlobalDescriptors();
     void DestroyGlobalDescriptors();
 
-    // Rendering info recomputed on init/resize, bound every frame.
+    // Rendering info recomputed on init/resize, bound every frame - one set per scope.
     VkRect2D Scissor {};
     VkViewport Viewport {};
-    VkRenderingAttachmentInfo ColorAttachment {};
-    VkRenderingAttachmentInfo DepthAttachment {};
-    VkRenderingInfo RenderingInfo {};
+    VkRenderingAttachmentInfo SceneColorAttachment {};  // MSAA HDR color, resolved on end
+    VkRenderingAttachmentInfo SceneDepthAttachment {};
+    VkRenderingInfo SceneRenderingInfo {};
+    VkRenderingAttachmentInfo OverlayColorAttachment {};  // the swapchain image, no depth
+    VkRenderingInfo OverlayRenderingInfo {};
 
     // Swapchain - the internal half of SwapchainState above.
     struct SwapchainImage {
@@ -135,8 +149,15 @@ private:
     void DestroySwapchainKHR(VkSwapchainKHR swapchain);
     void CleanupSwapchainImages();
 
-    // Depth buffer.
-    ImageId DepthBufferImage;
+    // Scene targets - swapchain-sized, single instances shared by every frame in flight (each
+    // frame's barriers order its use after the previous frame's on the same queue). All three
+    // are fully cleared/overwritten every frame, so they're transitioned from UNDEFINED each
+    // time and never need an initial layout setup of their own.
+    ImageId SceneColorMsaaImage;        // SceneSampleCount samples, rendered into, never read
+    ImageViewId SceneColorMsaaView;
+    ImageId SceneColorResolvedImage;    // 1 sample - MSAA resolve destination, read by PostPass
+    ImageViewId SceneColorResolvedView;
+    ImageId DepthBufferImage;           // SceneSampleCount samples, scene scope only
     ImageViewId DepthBufferImageView;
     VkImageSubresourceRange DepthBufferRange = {
         .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT,
@@ -146,9 +167,8 @@ private:
         .layerCount = 1
     };
 
-    IncResult InitDepthBuffer(u32 width, u32 height);
-    void DestroyDepthBuffer();
-    void ResizeDepthBuffer(u32 width, u32 height);
+    IncResult InitSceneTargets(u32 width, u32 height);
+    void DestroySceneTargets();
 
 public:
     TransferPipe TransferPipe;

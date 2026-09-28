@@ -117,6 +117,36 @@ namespace TerrainManager {
 
     using Heightmap = u16[VerticesPerEdge][VerticesPerEdge];
 
+    // Normalized [0,1] heightmap value of the water surface. Terrain below it is still stored at its
+    // true (seafloor) height - terrain.vert clamps the rendered surface up to this level and
+    // terrain.frag shades it as water, using the depth below it for the water tint. Fed to both
+    // shaders as a specialization constant, so this is the one source of truth.
+    constexpr f32 SeaLevel = 0.12f;
+
+    // Live-tunable terrain generator parameters (TerrainPass's debug panel edits `Generator`).
+    // Every generation job copies the struct when it's kicked off (PendingGeneration::Params), so
+    // worker threads never read a value the UI is concurrently changing - no locks, no waiting.
+    // SeaLevel deliberately isn't here: it's baked into the terrain shaders as a spec constant.
+    // Defaults reproduce the measured/tuned terrain described in notes/terrain_generation.md.
+    struct GeneratorParams {
+        i32 Seed = 0;                      // 0 = the original world; others shift every noise layer
+        f32 LandBias = 0.2f;               // higher = more land, less ocean
+        f32 WarpStrength = 600.0f;         // world units of coastline/range bending
+        f32 MountainCoverage = 0.0f;       // shifts the massif mask: higher = more of the land is mountains
+        f32 MountainHeight = 0.6f;         // normalized height the tallest peaks approach
+        f32 MountainWavelength = 2500.0f;  // world size of the largest mountain features
+        f32 ErosionStrength = 3.0f;        // slope damping: higher = smoother flanks, sharper crests
+        f32 PeakSharpness = 1.0f;          // 0 = rounded summits, higher = pointier peaks
+        f32 HillAmount = 1.0f;             // scales rolling hills on open land
+    };
+    inline GeneratorParams Generator;
+
+    // Bumped by Regenerate(). Chunks generated under an older epoch keep drawing and get regenerated
+    // in the background (nearest/visible first, after any truly missing chunks), so changing
+    // parameters never blanks the world.
+    inline u32 GeneratorEpoch = 0;
+    void Regenerate();
+
     // --- Props ---
     // Which mesh a PropInstance uses - lives here (Game layer) rather than under Renderer/ since
     // TerrainManager is what produces placement data and stamps this index into it; PropPass
@@ -154,6 +184,7 @@ namespace TerrainManager {
         ivec2 Position = { 0, 0 };
         bool Valid = false;       // has this slot ever actually been generated into
         u64 LastUsedTick = 0;     // last RefreshChunks() call this slot was part of the drawn set
+        u32 Epoch = 0;            // GeneratorEpoch this slot's data was generated under
     };
 
     // Rolling log of the most recent cache evictions, so thrashing (the same positions being
@@ -188,6 +219,8 @@ namespace TerrainManager {
         ivec2 Position = { 0, 0 };
         u32 TargetLayer = 0;
         f64 WorldStep = 1.0;               // this ring's world-space-per-texel step
+        GeneratorParams Params;            // snapshot of Generator at kick-off - what the worker reads
+        u32 Epoch = 0;                     // GeneratorEpoch at kick-off, stamped onto the cache slot
         std::chrono::steady_clock::time_point StartTime;
         std::atomic<bool> Done{false};     // release by worker, acquire by main thread
         bool InFlight = false;             // main-thread-only, no atomics needed
@@ -246,6 +279,16 @@ namespace TerrainManager {
         Stats DebugStats;
     };
 
+    // Cache position lookup: Phase 1 of RefreshRing() needs "is this grid position resident, and
+    // if so in which slot" for every candidate in a ring's exploration circle, every frame - a
+    // linear scan of a ring's Cache for each candidate would be O(drawn * cached) per ring per
+    // frame. Keeping each ring's own map in lockstep with its Cache (updated at the same two
+    // points Cache's Position/Valid change: finalize and eviction-kickoff) makes each lookup O(1)
+    // instead.
+    inline u64 PackPosition(ivec2 position) {
+        return (static_cast<u64>(static_cast<u32>(position.x)) << 32) | static_cast<u32>(position.y);
+    }
+
     using Ring0State = RingState<MaxDrawnChunks, MaxCachedChunks, Ring0GenerationPoolSize>;
     using OuterRingState = RingState<OuterRingMaxDrawnChunks, OuterRingMaxCachedChunks>;
 
@@ -283,6 +326,11 @@ namespace TerrainManager {
 
     // Called every time the current_player_chunk changes
     void RefreshChunks(vec3 player_position, const Frustum& camera_frustum);
+
+    // World-space height of the visible surface (terrain, or the water plane where terrain is
+    // below SeaLevel) at one XZ point, evaluated straight from the same generator the heightmaps
+    // use - no streamed data needed. Only valid after Init() (the noise is configured there).
+    f32 SampleSurfaceHeight(f32 world_x, f32 world_z);
 
     // --- Diagnostic-only API for TerrainDebugTools - not used by the core streaming loop itself,
     // deliberately narrow and read-only. ---

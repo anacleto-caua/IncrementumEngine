@@ -149,12 +149,7 @@ IncResult TextPass::Init() {
 
     auto dynamic_state_create_info = PipelineDefaults::DefaultPipelineDynamicStateCreateInfo();
 
-    VkPipelineRenderingCreateInfo rendering_create_info {};
-    rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    rendering_create_info.colorAttachmentCount = static_cast<u32>(VkVault::ColorAttachmentFormats.size());
-    rendering_create_info.pColorAttachmentFormats = VkVault::ColorAttachmentFormats.data();
-    rendering_create_info.depthAttachmentFormat = Renderer::DepthBufferFormat;
-    rendering_create_info.stencilAttachmentFormat = Renderer::DepthBufferFormat;
+    auto rendering_create_info = PipelineDefaults::OverlayRenderingCreateInfo();
 
     auto input_assembly_state = PipelineDefaults::DefaultPipelineInputAssemblyStateCreateInfo();
     auto viewport_state = PipelineDefaults::DefaultPipelineViewportStateCreateInfo();
