@@ -41,6 +41,49 @@ namespace TerrainManager {
         };
     }
 
+    // --- Ring ownership ---
+    //
+    // Every ring scans a lattice disc of RingScanRadius() chunks around the player's chunk at its
+    // own scale, and the rings tile the ground as a quadtree: a ring i + 1 chunk is exactly a 2x2
+    // block of ring i chunks (RingScalesDouble()). A block is drawn by ring i when all four of its
+    // chunks are inside ring i's disc, and as the single ring i + 1 chunk otherwise. Every point is
+    // drawn by exactly one ring - no gaps, and no double coverage z-fighting along the seams.
+    //
+    // This replaced a smooth-circle exclusion (skip outer chunks whose min corner was inside the
+    // inner ring's radius minus one chunk). Measuring from the min corner made it lopsided - one
+    // side's overlap band was ~3 chunks wide - and ~17% of the area within 13.5 km ended up drawn
+    // by two rings at once, which z-fought and pushed outer rings past their draw budget whenever
+    // nothing was culled.
+
+    bool InScanDisc(u32 ring_index, ivec2 chunk, vec3 player_position) {
+        f64 scale = RingChunkScale(ring_index);
+        i64 dx = static_cast<i64>(chunk.x) - static_cast<i64>(std::floor(static_cast<f64>(player_position.x) / scale));
+        i64 dz = static_cast<i64>(chunk.y) - static_cast<i64>(std::floor(static_cast<f64>(player_position.z) / scale));
+        i64 radius = RingScanRadius(ring_index);
+        return dx * dx + dz * dz <= radius * radius;
+    }
+
+    // Whether all four ring `ring_index` chunks making up ring ring_index + 1's chunk `block` are
+    // inside ring_index's disc.
+    bool BlockInScanDisc(u32 ring_index, ivec2 block, vec3 player_position) {
+        for (i32 i = 0; i < 2; i++) {
+            for (i32 j = 0; j < 2; j++) {
+                if (!InScanDisc(ring_index, { block.x * 2 + i, block.y * 2 + j }, player_position)) { return false; }
+            }
+        }
+        return true;
+    }
+
+    // `chunk` must already be inside ring_index's own scan disc.
+    bool OwnsChunk(u32 ring_index, ivec2 chunk, vec3 player_position) {
+        // Whole block inside the next ring in - drawn there (or further in) instead.
+        if (ring_index > 0 && BlockInScanDisc(ring_index - 1, chunk, player_position)) { return false; }
+        // Part of a block the next ring out draws as one chunk. >> 1 floors negatives too
+        // (arithmetic shift, guaranteed since C++20).
+        if (ring_index < OuterRingCount && !BlockInScanDisc(ring_index, { chunk.x >> 1, chunk.y >> 1 }, player_position)) { return false; }
+        return true;
+    }
+
     // --- Init(): ring 0's initial batch is parallel and blocking; outer rings start empty and
     // stream in through RefreshChunks() like anything else ---
 
@@ -109,7 +152,6 @@ namespace TerrainManager {
         // --- Ring geometry: fixed for the whole run, computed once here ---
         Ring0.ChunkScale = ChunkScale;
         Ring0.ScanRadius = ExplorationRadius;
-        Ring0.InnerRadius = 0.0;
         Ring0.OuterRadius = ChunkScale * static_cast<f64>(ExplorationRadius);
         Ring0.LayerOffset = 0;
 
@@ -120,7 +162,6 @@ namespace TerrainManager {
             // Reaches all the way to this ring's own OuterRadius, not just the annulus width -
             // see the comment on RingState::ScanRadius and on OuterRingScanRadius in the header.
             OuterRings[i].ScanRadius = OuterRingScanRadius;
-            OuterRings[i].InnerRadius = previous_outer_radius;
             OuterRings[i].OuterRadius = previous_outer_radius + OuterRings[i].ChunkScale * static_cast<f64>(OuterRingExplorationRadius);
             OuterRings[i].LayerOffset = layer_cursor;
 
@@ -154,7 +195,7 @@ namespace TerrainManager {
                 i32 dy = y - player_coord.y;
 
                 // Valid point
-                if ((dx * dx) + (dy * dy) <= r_squared) {
+                if ((dx * dx) + (dy * dy) <= r_squared && OwnsChunk(0, { x, y }, player_pos)) {
                     ChunkDrawList[coords_counter] = {
                         .WorldPos = { x, y },
                         .TextureLayer = coords_counter,   // Ring0.LayerOffset == 0
@@ -338,34 +379,11 @@ namespace TerrainManager {
                 i32 dy = y - player_coord.y;
                 if ((dx * dx) + (dy * dy) > r_squared) { continue; }
 
-                // Ring ownership is exclusive, not overlapping: skip anything already owned by a
-                // strictly-inner ring. Ring 0 has InnerRadius == 0, so this never skips anything
-                // for it. `world_x`/`world_z` are this candidate's true, absolute near-corner world
-                // position, compared against a smooth InnerRadius circle centered on the player's
-                // actual continuous position - NOT `dx`/`dy * ring.ChunkScale`, which would measure
-                // distance from the CORNER of this ring's own floor()'d player_coord chunk instead
-                // of from the player itself, silently adding up to one full ring.ChunkScale of
-                // error per axis depending on where the player sits within that chunk (a real,
-                // previously-unaccounted error source on top of the one below). The inner ring's
-                // actual coverage is also a lattice disc at its own (finer) scale and its own
-                // player_coord, which disagrees with a smooth circle worst along the diagonals -
-                // a candidate both rings believe the other owns ends up drawn by neither. Shrinking
-                // the exclusion radius by one chunk of this ring's own scale trades that gap for a
-                // thin band of double coverage near the seam instead.
-                if (ring.InnerRadius > 0.0) {
-                    f64 safe_inner_radius = ring.InnerRadius - ring.ChunkScale;
-                    if (safe_inner_radius > 0.0) {
-                        f64 world_x = static_cast<f64>(x) * ring.ChunkScale;
-                        f64 world_z = static_cast<f64>(y) * ring.ChunkScale;
-                        f64 true_dx = world_x - static_cast<f64>(player_position.x);
-                        f64 true_dz = world_z - static_cast<f64>(player_position.z);
-                        if ((true_dx * true_dx + true_dz * true_dz) < safe_inner_radius * safe_inner_radius) {
-                            continue;
-                        }
-                    }
-                }
-
                 ivec2 candidate = { x, y };
+
+                // Ring ownership is exclusive: a block drawn by another ring is skipped outright -
+                // never generated, cached or counted as missing here.
+                if (!OwnsChunk(ring_index, candidate, player_position)) { continue; }
 
                 u32 cache_index = UINT32_MAX;
                 auto slot_it = ring.PositionToSlot.find(PackPosition(candidate));

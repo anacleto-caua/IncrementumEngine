@@ -35,6 +35,25 @@ namespace TerrainManager {
     // ratio stays identical at every ring's outer edge.
     constexpr std::array<f64, OuterRingCount> OuterRingChunkScales = { 200.0, 400.0, 800.0, 1600.0 };
 
+    // Ring ownership is a quadtree tiling (see OwnsChunk() in TerrainManager.cpp): every chunk of
+    // ring i + 1 is exactly the 2x2 block of ring i chunks at grid positions 2c..2c+1. That only
+    // holds while each ring's ChunkScale is exactly double the previous one's.
+    constexpr bool RingScalesDouble() {
+        f64 previous = ChunkScale;
+        for (f64 scale : OuterRingChunkScales) {
+            if (scale != previous * 2.0) { return false; }
+            previous = scale;
+        }
+        return true;
+    }
+    static_assert(RingScalesDouble(), "every LOD ring's ChunkScale must be exactly double the previous ring's");
+
+    // Ring i's ChunkScale / candidate scan radius (chunk-grid units, its own scale), ring 0 = Ring0,
+    // ring i > 0 = OuterRings[i - 1].
+    constexpr f64 RingChunkScale(u32 ring_index) {
+        return ring_index == 0 ? ChunkScale : OuterRingChunkScales[ring_index - 1];
+    }
+
     // Quadrant-symmetric lattice-point count within a chunk-count radius - shared by ring 0
     // (radius = ExplorationRadius) and every outer ring (radius = OuterRingExplorationRadius).
     constexpr u32 ComputeMaxDrawnChunks(u32 radius) {
@@ -64,9 +83,17 @@ namespace TerrainManager {
     // its own chunk-grid units is always exactly double its inner radius there.
     constexpr u32 OuterRingScanRadius = OuterRingExplorationRadius * 2;
 
+    constexpr u32 RingScanRadius(u32 ring_index) {
+        return ring_index == 0 ? ExplorationRadius : OuterRingScanRadius;
+    }
+
     // Sized for the actual annulus (candidates within OuterRingScanRadius but outside
     // OuterRingExplorationRadius) - a full circle of radius OuterRingExplorationRadius undercounts
-    // by ~3x and starves streaming.
+    // by ~3x and starves streaming. Under the quadtree tiling, the most chunks a ring owns at once
+    // (simulated over many player positions, nothing culled) are 276 / 207 / 207 / 207 / 248 for
+    // rings 0..4 - 1145 total, under TotalMaxDrawnChunks. Ring 4 exceeds this per-ring figure
+    // (it has no outer ring to hand partial blocks to), which only the shared draw list and its
+    // own cache (OuterRingMaxCachedChunks) have to absorb, and both do.
     constexpr u32 OuterRingMaxDrawnChunks = ComputeMaxDrawnChunks(OuterRingScanRadius) - ComputeMaxDrawnChunks(OuterRingExplorationRadius);
 
     // Outer rings use a smaller, fixed additive cache headroom instead of ring 0's *2: an outer
@@ -262,12 +289,13 @@ namespace TerrainManager {
 
         f64 ChunkScale = 0.0;
         // How far this ring's own candidate loop scans (chunk-grid units, this ring's own scale).
-        // Ring 0's InnerRadius is 0, so its ScanRadius is an ordinary from-the-player radius; every
-        // outer ring's ScanRadius reaches all the way to its own OuterRadius, with everything
-        // closer than InnerRadius skipped by the candidate loop itself.
+        // Ring 0's is an ordinary from-the-player radius; every outer ring's reaches all the way
+        // to its own OuterRadius, with the chunks inner rings already cover skipped by OwnsChunk().
         u32 ScanRadius = 0;
-        f64 InnerRadius = 0.0;       // world-space distance where this ring starts owning chunks
-        f64 OuterRadius = 0.0;       // world-space distance where the next ring out takes over
+        // Nominal world-space distance where the next ring out takes over. The real boundary is
+        // OwnsChunk()'s stair-stepped one, within about one chunk of this - only diagnostics
+        // (FindRingForDistance) use it.
+        f64 OuterRadius = 0.0;
         u32 LayerOffset = 0;         // this ring's starting index into the shared heightmap texture array
 
         std::array<CacheSlot, MaxCachedChunksV> Cache;

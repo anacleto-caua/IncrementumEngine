@@ -124,8 +124,10 @@ namespace TerrainDebugTools {
         for (f32 dist = StepSize; dist <= MaxDistance; dist += StepSize) {
             vec3 sample = origin + dir * dist;
             // Ring ownership in TerrainManager is centered on the player's current position, not
-            // world origin - RefreshRing's InnerRadius/OuterRadius circles are built from
-            // player_coord, so this must measure from the player too, not (0,0,0).
+            // world origin - OwnsChunk()'s scan discs are built around the player's chunk at each
+            // ring's scale, so this must measure from the player too, not (0,0,0). (The ring this
+            // picks from nominal OuterRadius can be one chunk off OwnsChunk()'s stair-stepped
+            // boundary right at a seam.)
             f64 rel_x = static_cast<f64>(sample.x) - static_cast<f64>(origin.x);
             f64 rel_z = static_cast<f64>(sample.z) - static_cast<f64>(origin.z);
             f64 horiz_dist = std::sqrt(rel_x * rel_x + rel_z * rel_z);
