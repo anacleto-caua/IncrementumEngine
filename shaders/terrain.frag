@@ -30,11 +30,32 @@ layout(constant_id = 3) const float SEA_LEVEL = 0.12;
 // the streamed terrain disk dissolves into the sky instead of ending on a visible line.
 layout(constant_id = 10) const float FOG_END = 16000.0;
 
-// Debug view toggle (TerrainPass::ShowChunkDebugColors, ImGui-driven) - a runtime push constant
-// rather than a specialization constant specifically so it can flip without a pipeline rebuild.
+// Heightmap array layout (TerrainManager::MaxCachedChunks / OuterRingMaxCachedChunks): ring 0's
+// layers first, then one equally-sized block per outer ring - same as GetPropsForLayer().
+layout(constant_id = 11) const uint RING0_LAYERS = 634;
+layout(constant_id = 12) const uint OUTER_RING_LAYERS = 300;
+// TerrainPass::RingColors, sRGB 0xRRGGBB, ring 0 first.
+layout(constant_id = 20) const uint RING_COLOR_0 = 0x482878;
+layout(constant_id = 21) const uint RING_COLOR_1 = 0x31688E;
+layout(constant_id = 22) const uint RING_COLOR_2 = 0x1F9E89;
+layout(constant_id = 23) const uint RING_COLOR_3 = 0x6DCD59;
+layout(constant_id = 24) const uint RING_COLOR_4 = 0xFDE725;
+
+// Debug view toggles (TerrainPass's Show*/FogEnabled, ImGui-driven) - a runtime push constant
+// rather than specialization constants specifically so they flip without a pipeline rebuild.
+// Bits mirror TerrainPass::PushFlags.
+const uint FLAG_CHUNK_DEBUG_COLORS = 1u << 0;
+const uint FLAG_RING_COLORS        = 1u << 1;
+const uint FLAG_CHUNK_OUTLINES     = 1u << 2;
+const uint FLAG_WIREFRAME          = 1u << 3;
+const uint FLAG_NO_FOG             = 1u << 4;
+const uint FLAG_CAMERA_MARKER      = 1u << 5;
+
 layout(push_constant) uniform TerrainPushConstants {
-    uint showDebugColors;
+    uint flags;
 } pc;
+
+bool HasFlag(uint flag) { return (pc.flags & flag) != 0u; }
 
 #include "include/atmosphere.glsl"
 
@@ -222,9 +243,44 @@ vec3 WaterColor(vec3 worldPos, float depth, vec3 sunDir, float footprint) {
     return mix(color, foamColor, foam * 0.7);
 }
 
+// --- LOD ring debug view -------------------------------------------------------------------------
+
+uint RingIndex(uint layer) {
+    return layer < RING0_LAYERS ? 0u : 1u + (layer - RING0_LAYERS) / OUTER_RING_LAYERS;
+}
+
+vec3 RingColor(uint ring) {
+    uint rgb = ring == 0u ? RING_COLOR_0
+             : ring == 1u ? RING_COLOR_1
+             : ring == 2u ? RING_COLOR_2
+             : ring == 3u ? RING_COLOR_3
+             : RING_COLOR_4;
+    return SrgbToLinear(vec3((rgb >> 16) & 0xFFu, (rgb >> 8) & 0xFFu, rgb & 0xFFu) / 255.0);
+}
+
+// Antialiased coverage of a line `halfWidth` pixels to each side of every point where `value`
+// crosses an integer. Distance is measured along value's screen gradient (not fwidth, which
+// overestimates it on diagonals), so lines keep one width at any orientation and distance.
+float LineCoverage(float value, float halfWidth) {
+    float gradient = max(length(vec2(dFdx(value), dFdy(value))), 1e-6);
+    float pixels = abs(fract(value - 0.5) - 0.5) / gradient;
+    return 1.0 - smoothstep(halfWidth - 0.5, halfWidth + 0.5, pixels);
+}
+
+// LineCoverage for one family of parallel mesh edges, faded out where consecutive lines are closer
+// than ~3 pixels on screen - there they'd only merge into a flat tone or moiré instead of showing
+// individual edges. Per family, so at grazing angles the edges running toward the camera (still
+// well apart on screen) keep showing after the foreshortened cross edges have faded.
+float WireCoverage(float value) {
+    float spacing = 1.0 / max(length(vec2(dFdx(value), dFdy(value))), 1e-6);
+    return LineCoverage(value, 0.35) * smoothstep(2.0, 4.0, spacing);
+}
+
 void main()
 {
-    bool debugView = pc.showDebugColors != 0;
+    bool chunkColors = HasFlag(FLAG_CHUNK_DEBUG_COLORS);
+    bool ringColors = HasFlag(FLAG_RING_COLORS);
+    bool flatAlbedo = chunkColors || ringColors;
     float footprint = max(length(fwidth(inWorldPos.xz)), 1e-4);
     vec3 sunDir = normalize(sceneGlobalsData.data.SunDirection);
 
@@ -232,7 +288,12 @@ void main()
 
     vec3 albedo;
     vec3 normal;
-    if (debugView) {
+    if (ringColors) {
+        albedo = RingColor(RingIndex(inTextureLayer));
+        // The water surface is flat - lighting it with the seafloor's normal would print the
+        // seafloor's relief onto the sea.
+        normal = inWaterDepth > 0.0 ? vec3(0.0, 1.0, 0.0) : macroNormal;
+    } else if (chunkColors) {
         albedo = debugColor;
         normal = macroNormal;
     } else {
@@ -242,15 +303,49 @@ void main()
     }
 
     vec3 color = albedo * (SunLight(normal, sunDir) + AmbientLight(normal, sunDir));
-    if (!debugView && inWaterDepth > 0.0) {
+    if (!flatAlbedo && inWaterDepth > 0.0) {
         color = WaterColor(inWorldPos, inWaterDepth, sunDir, footprint);
     }
-    color = ApplyAerialPerspective(color, inWorldPos, sceneGlobalsData.data.CameraPosition, sunDir, FOG_END);
 
-    // Chunk grid overlay (debug view only). Scale UVs to grid space (0..63); fwidth keeps lines
-    // one pixel thick regardless of distance. Unshaded white (1.0 lands near-white after
+    // Triangle edges of the 64x64 vertex mesh: grid lines along u and v, plus each cell's diagonal
+    // (TerrainPass's index buffer splits cells top-right -> bottom-left, i.e. along u + v = const).
+    // Thin, translucent, and faded where too dense to resolve (WireCoverage), so the surface keeps
+    // its tint. Lines keep the surface's hue - darker on light albedo, lighter on dark albedo (the
+    // two darkest ring colors), so they read on every ring.
+    if (HasFlag(FLAG_WIREFRAME)) {
+        vec2 cell = texCoord * GRID_CELLS;
+        float wire = max(max(WireCoverage(cell.x), WireCoverage(cell.y)), WireCoverage(cell.x + cell.y));
+        bool darkAlbedo = dot(albedo, vec3(0.2126, 0.7152, 0.0722)) < 0.15;
+        vec3 lineColor = darkAlbedo ? color * 3.0 : color * 0.2;
+        color = mix(color, lineColor, wire * 0.7);
+    }
+    // Chunk borders (texCoord 0 or 1). Each chunk draws its own half, so the shared border line is
+    // twice halfWidth wide.
+    if (HasFlag(FLAG_CHUNK_OUTLINES)) {
+        float border = max(LineCoverage(texCoord.x, 0.5), LineCoverage(texCoord.y, 0.5));
+        color = mix(color, vec3(0.0), border * 0.85);
+    }
+
+    if (!HasFlag(FLAG_NO_FOG)) {
+        color = ApplyAerialPerspective(color, inWorldPos, sceneGlobalsData.data.CameraPosition, sunDir, FOG_END);
+    }
+
+    // Camera position marker for the top-down view: a white dot with a dark rim, sized in pixels
+    // (world units per pixel from the screen gradient of world X). Bright enough (radiance 10) to
+    // stay white through PostPass's tonemap.
+    if (HasFlag(FLAG_CAMERA_MARKER)) {
+        float worldPerPixel = max(length(vec2(dFdx(inWorldPos.x), dFdy(inWorldPos.x))), 1e-4);
+        float pixels = distance(inWorldPos.xz, sceneGlobalsData.data.CameraPosition.xz) / worldPerPixel;
+        float rim = 1.0 - smoothstep(8.0, 9.0, pixels);
+        float fill = 1.0 - smoothstep(5.0, 6.0, pixels);
+        color = mix(color, vec3(0.0), rim);
+        color = mix(color, vec3(10.0), fill);
+    }
+
+    // Chunk grid overlay (chunk debug view only). Scale UVs to grid space (0..63); fwidth keeps
+    // lines one pixel thick regardless of distance. Unshaded white (1.0 lands near-white after
     // PostPass's tonemap) so it stays a clean reference for chunk-boundary/LOD debugging.
-    if (debugView) {
+    if (chunkColors) {
         vec2 pos = texCoord * GRID_CELLS;
         vec2 grid = abs(fract(pos - 0.5) - 0.5) / fwidth(pos);
         float line = min(grid.x, grid.y);

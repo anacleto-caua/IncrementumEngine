@@ -127,9 +127,8 @@ IncResult TerrainPass::Init() {
         DescriptorManager::PerFrameLayout
     };
 
-    // Single uint32 toggle (terrain.frag's TerrainPushConstants::showDebugColors) - swaps between
-    // the procedural texture and the flat per-chunk debug checker at draw time, no pipeline
-    // rebuild needed.
+    // Single uint32 of PushFlags (terrain.frag's TerrainPushConstants::flags) - debug views toggled
+    // at draw time, no pipeline rebuild needed.
     VkPushConstantRange terrain_push_constant_range {};
     terrain_push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     terrain_push_constant_range.offset = 0;
@@ -213,7 +212,13 @@ IncResult TerrainPass::Init() {
         .AddConstant(0, static_cast<f32>(TerrainManager::VerticesPerEdge - 1))
         .AddConstant(2, Config.HeightScale)
         .AddConstant(3, TerrainManager::SeaLevel)
-        .AddConstant(10, static_cast<f32>(TerrainManager::TotalCoverageRadius));
+        .AddConstant(10, static_cast<f32>(TerrainManager::TotalCoverageRadius))
+        // TextureLayer -> ring, the same closed form as TerrainManager::GetPropsForLayer().
+        .AddConstant(11, TerrainManager::MaxCachedChunks)
+        .AddConstant(12, TerrainManager::OuterRingMaxCachedChunks);
+    for (u32 i = 0; i < RingColors.size(); i++) {
+        frag_shader_spec_builder.AddConstant(20 + i, RingColors[i]);
+    }
 
     INC_CHECK(
         CreateShaderStage(
@@ -313,8 +318,14 @@ void TerrainPass::Render() {
         nullptr
     );
 
-    u32 show_debug_colors = ShowChunkDebugColors ? 1u : 0u;
-    vkCmdPushConstants(cmd, TerrainPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(u32), &show_debug_colors);
+    u32 flags = 0;
+    if (ShowChunkDebugColors) { flags |= Flag_ChunkDebugColors; }
+    if (ShowRingColors) { flags |= Flag_RingColors; }
+    if (ShowChunkOutlines) { flags |= Flag_ChunkOutlines; }
+    if (ShowWireframe) { flags |= Flag_Wireframe; }
+    if (!FogEnabled) { flags |= Flag_NoFog; }
+    if (ShowCameraMarker) { flags |= Flag_CameraMarker; }
+    vkCmdPushConstants(cmd, TerrainPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(u32), &flags);
 
     vkCmdDrawIndexed(cmd, PlaneMeshResource::IndexCount, TerrainManager::CurrentlyActiveChunks, 0, 0, 0);
 }
@@ -368,6 +379,27 @@ void TerrainPass::OutTerrainData() {
     ImGui::Checkbox("Frustum Culling (draw)", &DrawCullingEnabled);
     ImGui::Checkbox("Frustum Culling (generation priority)", &CullingPrioritizesGeneration);
     ImGui::Checkbox("Show Chunk Debug Colors", &ShowChunkDebugColors);
+    ImGui::Checkbox("Show LOD Ring Colors", &ShowRingColors);
+    if (ShowRingColors) {
+        for (u32 i = 0; i < RingColors.size(); i++) {
+            u32 rgb = RingColors[i];
+            ImVec4 swatch(
+                static_cast<f32>((rgb >> 16) & 0xFF) / 255.0f,
+                static_cast<f32>((rgb >> 8) & 0xFF) / 255.0f,
+                static_cast<f32>(rgb & 0xFF) / 255.0f,
+                1.0f
+            );
+            ImGui::SameLine();
+            ImGui::PushID(static_cast<i32>(i));
+            ImGui::ColorButton("##ring", swatch, ImGuiColorEditFlags_NoTooltip, ImVec2(14.0f, 14.0f));
+            ImGui::PopID();
+        }
+    }
+    ImGui::Checkbox("Chunk Outlines", &ShowChunkOutlines);
+    ImGui::SameLine();
+    ImGui::Checkbox("Wireframe", &ShowWireframe);
+    ImGui::SameLine();
+    ImGui::Checkbox("Fog", &FogEnabled);
     ImGui::Text("Total Drawn: %u / %u", CurrentlyActiveChunks, TotalMaxDrawnChunks);
 
     // Live generator tuning. Edits only take effect through Regenerate() - automatically when a

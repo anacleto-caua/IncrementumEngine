@@ -14,6 +14,10 @@ struct Camera {
     f32 AspectRatio = 16.0f / 9.0f;
     f32 NearPlane = 0.1f;
     f32 FarPlane = 1000.0f;
+    // Orthographic instead of perspective (Fov unused) - Game/Screenshots' top-down LOD ring map,
+    // where a perspective lens can't show the whole terrain disk without distorting it.
+    bool Orthographic = false;
+    f32 OrthoHalfHeight = 1.0f;     // world units from the view center to the top edge
 
     // Output
     mat4 View = mat4(1.0f);
@@ -29,12 +33,22 @@ inline void UpdateMatrices(Camera &camera) {
         camera.Up
     );
 
-    camera.Projection = math::perspective(
-        math::radians(camera.Fov),
-        camera.AspectRatio,
-        camera.NearPlane,
-        camera.FarPlane
-    );
+    if (camera.Orthographic) {
+        f32 half_width = camera.OrthoHalfHeight * camera.AspectRatio;
+        camera.Projection = math::ortho(
+            -half_width, half_width,
+            -camera.OrthoHalfHeight, camera.OrthoHalfHeight,
+            camera.NearPlane,
+            camera.FarPlane
+        );
+    } else {
+        camera.Projection = math::perspective(
+            math::radians(camera.Fov),
+            camera.AspectRatio,
+            camera.NearPlane,
+            camera.FarPlane
+        );
+    }
 
     // Force the Y-flip for Vulkan
     camera.Projection[1][1] *= -1.0f;
