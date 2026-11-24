@@ -20,6 +20,7 @@ namespace Benchmark {
         u32 Height = 720;
         f32 DurationOverride = -1.0f;           // < 0 = scenario default
         f32 WarmupOverride = -1.0f;
+        std::string Handoff = "full";           // LOD handoff fixes: "full", "fallback", "prefetch" or "off"
         std::chrono::steady_clock::time_point ProcessStart;
     };
 

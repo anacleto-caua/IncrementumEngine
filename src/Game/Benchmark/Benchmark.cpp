@@ -519,6 +519,15 @@ namespace Benchmark {
             else if (key == "height") { out_config.Height = static_cast<u32>(std::stoul(value)); }
             else if (key == "duration") { out_config.DurationOverride = std::stof(value); }
             else if (key == "warmup") { out_config.WarmupOverride = std::stof(value); }
+            else if (key == "handoff") {
+                if (value != "full" && value != "fallback" && value != "prefetch" && value != "off") {
+                    analog::error("--handoff must be full, fallback, prefetch or off");
+                    return false;
+                }
+                out_config.Handoff = value;
+                TerrainManager::HandoffFallbackEnabled = (value == "full" || value == "fallback");
+                TerrainManager::HandoffPrefetchEnabled = (value == "full" || value == "prefetch");
+            }
             else {
                 analog::error("unrecognized argument '--{}'", key);
                 return false;
@@ -577,6 +586,7 @@ namespace Benchmark {
         json.Field("commit", INC_GIT_COMMIT);
         json.Field("commit_dirty", INC_GIT_DIRTY != 0);
         json.Field("workers_arg", config.WorkersArg.empty() ? std::string("half") : config.WorkersArg);
+        json.Field("handoff", config.Handoff);
     }
 
     void WriteSkipped(const BenchConfig& config, const char* reason) {

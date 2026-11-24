@@ -378,6 +378,8 @@ void TerrainPass::OutTerrainData() {
 
     ImGui::Checkbox("Frustum Culling (draw)", &DrawCullingEnabled);
     ImGui::Checkbox("Frustum Culling (generation priority)", &CullingPrioritizesGeneration);
+    ImGui::Checkbox("LOD Handoff Fallback", &HandoffFallbackEnabled);
+    ImGui::Checkbox("LOD Handoff Prefetch", &HandoffPrefetchEnabled);
     ImGui::Checkbox("Show Chunk Debug Colors", &ShowChunkDebugColors);
     ImGui::Checkbox("Show LOD Ring Colors", &ShowRingColors);
     if (ShowRingColors) {
@@ -461,23 +463,26 @@ void TerrainPass::OutTerrainData() {
     if (ImGui::CollapsingHeader("Terrain Draw Data")) {
         // Per-ring breakdown confirms outer rings stay bounded in chunk count even as effective
         // draw distance grows, instead of just one opaque global total.
-        if (ImGui::BeginTable("TerrainRings", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+        if (ImGui::BeginTable("TerrainRings", 7, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
             ImGui::TableSetupColumn("Ring");
             ImGui::TableSetupColumn("ChunkScale");
             ImGui::TableSetupColumn("Drawn");
             ImGui::TableSetupColumn("Culled");
+            ImGui::TableSetupColumn("Fallback");
             ImGui::TableSetupColumn("Dark");
             ImGui::TableSetupColumn("Cached");
             ImGui::TableHeadersRow();
 
             // "Dark" = VisibleMissingLastFrame: in the frustum right now but not yet generated -
-            // measured directly, not inferred from Drawn/Culled/Cached.
-            auto ring_row = [](const char* name, f64 scale, u32 drawn, u32 max_drawn, u32 culled, u32 dark, u32 cached, u32 max_cached) {
+            // measured directly, not inferred from Drawn/Culled/Cached. "Fallback" = drawn by this
+            // ring in place of another ring's missing chunks during an LOD handoff (included in Drawn).
+            auto ring_row = [](const char* name, f64 scale, u32 drawn, u32 max_drawn, u32 culled, u32 fallback, u32 dark, u32 cached, u32 max_cached) {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn(); ImGui::Text("%s", name);
                 ImGui::TableNextColumn(); ImGui::Text("%.0f", scale);
                 ImGui::TableNextColumn(); ImGui::Text("%u / %u", drawn, max_drawn);
                 ImGui::TableNextColumn(); ImGui::Text("%u", culled);
+                ImGui::TableNextColumn(); ImGui::Text("%u", fallback);
                 if (dark > 0) {
                     ImGui::TableNextColumn(); ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%u", dark);
                 } else {
@@ -489,14 +494,14 @@ void TerrainPass::OutTerrainData() {
             u32 ring0_cached = 0;
             for (u32 i = 0; i < MaxCachedChunks; i++) { if (Ring0.Cache[i].Valid) { ring0_cached++; } }
             ring_row("Ring 0", Ring0.ChunkScale, Ring0.DebugStats.DrawnLastFrame, MaxDrawnChunks,
-                     Ring0.DebugStats.CulledLastFrame, Ring0.DebugStats.VisibleMissingLastFrame, ring0_cached, MaxCachedChunks);
+                     Ring0.DebugStats.CulledLastFrame, Ring0.DebugStats.FallbackLastFrame, Ring0.DebugStats.VisibleMissingLastFrame, ring0_cached, MaxCachedChunks);
 
             const char* outer_ring_names[OuterRingCount] = { "Ring 1", "Ring 2", "Ring 3", "Ring 4" };
             for (u32 i = 0; i < OuterRingCount; i++) {
                 u32 cached = 0;
                 for (u32 j = 0; j < OuterRingMaxCachedChunks; j++) { if (OuterRings[i].Cache[j].Valid) { cached++; } }
                 ring_row(outer_ring_names[i], OuterRings[i].ChunkScale, OuterRings[i].DebugStats.DrawnLastFrame,
-                         OuterRingMaxDrawnChunks, OuterRings[i].DebugStats.CulledLastFrame,
+                         OuterRingMaxDrawnChunks, OuterRings[i].DebugStats.CulledLastFrame, OuterRings[i].DebugStats.FallbackLastFrame,
                          OuterRings[i].DebugStats.VisibleMissingLastFrame, cached, OuterRingMaxCachedChunks);
             }
 

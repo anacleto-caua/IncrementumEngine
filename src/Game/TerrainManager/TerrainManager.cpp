@@ -56,23 +56,31 @@ namespace TerrainManager {
     // by two rings at once, which z-fought and pushed outer rings past their draw budget whenever
     // nothing was culled.
 
-    bool InScanDisc(u32 ring_index, ivec2 chunk, vec3 player_position) {
+    // `radius` defaults to the ring's own RingScanRadius(); NearOwnsChunk() widens/narrows it.
+    bool InScanDisc(u32 ring_index, ivec2 chunk, vec3 player_position, i64 radius) {
         f64 scale = RingChunkScale(ring_index);
         i64 dx = static_cast<i64>(chunk.x) - static_cast<i64>(std::floor(static_cast<f64>(player_position.x) / scale));
         i64 dz = static_cast<i64>(chunk.y) - static_cast<i64>(std::floor(static_cast<f64>(player_position.z) / scale));
-        i64 radius = RingScanRadius(ring_index);
         return dx * dx + dz * dz <= radius * radius;
+    }
+
+    bool InScanDisc(u32 ring_index, ivec2 chunk, vec3 player_position) {
+        return InScanDisc(ring_index, chunk, player_position, static_cast<i64>(RingScanRadius(ring_index)));
     }
 
     // Whether all four ring `ring_index` chunks making up ring ring_index + 1's chunk `block` are
     // inside ring_index's disc.
-    bool BlockInScanDisc(u32 ring_index, ivec2 block, vec3 player_position) {
+    bool BlockInScanDisc(u32 ring_index, ivec2 block, vec3 player_position, i64 radius) {
         for (i32 i = 0; i < 2; i++) {
             for (i32 j = 0; j < 2; j++) {
-                if (!InScanDisc(ring_index, { block.x * 2 + i, block.y * 2 + j }, player_position)) { return false; }
+                if (!InScanDisc(ring_index, { block.x * 2 + i, block.y * 2 + j }, player_position, radius)) { return false; }
             }
         }
         return true;
+    }
+
+    bool BlockInScanDisc(u32 ring_index, ivec2 block, vec3 player_position) {
+        return BlockInScanDisc(ring_index, block, player_position, static_cast<i64>(RingScanRadius(ring_index)));
     }
 
     // `chunk` must already be inside ring_index's own scan disc.
@@ -83,6 +91,31 @@ namespace TerrainManager {
         // (arithmetic shift, guaranteed since C++20).
         if (ring_index < OuterRingCount && !BlockInScanDisc(ring_index, { chunk.x >> 1, chunk.y >> 1 }, player_position)) { return false; }
         return true;
+    }
+
+    // OwnsChunk() with every boundary pushed HandoffMargin chunks outward: the inner ring's disc
+    // shrunk, this ring's own disc grown. A superset of what this ring owns - everything it could
+    // own after one boundary crossing - kept resident and prefetched, so a handoff usually finds
+    // its data already there. Unlike OwnsChunk(), needs no precondition on `chunk`.
+    bool NearOwnsChunk(u32 ring_index, ivec2 chunk, vec3 player_position) {
+        constexpr i64 margin = HandoffMargin;
+        if (ring_index > 0 &&
+            BlockInScanDisc(ring_index - 1, chunk, player_position, static_cast<i64>(RingScanRadius(ring_index - 1)) - margin)) {
+            return false;
+        }
+        i64 grown_radius = static_cast<i64>(RingScanRadius(ring_index)) + margin;
+        if (ring_index < OuterRingCount) {
+            return BlockInScanDisc(ring_index, { chunk.x >> 1, chunk.y >> 1 }, player_position, grown_radius);
+        }
+        return InScanDisc(ring_index, chunk, player_position, grown_radius);
+    }
+
+    // Ring 0 and the outer rings are different RingState instantiations - this lets ring-index
+    // driven code (the draw-list traversal) reach either with one generic lambda.
+    template<typename F>
+    decltype(auto) WithRing(u32 ring_index, F&& visit) {
+        if (ring_index == 0) { return visit(Ring0); }
+        return visit(OuterRings[ring_index - 1]);
     }
 
     // --- Init(): ring 0's initial batch is parallel and blocking; outer rings start empty and
@@ -258,14 +291,16 @@ namespace TerrainManager {
     }
 
     // Picks a cache slot to generate a new chunk into, within one ring: prefer one that's never
-    // been used, else evict the least-recently-used slot - which is never one of this frame's
-    // drawn slots, since RefreshRing() already stamped all of those to CurrentTick before this is
-    // ever called. Also skips any slot already claimed by another in-flight generation in this
-    // same ring's pool - without this, two generations kicked off in the same RefreshRing() call
-    // could both target the same cache slot (invalidating it doesn't remove it from consideration
-    // on its own; only tracking "is some pool entry already writing here" does).
+    // been used, else evict the least-recently-used slot. Also skips any slot already claimed by
+    // another in-flight generation in this same ring's pool - without this, two generations kicked
+    // off in the same frame could both target the same cache slot (invalidating it doesn't remove
+    // it from consideration on its own; only tracking "is some pool entry already writing here"
+    // does). Returns UINT32_MAX rather than evict a slot stamped this frame (owned, in the handoff
+    // band, or drawn), so a cache too small for its resident set stops generating instead of
+    // punching holes into what's on screen - the static_assert on the cache sizes in the header is
+    // what keeps that from happening in practice.
     template<typename RingT>
-    u32 PickSlotToGenerateInto(RingT& ring) {
+    u32 PickSlotToGenerateInto(RingT& ring, u64 current_tick) {
         u32 count = static_cast<u32>(ring.Cache.size());
 
         auto is_claimed = [&](u32 slot) {
@@ -279,8 +314,8 @@ namespace TerrainManager {
             if (!ring.Cache[i].Valid && !is_claimed(i)) { return i; }
         }
 
-        u32 oldest = 0;
-        u64 oldest_tick = UINT64_MAX;
+        u32 oldest = UINT32_MAX;
+        u64 oldest_tick = current_tick;
         for (u32 i = 0; i < count; i++) {
             if (is_claimed(i)) { continue; }
             if (ring.Cache[i].LastUsedTick < oldest_tick) {
@@ -291,87 +326,64 @@ namespace TerrainManager {
         return oldest;
     }
 
-    // Three-phase per-ring refresh: rebuild draw list / finalize a finished generation / kick off
-    // the next missing ones. Shared by ring 0 and every outer ring via `ring`'s own state and
-    // LODRing config (baked in by Init()). Returns true if this ring queued any completed chunk's
-    // slice this call - the caller batches this across every ring into one SubmitReleaseAndWrite()
-    // call per frame; a per-ring call point hit a real GPU-timing assertion failure once the pool
-    // let several rings each queue several chunks in close succession.
+    // --- RefreshChunks(), stage 1: per-ring scan ---
+    //
+    // Stamps every resident chunk this ring wants this frame (owned or in its handoff band) as
+    // recently used, counts owned-but-missing chunks, and ranks generation candidates into
+    // ring.Candidates. Draws nothing - BuildDrawList() decides that across every ring at once.
     template<typename RingT>
-    bool RefreshRing(RingT& ring, u32 ring_index, vec3 player_position, const Frustum& camera_frustum, u64 current_tick, u32& draw_cursor) {
-        // Phase 1: rebuild this ring's slice of the shared draw list from its cache as it stood
-        // at the start of this call - deliberately BEFORE finalizing any generation that just
-        // completed (see phase 2 below), so a chunk never gets added to the drawn list in the
-        // same frame its GPU upload was queued. That upload's release/write/acquire chain hasn't
-        // had a chance to actually run yet at this point - sampling it this frame would race
-        // ahead of it. Waiting until next frame gives AcquirePending (called every frame from
-        // Renderer::Frame()) a full cycle to actually acquire it and for the draw's own
-        // wait-on-last-acquire to cover it correctly.
+    void ScanRing(RingT& ring, u32 ring_index, vec3 player_position, const Frustum& camera_frustum, u64 current_tick) {
         ivec2 player_coord;
         player_coord.x = static_cast<i32>(std::floor(player_position.x / ring.ChunkScale));
         player_coord.y = static_cast<i32>(std::floor(player_position.z / ring.ChunkScale));
 
-        i32 radius = static_cast<i32>(ring.ScanRadius);
+        // The handoff band reaches up to HandoffMargin chunks past the ring's own scan disc.
+        i32 radius = static_cast<i32>(ring.ScanRadius + HandoffMargin);
         i32 r_squared = radius * radius;
 
-        // The ring's own PoolCapacity best missing candidates found this pass, kept sorted
-        // ascending by priority (index 0 = best) as the scan runs - NOT the first PoolCapacity
-        // found in scan order. Visible (per the same frustum test used for cached chunks below)
-        // beats not-visible outright; ties within the same visibility go to the closer one - taking
-        // scan-order candidates instead meant a region late in the raster scan could sit
-        // unresolved for many frames even while directly in view.
-        //
-        // Stale chunks (cached, but generated under an older GeneratorEpoch - see Regenerate())
-        // compete for the same pool slots, ranked just below a truly missing chunk of the same
-        // visibility: a dark hole always beats refreshing terrain that's already on screen.
-        struct PrioritizedMiss {
-            ivec2 Position;
-            bool Visible;
-            bool Stale;
-            i64 DistSq;   // chunk-grid units, this ring's own scale - only compared within this ring
-        };
-        auto is_better = [](const PrioritizedMiss& a, const PrioritizedMiss& b) {
+        // The ring's own PoolCapacity best candidates found this pass, kept sorted ascending by
+        // priority (index 0 = best) as the scan runs - NOT the first PoolCapacity found in scan
+        // order. Visible (per the same frustum test the draw list uses) beats not-visible
+        // outright; then a truly missing owned chunk beats a handoff prefetch, which beats
+        // refreshing a stale one; ties go to the closer one - taking scan-order candidates instead
+        // meant a region late in the raster scan could sit unresolved for many frames even while
+        // directly in view.
+        auto is_better = [](const GenerationCandidate& a, const GenerationCandidate& b) {
             if (a.Visible != b.Visible) { return a.Visible; }
-            if (a.Stale != b.Stale) { return !a.Stale; }
+            if (a.Kind != b.Kind) { return a.Kind < b.Kind; }
             return a.DistSq < b.DistSq;
         };
-        std::array<PrioritizedMiss, RingT::PoolCapacity> best_missing;
-        u32 best_count = 0;
-        u32 culled_count = 0;
-        u32 drawn_count = 0;
-        u32 visible_missing_count = 0;
+        ring.CandidateCount = 0;
         u32 missing_count = 0;
 
-        auto consider_for_generation = [&](ivec2 candidate, bool visible, bool stale, i32 dx, i32 dy) {
+        auto consider_for_generation = [&](ivec2 candidate, bool visible, CandidateKind kind, i32 dx, i32 dy) {
             for (const PendingGeneration& gen : ring.GenerationPool) {
                 if (gen.InFlight && gen.Position == candidate) { return; }
             }
 
-            PrioritizedMiss candidate_info = {
+            GenerationCandidate candidate_info = {
                 .Position = candidate,
                 .Visible = visible,
-                .Stale = stale,
+                .Kind = kind,
                 .DistSq = static_cast<i64>(dx) * dx + static_cast<i64>(dy) * dy
             };
 
             // Insertion into the small (K=RingT::PoolCapacity) sorted buffer - cheaper and more
             // legible than pulling in <algorithm> for a size this small.
-            if (best_count < RingT::PoolCapacity) {
-                u32 insert_at = best_count;
-                while (insert_at > 0 && is_better(candidate_info, best_missing[insert_at - 1])) {
-                    best_missing[insert_at] = best_missing[insert_at - 1];
-                    insert_at--;
-                }
-                best_missing[insert_at] = candidate_info;
-                best_count++;
-            } else if (is_better(candidate_info, best_missing[RingT::PoolCapacity - 1])) {
-                u32 insert_at = RingT::PoolCapacity - 1;
-                while (insert_at > 0 && is_better(candidate_info, best_missing[insert_at - 1])) {
-                    best_missing[insert_at] = best_missing[insert_at - 1];
-                    insert_at--;
-                }
-                best_missing[insert_at] = candidate_info;
+            u32 insert_at;
+            if (ring.CandidateCount < RingT::PoolCapacity) {
+                insert_at = ring.CandidateCount;
+                ring.CandidateCount++;
+            } else if (is_better(candidate_info, ring.Candidates[RingT::PoolCapacity - 1])) {
+                insert_at = RingT::PoolCapacity - 1;
+            } else {
+                return;
             }
+            while (insert_at > 0 && is_better(candidate_info, ring.Candidates[insert_at - 1])) {
+                ring.Candidates[insert_at] = ring.Candidates[insert_at - 1];
+                insert_at--;
+            }
+            ring.Candidates[insert_at] = candidate_info;
         };
 
         for (i32 x = player_coord.x - radius; x <= player_coord.x + radius; x++) {
@@ -382,67 +394,189 @@ namespace TerrainManager {
 
                 ivec2 candidate = { x, y };
 
-                // Ring ownership is exclusive: a block drawn by another ring is skipped outright -
-                // never generated, cached or counted as missing here.
-                if (!OwnsChunk(ring_index, candidate, player_position)) { continue; }
+                // Ring ownership is exclusive: a block another ring draws is skipped outright -
+                // unless it's within this ring's handoff band, where it's kept resident (and
+                // prefetched) without being counted as missing.
+                bool owned = InScanDisc(ring_index, candidate, player_position) && OwnsChunk(ring_index, candidate, player_position);
+                if (!owned && !(HandoffPrefetchEnabled && NearOwnsChunk(ring_index, candidate, player_position))) { continue; }
 
-                u32 cache_index = UINT32_MAX;
+                bool visible = !CullingPrioritizesGeneration || Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale));
+
                 auto slot_it = ring.PositionToSlot.find(PackPosition(candidate));
                 if (slot_it != ring.PositionToSlot.end()) {
-                    cache_index = slot_it->second;
-                }
-
-                if (cache_index != UINT32_MAX) {
                     // Cache hit - always mark recently used regardless of visibility, so turning
-                    // away from a chunk doesn't make it LRU-evict while it's still within this
-                    // ring's ExplorationRadius.
-                    ring.Cache[cache_index].LastUsedTick = current_tick;
-                    bool intersects = Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale));
-
-                    bool isolated_out = IsolateChunk && (ring_index != 0 || candidate != IsolatedChunk);
-                    if (
-                        (!DrawCullingEnabled || intersects) &&
-                        !isolated_out &&
-                        (draw_cursor < TotalMaxDrawnChunks)
-                        ) {
-                        ChunkDrawList[draw_cursor] = {
-                            .WorldPos = candidate,
-                            .TextureLayer = cache_index + ring.LayerOffset,
-                            .Scale = static_cast<f32>(ring.ChunkScale)
-                        };
-                        CurrentlyActiveChunks++;
-                        draw_cursor++;
-                        drawn_count++;
-                    } else {
-                        culled_count++;
-                    }
-
-                    if (ring.Cache[cache_index].Epoch != GeneratorEpoch) {
-                        consider_for_generation(candidate, !CullingPrioritizesGeneration || intersects, true, dx, dy);
+                    // away from a chunk doesn't make it LRU-evict while it's still in range.
+                    ring.Cache[slot_it->second].LastUsedTick = current_tick;
+                    if (ring.Cache[slot_it->second].Epoch != GeneratorEpoch) {
+                        consider_for_generation(candidate, visible, CandidateKind::Stale, dx, dy);
                     }
                 } else {
-                    // Visible-but-missing counts regardless of already-in-flight status below -
-                    // an in-flight chunk is still visibly dark on screen until it actually finishes,
-                    // so it belongs in this "how many dark chunks are in view right now" stat too.
-                    bool intersects = Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale));
-                    if (!DrawCullingEnabled || intersects) { visible_missing_count++; }
-                    missing_count++;
-
-                    consider_for_generation(candidate, !CullingPrioritizesGeneration || intersects, false, dx, dy);
+                    if (owned) { missing_count++; }
+                    consider_for_generation(candidate, visible, owned ? CandidateKind::Missing : CandidateKind::Prefetch, dx, dy);
                 }
             }
         }
 
-        // Phase 2: finalize a generation that finished since last frame, landing it in the cache -
-        // deliberately AFTER this call's drawn-list rebuild above, so it only becomes eligible to
-        // be drawn starting next frame (see the comment on phase 1 for why).
-        ring.DebugStats.DrawnLastFrame = drawn_count;
-        ring.DebugStats.CulledLastFrame = culled_count;
-        ring.DebugStats.VisibleMissingLastFrame = visible_missing_count;
         ring.DebugStats.MissingLastFrame = missing_count;
+    }
 
-        // Queue every completed generation's slice - the caller submits once for the whole
-        // frame's batch across every ring (see the comment on this function).
+    // --- RefreshChunks(), stage 2: the draw list, across every ring at once ---
+    //
+    // The rings' ownership is a quadtree cut: starting from ring OuterRingCount's chunks, a node
+    // splits into its 4 ring - 1 children exactly where OwnsChunk() hands the block inward. Walking
+    // that tree (instead of each ring drawing what it owns on its own) is what lets a block whose
+    // ideal owner isn't resident yet borrow another ring's data, instead of going dark:
+    //  - Inward handoff (a block just became the finer ring's): if the children can't all be
+    //    covered, the coarser parent is drawn in their place, as long as it's still resident.
+    //  - Outward handoff (a block just became the coarser ring's): if the parent is missing, its
+    //    resident finer children are drawn in its place.
+    // Never both for the same area, so fallbacks can't double-cover or z-fight. Fallback data is
+    // only there because ScanRing() keeps each ring's handoff band resident.
+
+    struct DrawEntry {
+        u32 Ring;
+        ivec2 Position;   // grid position at Ring's own scale
+        u32 Slot;         // local cache slot within Ring; NoDrawSlot = a hole nothing could cover
+        bool Fallback;    // drawn by a ring that doesn't own this area right now
+    };
+    constexpr u32 NoDrawSlot = UINT32_MAX;
+
+    // Reused every frame; entries get appended and rolled back during the traversal, then turned
+    // into ChunkDrawList entries (frustum culling, stats) in one pass afterwards.
+    std::vector<DrawEntry> DrawEntries;
+
+    u32 ResidentSlot(u32 ring_index, ivec2 chunk) {
+        return WithRing(ring_index, [&](auto& ring) -> u32 {
+            auto found = ring.PositionToSlot.find(PackPosition(chunk));
+            return found == ring.PositionToSlot.end() ? NoDrawSlot : found->second;
+        });
+    }
+
+    ivec2 ChildChunk(ivec2 node, i32 index) {
+        return { node.x * 2 + (index & 1), node.y * 2 + (index >> 1) };
+    }
+
+    // Appends whatever covers `node`'s area to DrawEntries. Returns whether that area is fully
+    // covered, i.e. no hole entry was left in it.
+    bool EmitDrawNode(u32 ring_index, ivec2 node, vec3 player_position) {
+        bool split = ring_index > 0 && BlockInScanDisc(ring_index - 1, node, player_position);
+
+        if (split) {
+            size_t mark = DrawEntries.size();
+            bool covered = true;
+            for (i32 i = 0; i < 4; i++) {
+                covered &= EmitDrawNode(ring_index - 1, ChildChunk(node, i), player_position);
+            }
+            if (covered || !HandoffFallbackEnabled) { return covered; }
+
+            // A hole somewhere below - draw this node whole instead, if it's still resident.
+            u32 slot = ResidentSlot(ring_index, node);
+            if (slot != NoDrawSlot) {
+                DrawEntries.resize(mark);
+                DrawEntries.push_back({ .Ring = ring_index, .Position = node, .Slot = slot, .Fallback = true });
+                return true;
+            }
+            return false; // best effort: keep whatever the children could cover
+        }
+
+        u32 slot = ResidentSlot(ring_index, node);
+        if (slot != NoDrawSlot) {
+            DrawEntries.push_back({ .Ring = ring_index, .Position = node, .Slot = slot, .Fallback = false });
+            return true;
+        }
+
+        // Missing - fall back to whichever of the finer children are resident.
+        bool covered = ring_index > 0 && HandoffFallbackEnabled;
+        if (covered) {
+            for (i32 i = 0; i < 4; i++) {
+                ivec2 child = ChildChunk(node, i);
+                u32 child_slot = ResidentSlot(ring_index - 1, child);
+                if (child_slot == NoDrawSlot) {
+                    covered = false;
+                    continue;
+                }
+                DrawEntries.push_back({ .Ring = ring_index - 1, .Position = child, .Slot = child_slot, .Fallback = true });
+            }
+        }
+        if (!covered) {
+            DrawEntries.push_back({ .Ring = ring_index, .Position = node, .Slot = NoDrawSlot, .Fallback = false });
+        }
+        return covered;
+    }
+
+    // Must run before any of this frame's generations are finalized, so a chunk never gets drawn
+    // in the same frame its GPU upload is queued: that upload's release/write/acquire chain hasn't
+    // had a chance to run yet. Waiting until next frame gives AcquirePending (called every frame
+    // from Renderer::Frame()) a full cycle to acquire it and for the draw's own
+    // wait-on-last-acquire to cover it.
+    void BuildDrawList(vec3 player_position, const Frustum& camera_frustum, u64 current_tick) {
+        DrawEntries.clear();
+
+        constexpr u32 root_ring = OuterRingCount;
+        f64 root_scale = RingChunkScale(root_ring);
+        ivec2 player_coord = {
+            static_cast<i32>(std::floor(player_position.x / root_scale)),
+            static_cast<i32>(std::floor(player_position.z / root_scale))
+        };
+        i32 radius = static_cast<i32>(RingScanRadius(root_ring));
+        for (i32 x = player_coord.x - radius; x <= player_coord.x + radius; x++) {
+            for (i32 y = player_coord.y - radius; y <= player_coord.y + radius; y++) {
+                i32 dx = x - player_coord.x;
+                i32 dy = y - player_coord.y;
+                if ((dx * dx) + (dy * dy) > radius * radius) { continue; }
+                EmitDrawNode(root_ring, { x, y }, player_position);
+            }
+        }
+
+        for (u32 r = 0; r <= OuterRingCount; r++) {
+            WithRing(r, [](auto& ring) {
+                ring.DebugStats.DrawnLastFrame = 0;
+                ring.DebugStats.CulledLastFrame = 0;
+                ring.DebugStats.FallbackLastFrame = 0;
+                ring.DebugStats.VisibleMissingLastFrame = 0;
+            });
+        }
+
+        u32 draw_cursor = 0;
+        for (const DrawEntry& entry : DrawEntries) {
+            WithRing(entry.Ring, [&](auto& ring) {
+                bool intersects = Intersects(camera_frustum, ChunkBounds(entry.Position, ring.ChunkScale));
+
+                if (entry.Slot == NoDrawSlot) {
+                    if (!DrawCullingEnabled || intersects) { ring.DebugStats.VisibleMissingLastFrame++; }
+                    return;
+                }
+
+                // A fallback chunk may sit outside its ring's handoff band - keep it from being
+                // evicted by this frame's kick-offs all the same.
+                ring.Cache[entry.Slot].LastUsedTick = current_tick;
+
+                bool isolated_out = IsolateChunk && (entry.Ring != 0 || entry.Position != IsolatedChunk);
+                if ((!DrawCullingEnabled || intersects) && !isolated_out && draw_cursor < TotalMaxDrawnChunks) {
+                    ChunkDrawList[draw_cursor] = {
+                        .WorldPos = entry.Position,
+                        .TextureLayer = entry.Slot + ring.LayerOffset,
+                        .Scale = static_cast<f32>(ring.ChunkScale)
+                    };
+                    draw_cursor++;
+                    ring.DebugStats.DrawnLastFrame++;
+                    if (entry.Fallback) { ring.DebugStats.FallbackLastFrame++; }
+                } else {
+                    ring.DebugStats.CulledLastFrame++;
+                }
+            });
+        }
+        CurrentlyActiveChunks = draw_cursor;
+    }
+
+    // --- RefreshChunks(), stage 3: per-ring finalize + kick-off ---
+    //
+    // Returns true if this ring queued any completed chunk's slice this call - the caller batches
+    // this across every ring into one SubmitReleaseAndWrite() call per frame; a per-ring call
+    // point hit a real GPU-timing assertion failure once the pool let several rings each queue
+    // several chunks in close succession.
+    template<typename RingT>
+    bool FinalizeGenerations(RingT& ring, u32 ring_index, u64 current_tick) {
         bool any_finalized = false;
         for (PendingGeneration& gen : ring.GenerationPool) {
             if (!gen.InFlight || !gen.Done.load(std::memory_order_acquire)) { continue; }
@@ -458,8 +592,8 @@ namespace TerrainManager {
             }
 
             // A stale-chunk regeneration lands in a fresh slot while the old one was still being
-            // drawn (this very frame included - phase 1 already ran). The old slot is orphaned
-            // rather than freed: it stays Valid with its current LastUsedTick but leaves
+            // drawn (this very frame included - the draw list is already built). The old slot is
+            // orphaned rather than freed: it stays Valid with its current LastUsedTick but leaves
             // PositionToSlot, so nothing draws it from next frame on, and LRU only reclaims it once
             // it's genuinely the oldest slot - instead of PickSlotToGenerateInto() grabbing it (as
             // an invalid slot) immediately and uploading over a layer frames in flight may still
@@ -483,19 +617,27 @@ namespace TerrainManager {
 
             gen.InFlight = false;
         }
+        return any_finalized;
+    }
 
-        // Phase 3: kick off generation for the best-scoring missing positions found this pass, up
-        // to GenerationPoolSize concurrently instead of strictly one at a time.
-        for (u32 m = 0; m < best_count; m++) {
+    // Kicks off generation for ScanRing()'s best candidates, up to GenerationPoolSize
+    // concurrently instead of strictly one at a time.
+    template<typename RingT>
+    void KickOffGenerations(RingT& ring, u64 current_tick) {
+        for (u32 m = 0; m < ring.CandidateCount; m++) {
             PendingGeneration* free_slot = nullptr;
             for (PendingGeneration& gen : ring.GenerationPool) {
                 if (!gen.InFlight) { free_slot = &gen; break; }
             }
             if (!free_slot) { break; } // every pool slot busy - the rest wait for next frame
 
+            u32 target_layer = PickSlotToGenerateInto(ring, current_tick);
+            if (target_layer == UINT32_MAX) { break; } // nothing evictable this frame
+
+            const GenerationCandidate& candidate = ring.Candidates[m];
             PendingGeneration& gen = *free_slot;
-            gen.Position = best_missing[m].Position;
-            gen.TargetLayer = PickSlotToGenerateInto(ring);
+            gen.Position = candidate.Position;
+            gen.TargetLayer = target_layer;
             gen.WorldStep = ring.ChunkScale / static_cast<f64>(VerticesPerEdge - 1);
             gen.Params = Generator;
             gen.Epoch = GeneratorEpoch;
@@ -507,9 +649,9 @@ namespace TerrainManager {
             // replaced by a completely unrelated position's terrain the moment finalize lands,
             // instead of cleanly showing as missing and getting regenerated on its own.
             if (ring.Cache[gen.TargetLayer].Valid) {
-                // Only unmap if the map still points here - an orphaned stale slot (see phase 2)
-                // shares its Position with the fresh slot that replaced it, and that mapping must
-                // survive this eviction.
+                // Only unmap if the map still points here - an orphaned stale slot (see
+                // FinalizeGenerations()) shares its Position with the fresh slot that replaced it,
+                // and that mapping must survive this eviction.
                 auto mapped = ring.PositionToSlot.find(PackPosition(ring.Cache[gen.TargetLayer].Position));
                 if (mapped != ring.PositionToSlot.end() && mapped->second == gen.TargetLayer) {
                     ring.PositionToSlot.erase(mapped);
@@ -532,23 +674,21 @@ namespace TerrainManager {
             gen.StartTime = std::chrono::steady_clock::now();
             ring.DebugStats.GenerationsStarted++;
 
-            // The pool-slot reservation above prioritizes (Visible, DistSq) for *which* candidate
-            // gets a slot, but says nothing about the order TaskScheduler's worker threads actually
-            // run submitted work in. TaskPriority::High routes a currently-visible chunk into a
-            // separate, always-drained-first queue tier so it can't get stuck behind older,
+            // The pool-slot reservation above prioritizes which candidate gets a slot, but says
+            // nothing about the order TaskScheduler's worker threads actually run submitted work
+            // in. TaskPriority::High routes a currently-visible chunk into a separate,
+            // always-drained-first queue tier so it can't get stuck behind older,
             // now-less-relevant submissions under a big enough burst.
             TaskScheduler::SubmitTask(
                 GenerateHeightmapTask,
                 &gen,
-                best_missing[m].Visible ? TaskScheduler::TaskPriority::High : TaskScheduler::TaskPriority::Normal
+                candidate.Visible ? TaskScheduler::TaskPriority::High : TaskScheduler::TaskPriority::Normal
             );
         }
 
         u32 in_flight_count = 0;
         for (const PendingGeneration& gen : ring.GenerationPool) { if (gen.InFlight) { in_flight_count++; } }
         ring.DebugStats.GenerationsInFlight = in_flight_count;
-
-        return any_finalized;
     }
 
     void Regenerate() {
@@ -558,13 +698,19 @@ namespace TerrainManager {
     void RefreshChunks(vec3 player_position, const Frustum& camera_frustum) {
         auto profile_start = FrameProfile::Clock::now();
         CurrentTick++;
-        CurrentlyActiveChunks = 0;
 
-        u32 draw_cursor = 0;
-
-        bool any_finalized = RefreshRing(Ring0, 0, player_position, camera_frustum, CurrentTick, draw_cursor);
+        ScanRing(Ring0, 0, player_position, camera_frustum, CurrentTick);
         for (u32 i = 0; i < OuterRingCount; i++) {
-            any_finalized |= RefreshRing(OuterRings[i], i + 1, player_position, camera_frustum, CurrentTick, draw_cursor);
+            ScanRing(OuterRings[i], i + 1, player_position, camera_frustum, CurrentTick);
+        }
+
+        BuildDrawList(player_position, camera_frustum, CurrentTick);
+
+        bool any_finalized = FinalizeGenerations(Ring0, 0, CurrentTick);
+        KickOffGenerations(Ring0, CurrentTick);
+        for (u32 i = 0; i < OuterRingCount; i++) {
+            any_finalized |= FinalizeGenerations(OuterRings[i], i + 1, CurrentTick);
+            KickOffGenerations(OuterRings[i], CurrentTick);
         }
 
         FrameProfile::Current.TransferSubmitMs = 0.0f;

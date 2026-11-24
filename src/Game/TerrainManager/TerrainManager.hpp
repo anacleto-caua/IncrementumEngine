@@ -69,12 +69,30 @@ namespace TerrainManager {
         return 1 + 4 * radius + 4 * quadrant_points;
     }
 
+    // How far (chunk-grid units) past its exact ownership boundary each ring keeps chunks resident
+    // and prefetches missing ones - both its outer edge and the inner edge where the next ring in
+    // takes over. Ownership flips the frame the player crosses a chunk boundary, so without this
+    // the new owner only starts generating at that moment and the block flickers dark until it
+    // lands (BuildDrawList()'s fallback hides that, at the cost of a frame or two at the wrong
+    // LOD). 1 covers one boundary crossing in any axis direction; 2 doesn't fit the
+    // maxArrayLayers budget below (simulated: up to 400 resident chunks in ring 4).
+    constexpr u32 HandoffMargin = 1;
+
+    // Most chunks a ring ever needs resident at once - owned plus the HandoffMargin band -
+    // simulated over 3000 random player positions with the exact OwnsChunk()/NearOwnsChunk()
+    // rules (276 / 207 / 207 / 207 / 248 owned-only, matching the figures below). The caches
+    // must hold these plus every in-flight generation's claimed slot, or LRU would have to evict
+    // a chunk that's still needed this frame.
+    constexpr u32 Ring0MaxResidentChunks = 332;
+    constexpr u32 OuterRingMaxResidentChunks = 323;  // ring 4; rings 1..3 peak at 278
+
     // How many chunks are actually drawn each frame, and how many stay resident on the GPU at
     // once (>= drawn - the extra headroom is a cache: chunks that fall out of the drawn set keep
     // their generated data here instead of being evicted immediately, so revisiting them is
-    // instant) - ring 0.
+    // instant) - ring 0. Fixed rather than MaxDrawnChunks * 2 (634): the outer rings need that
+    // room for their handoff bands, and 450 still leaves ~120 slots of revisit headroom.
     constexpr u32 MaxDrawnChunks = ComputeMaxDrawnChunks(ExplorationRadius);
-    constexpr u32 MaxCachedChunks = MaxDrawnChunks * 2;
+    constexpr u32 MaxCachedChunks = 450;
 
     // An outer ring's own candidate scan has to reach its OUTER radius, not just
     // OuterRingExplorationRadius (which is the ring's own ANNULUS WIDTH in its own chunk-grid
@@ -99,14 +117,9 @@ namespace TerrainManager {
     // Outer rings use a smaller, fixed additive cache headroom instead of ring 0's *2: an outer
     // ring's candidate set only shifts when the player crosses one of ITS chunks (up to 1600 world
     // units for the outermost ring), so LRU eviction pressure there is far lower than ring 0's.
-    constexpr u32 OuterRingCacheHeadroom = 64;
+    // Sized for OuterRingMaxResidentChunks (the handoff band), not just the drawn set.
+    constexpr u32 OuterRingCacheHeadroom = 124;
     constexpr u32 OuterRingMaxCachedChunks = OuterRingMaxDrawnChunks + OuterRingCacheHeadroom;
-
-    static_assert(
-        MaxCachedChunks >= MaxDrawnChunks && OuterRingMaxCachedChunks >= OuterRingMaxDrawnChunks,
-        "MaxCachedChunks must be at least MaxDrawnChunks for every ring, or LRU eviction could "
-        "evict a chunk that's still part of the current frame's drawn set"
-    );
 
     // Every visible-chunk slot across every ring, summed - sizes the shared heightmap texture
     // array and the shared per-frame chunk-instance SSBO.
@@ -211,7 +224,9 @@ namespace TerrainManager {
     struct CacheSlot {
         ivec2 Position = { 0, 0 };
         bool Valid = false;       // has this slot ever actually been generated into
-        u64 LastUsedTick = 0;     // last RefreshChunks() call this slot was part of the drawn set
+        u64 LastUsedTick = 0;     // last RefreshChunks() call this slot was resident-wanted (owned,
+                                  // in the handoff band, or drawn as a fallback) - never evicted
+                                  // while equal to CurrentTick
         u32 Epoch = 0;            // GeneratorEpoch this slot's data was generated under
     };
 
@@ -232,11 +247,29 @@ namespace TerrainManager {
         u64 GenerationsStarted = 0;
         f32 LastGenerationMs = 0;     // wall time of the most recently finalized generation
         u32 GenerationsInFlight = 0;  // how many of this ring's GenerationPool slots are busy right now
-        u32 DrawnLastFrame = 0;       // after frustum culling
+        u32 DrawnLastFrame = 0;       // after frustum culling, fallback draws included
         u32 CulledLastFrame = 0;      // cache-resident but rejected by the frustum test
-        u32 VisibleMissingLastFrame = 0;  // in frustum but not yet generated - the real "dark chunk" count
-        u32 MissingLastFrame = 0;     // in range but not yet generated, visible or not - 0 on every
-                                      // ring (with nothing in flight) means the world is complete
+        u32 FallbackLastFrame = 0;    // drawn by this ring in place of another ring's missing chunks
+        u32 VisibleMissingLastFrame = 0;  // in frustum, missing, and no other ring could cover it
+                                          // either - the real "dark chunk" count
+        u32 MissingLastFrame = 0;     // owned but not yet generated, visible or not, fallback or
+                                      // not - 0 on every ring (with nothing in flight) means the
+                                      // world is complete
+    };
+
+    // One generation candidate a ring's scan found this frame. Lower Kind = more urgent, ranked
+    // after visibility and before distance (see ScanRing()).
+    enum class CandidateKind : u8 {
+        Missing,   // owned and not resident - a hole, or at best a fallback at the wrong LOD
+        Prefetch,  // in the HandoffMargin band - about to become owned
+        Stale,     // resident, but generated under an older GeneratorEpoch
+    };
+
+    struct GenerationCandidate {
+        ivec2 Position;
+        bool Visible;
+        CandidateKind Kind;
+        i64 DistSq;   // chunk-grid units, this ring's own scale - only compared within this ring
     };
 
     // One in-flight async heightmap generation - one slot of a ring's GenerationPool.
@@ -276,6 +309,13 @@ namespace TerrainManager {
     // TransferPipe's/Renderer's submission-pile capacities (64 each, see plans/terrain_lod.md "10.").
     constexpr u32 Ring0GenerationPoolSize = 16;
 
+    static_assert(
+        MaxCachedChunks >= Ring0MaxResidentChunks + Ring0GenerationPoolSize &&
+        OuterRingMaxCachedChunks >= OuterRingMaxResidentChunks + GenerationPoolSize,
+        "a ring's cache must hold its whole resident set (owned + HandoffMargin band) plus every "
+        "in-flight generation's claimed slot, or LRU eviction runs out of slots it may reclaim"
+    );
+
     // One ring's complete streaming/cache state. Templated on its own
     // MaxDrawnChunks/MaxCachedChunks so every ring stays exactly as tightly, statically sized as
     // ring 0 always was - no heap-allocated or worst-case-shared arrays. Also templated on its own
@@ -303,6 +343,11 @@ namespace TerrainManager {
         std::array<PropPlacement, MaxCachedChunksV> Props;  // parallel to HeightmapData, same index
         std::unordered_map<u64, u32> PositionToSlot;
         std::array<PendingGeneration, GenerationPoolSizeV> GenerationPool;
+
+        // This frame's best generation candidates, sorted best first - written by ScanRing(),
+        // consumed by KickOffGenerations() after the draw list is built.
+        std::array<GenerationCandidate, GenerationPoolSizeV> Candidates;
+        u32 CandidateCount = 0;
 
         std::array<EvictionRecord, EvictionLogSize> EvictionLog{};
         u32 EvictionLogCount = 0;
@@ -349,6 +394,13 @@ namespace TerrainManager {
     // order falls back to distance only.
     inline bool DrawCullingEnabled = true;
     inline bool CullingPrioritizesGeneration = true;
+
+    // LOD-handoff toggles, split the same way so each fix can be measured on its own: fallback
+    // draws (BuildDrawList() covering a missing block with another ring's resident data), and
+    // the HandoffMargin band (ScanRing() keeping/prefetching chunks just past each ring's
+    // boundary). Both off reproduces the original break-then-make handoff.
+    inline bool HandoffFallbackEnabled = true;
+    inline bool HandoffPrefetchEnabled = true;
 
     // Draws only ring 0's chunk at IsolatedChunk (props included, since PropPass follows the draw
     // list). Residency and generation are unaffected - Game/Screenshots' chunk shots use it.

@@ -48,6 +48,7 @@ namespace TerrainDebugTools {
         out << "  " << name
             << " Drawn=" << ring.DebugStats.DrawnLastFrame
             << " Culled=" << ring.DebugStats.CulledLastFrame
+            << " Fallback=" << ring.DebugStats.FallbackLastFrame
             << " Dark=" << ring.DebugStats.VisibleMissingLastFrame
             << " GenInFlight=" << ring.DebugStats.GenerationsInFlight
             << " Generated=" << ring.DebugStats.ChunksGenerated
