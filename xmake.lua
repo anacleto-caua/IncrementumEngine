@@ -295,9 +295,12 @@ target("IncrementumEngine")
     -- add_files+a custom rule: Wavefront's .obj extension collides with MSVC's compiled-object
     -- extension on Windows, so add_files feeds them straight to the linker, failing with a
     -- cryptic LNK1107 "invalid or corrupt file".
+    -- Copied file by file with rootdir rather than os.cp("assets", dest): once dest exists, the
+    -- whole-directory form nests the copy into dest/assets/ instead of overwriting, so edited or
+    -- swapped models silently never reached the binary after the first build.
     after_build(function (target)
         if os.isdir("assets") then
-            os.cp("assets", path.join(target:targetdir(), "assets"))
+            os.cp(path.join("assets", "**"), path.join(target:targetdir(), "assets"), {rootdir = "assets"})
         end
     end)
 

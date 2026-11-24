@@ -14,7 +14,7 @@ layout(set = 0, binding = 0) uniform SceneGlobalsData {
 // Matches PropPass::GpuInstance exactly - two vec4s, no manually-computed std430 padding needed.
 struct PropInstance {
     vec4 PositionAndRotation;  // xyz = world position, w = Y rotation (radians)
-    vec4 ScaleAndColor;        // x = scale, yzw = flat base color (RGB)
+    vec4 ScaleAndColor;        // x = scale, yzw = per-instance linear tint multiplier
 };
 
 layout(std430, set = 1, binding = 0) readonly buffer InstanceBuffer {
@@ -23,10 +23,12 @@ layout(std430, set = 1, binding = 0) readonly buffer InstanceBuffer {
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec2 inUV;
 
 layout(location = 0) out vec3 outNormal;
 layout(location = 1) out vec3 outColor;
 layout(location = 2) out vec3 outWorldPos;
+layout(location = 3) out vec2 outUV;
 
 void main() {
     PropInstance instance = instanceData.instances[gl_InstanceIndex];
@@ -52,6 +54,7 @@ void main() {
     outNormal = rotatedNormal;
     outColor = instance.ScaleAndColor.yzw;
     outWorldPos = worldPos;
+    outUV = inUV;
 
     gl_Position = sceneGlobalsData.data.ViewProjection * vec4(worldPos, 1.0);
 }

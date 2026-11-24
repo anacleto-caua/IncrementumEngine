@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <string>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -23,6 +24,11 @@ public:
     enum class DrawMode : u8 { Instanced, PerInstance, Off };
     DrawMode Mode = DrawMode::Instanced;
 
+    // Props past this horizontal distance from the camera aren't drawn at all. Without it every
+    // ring's chunks contribute props out to the full coverage radius - tens of thousands of
+    // sub-pixel instances, which real (thousands-of-triangles) art can't afford.
+    f32 DrawDistance = 1200.0f;
+
     u32 DrawCallsLastFrame = 0;
     u32 InstancesLastFrame = 0;
 
@@ -39,16 +45,42 @@ private:
     // footgun for a derived-vec3-in-a-shared-layout situation) rather than hand-computing padding.
     struct GpuInstance {
         vec4 PositionAndRotation;  // xyz = world position, w = Y rotation (radians)
-        vec4 ScaleAndColor;        // x = scale, yzw = flat base color (RGB, no textures in v1)
+        vec4 ScaleAndColor;        // x = scale, yzw = per-instance linear tint multiplier (color variation)
+    };
+
+    // Fragment-stage push constant, one per SubMesh draw - matches prop.frag's PropPushConstants.
+    struct PushConstants {
+        glm::vec3 Tint;    // linear albedo multiplier (.mtl Kd, or the model's fallback color)
+        u32 LayerAndFlags;  // layer in TextureImage (0 = plain white) | FoliageFlag
+    };
+    // Set for submeshes whose texture has cut-out alpha (leaf cards): prop.frag lights those as
+    // thin translucent foliage instead of as an opaque surface.
+    static constexpr u32 FoliageFlag = 1u << 31;
+    static_assert(sizeof(PushConstants) == 16);
+
+    struct SubMeshResource {
+        u32 FirstIndex = 0;
+        u32 IndexCount = 0;
+        u32 TextureLayer = 0;
+        bool Foliage = false;
+        glm::vec3 Tint = glm::vec3(1.0f);
     };
 
     struct ModelResource {
         BufferId VertexBuffer;
         BufferId IndexBuffer;
-        u32 IndexCount = 0;
-        vec3 BaseColor;
+        std::vector<SubMeshResource> SubMeshes;
     };
     std::array<ModelResource, ModelCount> Models;
+
+    // Every texture any model's .mtl references, deduplicated by path - index + 1 is its layer in
+    // TextureImage (layer 0 is reserved for plain white). Filled by LoadModel(), consumed once by
+    // CreateTextures().
+    struct TextureSource {
+        std::string Diffuse;
+        std::string Alpha;  // separate map_d mask, empty = use Diffuse's own alpha channel
+    };
+    std::vector<TextureSource> TextureSources;
 
     // Worst case: every currently-drawn chunk's props all happen to be this one model type.
     // Wasteful in the common case (models are usually mixed) but bounded and simple - matches this
@@ -68,16 +100,20 @@ private:
     VkPipeline PropPipeline {};
     VkPipelineLayout PropPipelineLayout {};
 
-    // v1 texturing: one procedural checkerboard shared by every model, sampled via world-space
-    // planar UV (inWorldPos.xz) in prop.frag rather than real per-vertex UVs - neither placeholder
-    // .obj has texture coordinates yet (see ModelLoader.hpp), so this is a stand-in to prove the
-    // sampling path end to end, not the final textured-prop pipeline. Swap for real UVs (and drop
-    // the planar projection) once real, UV-authored prop art replaces the placeholders.
+    // One sRGB 2D array holding every prop texture, each resampled to TextureSize and given a full
+    // mip chain (alpha-coverage-preserving, so cut-out leaves don't thin out with distance).
+    // Uploaded once at Init() on the Graphics queue directly rather than through TransferPipe,
+    // whose ownership-transfer path only ever handles mip 0.
+    static constexpr u32 TextureSize = 1024;
+    static constexpr u32 MaxTextureLayers = 64;
     ImageId TextureImage;
     ImageViewId TextureView;
     VkSampler TextureSampler = VK_NULL_HANDLE;
 
-    IncResult LoadModel(TerrainManager::PropModel model, const char* path, vec3 base_color);
-    IncResult CreateTexture();
+    // base_color (sRGB) is only used by submeshes with no .mtl material at all; target_height
+    // rescales the mesh to a world size in metres (see ModelLoader::NormalizeHeight).
+    IncResult LoadModel(TerrainManager::PropModel model, const char* path, vec3 base_color, f32 target_height);
+    u32 TextureLayerFor(const std::string& diffuse, const std::string& alpha);
+    IncResult CreateTextures();
     void OutPropData();
 };

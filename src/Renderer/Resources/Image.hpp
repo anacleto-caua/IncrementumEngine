@@ -37,7 +37,7 @@ struct ImagePool {
 
         VkImageCreateInfo image_create_info {};
         image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        image_create_info.mipLevels = 1;
+        image_create_info.mipLevels = create_info.MipLevels;
         image_create_info.extent.depth = 1;
         image_create_info.format = create_info.Format;
         image_create_info.imageType = VK_IMAGE_TYPE_2D;
