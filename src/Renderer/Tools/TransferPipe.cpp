@@ -3,6 +3,7 @@
 #include <cassert>
 
 #include "Renderer/Vk/LeanVk.hpp"
+#include "Engine/Core/FrameProfile.hpp"
 
 IncResult TransferPipe::Init() {
     INC_CHECK(StagingBuffer.Create(), "staging buffer creation failed");
@@ -234,15 +235,22 @@ void TransferPipe::LazyWrite() {
 // AcquirePending (already piggybacked onto Renderer::Frame()) picks up the result whenever
 // the GPU actually gets to it.
 void TransferPipe::SubmitReleaseAndWrite() {
+    auto profile_start = FrameProfile::Clock::now();
     for (QueueRole role : VkVault::UniqueRoles) {
         while (OwnershipTracker.HasPendingRelease(role)) {
             OwnershipTracker.ReleasePending(role, QueueRole::Transfer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
             OwnershipTracker.SubmitReleases(role);
         }
     }
+    FrameProfile::Current.TransferReleaseMs = FrameProfile::MsSince(profile_start);
 
+    profile_start = FrameProfile::Clock::now();
     LazyWrite();
+    FrameProfile::Current.TransferRecordMs = FrameProfile::MsSince(profile_start);
+
+    profile_start = FrameProfile::Clock::now();
     TransferSubmissionPile.Submit(VK_NULL_HANDLE);
+    FrameProfile::Current.TransferQueueSubmitMs = FrameProfile::MsSince(profile_start);
 }
 
 void TransferPipe::LazySubmit() {

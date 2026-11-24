@@ -10,6 +10,7 @@
 #include "Passes/Pass.hpp"
 #include "Tools/DebugPanel.hpp"
 #include "Engine/Core/Window.hpp"
+#include "Engine/Core/FrameProfile.hpp"
 #include "Renderer/Descriptors/DescriptorManager.hpp"
 
 #include "Renderer/Vk/LeanVk.hpp"
@@ -165,7 +166,9 @@ void Renderer::Frame() {
 
     // Wait for this frame-in-flight slot's previous GPU work to actually finish before
     // resetting its command pool - resetting first would reset buffers that might still be pending.
+    auto profile_start = FrameProfile::Clock::now();
     FrameSemaphore.Wait(target_frame.LastSignaledValue);
+    FrameProfile::Current.FenceWaitMs = FrameProfile::MsSince(profile_start);
 
     // That slot's GPU work is retired now, so its timestamps are final - reading them never blocks.
     ReadTimestamps(FrameContext.FrameInFlightIndex);
@@ -177,6 +180,7 @@ void Renderer::Frame() {
     target_frame.FrameBlock.Reset();
     FrameContext.DrawCommand = target_frame.FrameBlock.GetNext();
 
+    profile_start = FrameProfile::Clock::now();
     VkResult result = vkAcquireNextImageKHR(
         VkVault::Device,
         SwapchainHandle,
@@ -185,6 +189,8 @@ void Renderer::Frame() {
         VK_NULL_HANDLE,
         &FrameContext.ImageViewIndex
     );
+    FrameProfile::Current.AcquireMs = FrameProfile::MsSince(profile_start);
+    profile_start = FrameProfile::Clock::now();
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         vkDeviceWaitIdle(VkVault::Device);
         return;
@@ -437,6 +443,8 @@ void Renderer::Frame() {
 
     WriteTimestamp(TimestampsPerFrame - 1);
     LeanVk::EndCommand(FrameContext.DrawCommand);
+    FrameProfile::Current.RecordMs = FrameProfile::MsSince(profile_start);
+    profile_start = FrameProfile::Clock::now();
 
     // Reclaim any command buffer pools whose prior work has actually finished on the GPU
     TransferPipe.TryReclaimCommandBuffers();
@@ -473,9 +481,12 @@ void Renderer::Frame() {
 
     // Submit
     SubmissionPile.Submit();
+    FrameProfile::Current.SubmitMs = FrameProfile::MsSince(profile_start);
 
     SwapchainPresentInfo.pWaitSemaphores = &SwapchainImages[FrameContext.ImageViewIndex].RenderFinished.Semaphore;
+    profile_start = FrameProfile::Clock::now();
     vkQueuePresentKHR(VkVault::Queues[QueueRole::Present].Queue, &SwapchainPresentInfo);
+    FrameProfile::Current.PresentMs = FrameProfile::MsSince(profile_start);
 
     // Save the timeline value so the CPU can wait on it next time!
     target_frame.LastSignaledValue = signal_value;

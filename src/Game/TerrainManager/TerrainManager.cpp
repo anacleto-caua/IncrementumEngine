@@ -11,6 +11,7 @@
 
 #include "Game/Game.hpp"
 #include "Engine/Core/TaskScheduler/TaskScheduler.hpp"
+#include "Engine/Core/FrameProfile.hpp"
 
 namespace TerrainManager {
     void WriteHeightmap(Heightmap& out, ivec2 position, f64 world_step, const GeneratorParams& params);
@@ -555,6 +556,7 @@ namespace TerrainManager {
     }
 
     void RefreshChunks(vec3 player_position, const Frustum& camera_frustum) {
+        auto profile_start = FrameProfile::Clock::now();
         CurrentTick++;
         CurrentlyActiveChunks = 0;
 
@@ -565,7 +567,16 @@ namespace TerrainManager {
             any_finalized |= RefreshRing(OuterRings[i], i + 1, player_position, camera_frustum, CurrentTick, draw_cursor);
         }
 
-        if (any_finalized) { GTransferPipe.SubmitReleaseAndWrite(); }
+        FrameProfile::Current.TransferSubmitMs = 0.0f;
+        FrameProfile::Current.TransferReleaseMs = 0.0f;
+        FrameProfile::Current.TransferRecordMs = 0.0f;
+        FrameProfile::Current.TransferQueueSubmitMs = 0.0f;
+        if (any_finalized) {
+            auto submit_start = FrameProfile::Clock::now();
+            GTransferPipe.SubmitReleaseAndWrite();
+            FrameProfile::Current.TransferSubmitMs = FrameProfile::MsSince(submit_start);
+        }
+        FrameProfile::Current.TerrainMs = FrameProfile::MsSince(profile_start);
     }
 
     i32 FindRingForDistance(f64 horizontal_distance, f64& out_chunk_scale) {
