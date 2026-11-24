@@ -3,6 +3,6 @@ docs/*
 *.md
 .*/
 terrain_debug_log.txt
-imagens/
-results/
-screenshots/
+/imagens/
+/results/
+/screenshots/
