@@ -62,8 +62,13 @@ namespace TaskScheduler {
             }
 
             // Execute the task
-            if (has_task && current_task.EntryPoint) {
-                current_task.EntryPoint(current_task.Payload, context);
+            if (has_task) {
+                // Counted down on pickup, not on completion: PendingTasks is what idle workers
+                // sleep on, so it must only count tasks still sitting in a queue.
+                PendingTasks.fetch_sub(1, std::memory_order_release);
+                if (current_task.EntryPoint) {
+                    current_task.EntryPoint(current_task.Payload, context);
+                }
             } else {
                 // Lock if there is absolutely no work
                 std::unique_lock<std::mutex> lock(WakeMutex);
@@ -133,6 +138,9 @@ namespace TaskScheduler {
             WorkersTaskQueues[index].PushExternal({entry_point, payload});
         }
 
+        // Taking the mutex orders this against a worker that already checked the predicate but
+        // hasn't blocked yet; without it the notify can be lost and the task waits for the next one.
+        { std::lock_guard<std::mutex> lock(WakeMutex); }
         // Wake up ONE sleeping worker to handle this new task
         WakeCondition.notify_one();
     }
@@ -159,10 +167,10 @@ namespace TaskScheduler {
             }
 
             if (has_task) {
+                PendingTasks.fetch_sub(1, std::memory_order_release);
                 if (current_task.EntryPoint) {
                     current_task.EntryPoint(current_task.Payload, dummy_context);
                 }
-                PendingTasks.fetch_sub(1, std::memory_order_release);
             } else {
                 // Main thread can't really afford a fancy pause
                 std::this_thread::yield();
