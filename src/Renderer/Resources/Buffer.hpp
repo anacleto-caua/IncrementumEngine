@@ -13,6 +13,7 @@ struct Buffer {
         INDEX,
         SSBO,
         UBO,
+        READBACK,   // GPU -> CPU copies (e.g. Renderer's swapchain capture), read on the host
 
         _COUNT_
     };
@@ -69,6 +70,12 @@ struct BufferPool {
                 vma_usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
                 vma_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
                 memory_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+                break;
+            case Buffer::Type::READBACK:
+                vk_usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+                vma_usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+                vma_flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+                memory_flags = 0;
                 break;
             default:
                 analog::error("unexpected type on buffer creation.");

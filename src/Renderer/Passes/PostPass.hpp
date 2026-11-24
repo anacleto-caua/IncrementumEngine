@@ -22,7 +22,17 @@ public:
     // debug section.
     f32 Exposure = 1.0f;
 
+    // Off = the raw scene radiance, only clamped to the display range (no exposure, no curve) -
+    // shows what this pass contributes, e.g. for Game/Screenshots' before/after shots.
+    bool Tonemap = true;
+
 private:
+    // Mirrors post.frag's PostPushConstants.
+    struct PushConstants {
+        f32 Exposure;
+        u32 Tonemap;
+    };
+
     VkPipeline PostPipeline = VK_NULL_HANDLE;
     VkPipelineLayout PostPipelineLayout = VK_NULL_HANDLE;
     VkSampler SceneColorSampler = VK_NULL_HANDLE;

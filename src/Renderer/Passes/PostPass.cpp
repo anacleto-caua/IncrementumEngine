@@ -31,17 +31,17 @@ IncResult PostPass::Init() {
     SceneColorSet = DescriptorManager::AllocateSet(DescriptorManager::PostLayout);
     RebindSceneColor();
 
-    VkPushConstantRange exposure_range {};
-    exposure_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    exposure_range.offset = 0;
-    exposure_range.size = sizeof(f32);
+    VkPushConstantRange push_range {};
+    push_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    push_range.offset = 0;
+    push_range.size = sizeof(PushConstants);
 
     VkPipelineLayoutCreateInfo layout_info {};
     layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layout_info.setLayoutCount = 1;
     layout_info.pSetLayouts = &DescriptorManager::PostLayout;
     layout_info.pushConstantRangeCount = 1;
-    layout_info.pPushConstantRanges = &exposure_range;
+    layout_info.pPushConstantRanges = &push_range;
 
     VK_CHECK(
         vkCreatePipelineLayout(VkVault::Device, &layout_info, nullptr, &PostPipelineLayout),
@@ -147,7 +147,8 @@ void PostPass::Render() {
         cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, PostPipelineLayout,
         DescriptorMap::Post::SetIndex, 1, &SceneColorSet, 0, nullptr
     );
-    vkCmdPushConstants(cmd, PostPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(f32), &Exposure);
+    PushConstants push_constants = { .Exposure = Exposure, .Tonemap = Tonemap ? 1u : 0u };
+    vkCmdPushConstants(cmd, PostPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &push_constants);
 
     vkCmdDraw(cmd, 6, 1, 0, 0);
 }

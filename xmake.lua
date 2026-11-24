@@ -62,11 +62,15 @@ rule("compile_shaders")
             -- Shared #include files (shaders/include/*.glsl) count as dependencies of every stage
             -- shader - editing one must recompile everything that might include it, and the
             -- cache has no include-graph awareness of its own.
+            -- dependfile keyed by output_file (so per mode/platform): with the default one, a
+            -- source edit compiled in one mode marked the shader up to date in every other mode,
+            -- leaving e.g. release running a stale .spv that still existed - which the existence
+            -- check above can't catch. Hit for real with post.frag's push constant change.
             local dependency_files = table.join({sourcefile}, os.files(path.join(path.directory(sourcefile), "include", "*.glsl")))
             depend.on_changed(function ()
                 os.vrunv(glslc, {sourcefile, "-o", output_file})
                 print("Compiling: " .. shader_name .. " -> " .. output_file)
-            end, {files = dependency_files})
+            end, {files = dependency_files, dependfile = target:dependfile(output_file)})
         else
             print("Warning: glslc not found. Skipping: " .. shader_name)
         end

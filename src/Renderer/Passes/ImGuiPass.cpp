@@ -70,6 +70,7 @@ void ImGuiPass::Render() {
         ImGui::Text("Frame in flight: %u / %u", GRenderer.FrameContext.FrameInFlightIndex, Renderer::MAX_FRAMES_IN_FLIGHT);
         ImGui::Text("Sun Direction: (%.2f, %.2f, %.2f)", static_cast<f64>(GRenderer.SunDirection.x), static_cast<f64>(GRenderer.SunDirection.y), static_cast<f64>(GRenderer.SunDirection.z));
         ImGui::Text("Scene target: RGBA16F HDR, %ux MSAA", static_cast<u32>(RendererConstants::SceneSampleCount));
+        ImGui::Checkbox("Tonemap", &GPostPass.Tonemap);
         ImGui::SliderFloat("Exposure", &GPostPass.Exposure, 0.1f, 4.0f, "%.2f");
 
         // Was console-log-only until now (VkVault.cpp's own TODO asked for this) - which queue

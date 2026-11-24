@@ -9,6 +9,7 @@
 #include "Game/TerrainManager/TerrainManager.hpp"
 #include "Game/TerrainDebugTools.hpp"
 #include "Game/Benchmark/Benchmark.hpp"
+#include "Game/Screenshots/Screenshots.hpp"
 #include "Renderer/VkVault.hpp"
 
 #include <chrono>
@@ -47,6 +48,10 @@ namespace Game {
             GEngine.Config.Workers = bench_config.Workers;
             VkVault::PreferImmediatePresent = true;
         }
+        if (Screenshots::Active) {
+            GEngine.Config.Width = Screenshots::Config.Width;
+            GEngine.Config.Height = Screenshots::Config.Height;
+        }
 
         MainCamera =
             CreateCamera(
@@ -80,6 +85,9 @@ namespace Game {
         if (Benchmark::Active) {
             Benchmark::Init(bench_config, MainCamera, engine_init_ms);
         }
+        if (Screenshots::Active) {
+            Screenshots::Init(MainCamera);
+        }
 
         // Good taste stuff
         Context.BindKey(Action::ToggleFullscreen, Input::Key::F11);
@@ -106,6 +114,8 @@ namespace Game {
             // The benchmark's scripted camera replaces the fly-by one, same ordering constraint.
             if (Benchmark::Active) {
                 Benchmark::BeginFrame(Engine.CurrentFrame.DeltaTime);
+            } else if (Screenshots::Active) {
+                Screenshots::Update(Engine.CurrentFrame.DeltaTime);
             } else {
                 FlyByCamera::Update(Engine.CurrentFrame.DeltaTime);
             }
@@ -116,26 +126,29 @@ namespace Game {
             Context.Frame();
 
             PerfOverlay::Frame(Engine.CurrentFrame.DeltaTime);
-            // Its periodic log-file dump would be file I/O inside the measured window.
-            if (!Benchmark::Active) {
+            // Its periodic log-file dump would be file I/O inside the measured window, and its
+            // crosshair would end up in every screenshot.
+            if (!Benchmark::Active && !Screenshots::Active) {
                 TerrainDebugTools::Update(Engine.CurrentFrame.DeltaTime);
             }
 
-            // Simplest possible exercise of TextPass: a static bottom-left watermark. Real
-            // HUD/label usage can call GTextPass.DrawText() from anywhere. Reads the window's own
-            // framebuffer size rather than GRenderer.Swapchain (Renderer's internal, GPU-precise
-            // extent, kept for TextPass's own NDC math) - a UI label's position doesn't need that
-            // precision, and Game code has no reason to reach into Renderer's swapchain state for it.
-            i32 window_width, window_height;
-            Window::GetFramebufferSize(window_width, window_height);
+            if (!Screenshots::Active) {
+                // Simplest possible exercise of TextPass: a static bottom-left watermark. Real
+                // HUD/label usage can call GTextPass.DrawText() from anywhere. Reads the window's own
+                // framebuffer size rather than GRenderer.Swapchain (Renderer's internal, GPU-precise
+                // extent, kept for TextPass's own NDC math) - a UI label's position doesn't need that
+                // precision, and Game code has no reason to reach into Renderer's swapchain state for it.
+                i32 window_width, window_height;
+                Window::GetFramebufferSize(window_width, window_height);
 
-            GTextPass.DrawText(
-                "Incrementum Engine",
-                10.0f,
-                static_cast<f32>(window_height) - 25.0f,
-                vec3(0.85f, 0.0f, 0.85f),
-                2.5f
-            );
+                GTextPass.DrawText(
+                    "Incrementum Engine",
+                    10.0f,
+                    static_cast<f32>(window_height) - 25.0f,
+                    vec3(0.85f, 0.0f, 0.85f),
+                    2.5f
+                );
+            }
 
             Benchmark::EndFrame();
         }

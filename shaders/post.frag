@@ -5,6 +5,7 @@ layout(set = 0, binding = 0) uniform sampler2D sceneColor;
 
 layout(push_constant) uniform PostPushConstants {
     float exposure;
+    uint tonemap;   // 0 = raw radiance, clamped - PostPass::Tonemap
 } pc;
 
 layout(location = 0) out vec4 outColor;
@@ -43,5 +44,6 @@ void main() {
     vec3 hdr = texelFetch(sceneColor, ivec2(gl_FragCoord.xy), 0).rgb;
 
     // Output stays LINEAR - the _SRGB swapchain format applies the sRGB encode on write.
-    outColor = vec4(AcesFitted(hdr * pc.exposure), 1.0);
+    vec3 color = pc.tonemap != 0u ? AcesFitted(hdr * pc.exposure) : clamp(hdr, 0.0, 1.0);
+    outColor = vec4(color, 1.0);
 }

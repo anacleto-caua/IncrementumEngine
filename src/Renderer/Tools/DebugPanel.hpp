@@ -24,6 +24,10 @@ namespace DebugPanel {
     inline constexpr const char* SectionNames[] = { "Terrain", "Props", "Sky", "Text", "Renderer" };
     inline bool SectionOpen[static_cast<u32>(Section::_COUNT_)] = {};
 
+    // Gated at Renderer::Frame()'s DrawToolbar() call. With the toolbar hidden and every section
+    // closed ImGui draws nothing at all - what Game/Screenshots relies on for clean captures.
+    inline bool ToolbarVisible = true;
+
     inline void DrawToolbar() {
         if (ImGui::BeginMainMenuBar()) {
             for (u32 i = 0; i < static_cast<u32>(Section::_COUNT_); i++) {

@@ -25,6 +25,7 @@ namespace TerrainManager {
     FastNoiseLite HillNoise;         // gentle rolling relief on open land
 
     f32 Elevation(f32 world_x, f32 world_z, f32 min_wavelength, const GeneratorParams& params);
+    f32 ElevationImpl(f32 world_x, f32 world_z, f32 min_wavelength, const GeneratorParams& params, ElevationLayers* out_layers);
 
 
     // World-space bounds of a chunk, for frustum culling. Y uses the full [0, HeightScale] range
@@ -379,8 +380,10 @@ namespace TerrainManager {
                     ring.Cache[cache_index].LastUsedTick = current_tick;
                     bool intersects = Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale));
 
+                    bool isolated_out = IsolateChunk && (ring_index != 0 || candidate != IsolatedChunk);
                     if (
                         (!DrawCullingEnabled || intersects) &&
+                        !isolated_out &&
                         (draw_cursor < TotalMaxDrawnChunks)
                         ) {
                         ChunkDrawList[draw_cursor] = {
@@ -675,6 +678,18 @@ namespace TerrainManager {
     //   mountains  - ErodedFbm() masked to broad massifs. The mask ramps over thousands of units, so
     //                mountains rise out of foothills instead of standing up as sheer walls.
     f32 Elevation(f32 world_x, f32 world_z, f32 min_wavelength, const GeneratorParams& params) {
+        return ElevationImpl(world_x, world_z, min_wavelength, params, nullptr);
+    }
+
+    ElevationLayers SampleElevationLayers(f32 world_x, f32 world_z, f32 min_wavelength) {
+        ElevationLayers layers;
+        ElevationImpl(world_x, world_z, min_wavelength, Generator, &layers);
+        return layers;
+    }
+
+    // out_layers (diagnostic export only) additionally evaluates the mountain field where the mask
+    // is zero, which the normal path skips - otherwise the result is identical either way.
+    f32 ElevationImpl(f32 world_x, f32 world_z, f32 min_wavelength, const GeneratorParams& params, ElevationLayers* out_layers) {
         // Seed = a large per-seed offset into the same noise field, rather than reseeding the
         // FastNoiseLite objects - those are shared with worker threads and stay read-only after
         // Init(). Offsets stay under ~40000 units so f32 coordinates keep sub-centimetre precision.
@@ -708,7 +723,7 @@ namespace TerrainManager {
                   * params.HillAmount;
 
         f32 mountains = 0.0f;
-        if (massif > 0.0f) {
+        if (massif > 0.0f || out_layers) {
             f32 peaks = ErodedFbm(world_x, world_z, min_wavelength, params.MountainWavelength, params.ErosionStrength);
 
             // Peak sharpness, two parts (measured: no needles, >60 deg slopes stay ~1-2%):
@@ -728,15 +743,26 @@ namespace TerrainManager {
                 crest = (1.0f - soft_abs) * (1.0f - soft_abs);
             }
 
-            f32 raw = massif * std::sqrt(massif)
-                    * (0.2f + 0.8f * shaped + params.PeakSharpness * 0.3f * crest * peaks * peaks);
+            f32 field = 0.2f + 0.8f * shaped + params.PeakSharpness * 0.3f * crest * peaks * peaks;
+            f32 raw = massif * std::sqrt(massif) * field;
             // Soft ceiling (1 - e^-kx, normalized to reach MountainHeight at raw = 1) instead of a
             // hard clamp, so the very tallest peaks round off rather than flatten.
             constexpr f32 Softness = 2.2f;
-            mountains = params.MountainHeight * (1.0f - std::exp(-Softness * raw)) / (1.0f - std::exp(-Softness));
+            auto soft_ceiling = [&](f32 x) {
+                return params.MountainHeight * (1.0f - std::exp(-Softness * x)) / (1.0f - std::exp(-Softness));
+            };
+            mountains = soft_ceiling(raw);
+            if (out_layers) { out_layers->Mountains = soft_ceiling(field); }
         }
 
-        return std::clamp(base + hills + mountains, 0.0f, 1.0f);
+        f32 elevation = std::clamp(base + hills + mountains, 0.0f, 1.0f);
+        if (out_layers) {
+            out_layers->Continents = base;
+            out_layers->RangeMask = massif;
+            out_layers->Hills = hills;
+            out_layers->Final = elevation;
+        }
+        return elevation;
     }
 
     bool IsWorldComplete() {

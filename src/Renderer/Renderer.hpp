@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <string>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -82,6 +83,14 @@ public:
 
     void Resize(i32 width, i32 height);
     void BindCamera(Camera* camera);
+
+    // Screenshot of the final swapchain image (after every overlay pass): the next Frame() copies
+    // it into a readback buffer, and a later Frame() writes it to `path` as a PNG once that
+    // frame's GPU work has retired - polled, never waited on. CapturePending stays true until
+    // then (on failure too - check the file). Returns false if a capture is already pending or
+    // this swapchain can't be copied from.
+    bool RequestCapture(std::string path);
+    bool CapturePending = false;
 
     // The single-sample resolve target PostPass reads - recreated on resize (PostPass is told via
     // RebindSceneColor(), so never cache this handle across frames).
@@ -172,6 +181,22 @@ private:
     VkSwapchainKHR SwapchainHandle = VK_NULL_HANDLE;
     VkPresentInfoKHR SwapchainPresentInfo {};
     std::vector<SwapchainImage> SwapchainImages;
+
+    // Swapchain capture - see RequestCapture(). Recorded = the copy is in a submitted frame,
+    // which signals FrameSemaphore with CaptureSignalValue once it's done.
+    bool SwapchainCopySupported = false;
+    std::string CapturePath;
+    BufferId CaptureBuffer;
+    u32 CaptureWidth = 0;
+    u32 CaptureHeight = 0;
+    bool CaptureRecorded = false;
+    u64 CaptureSignalValue = 0;
+
+    // Records the copy and leaves the swapchain image in PRESENT_SRC - in place of the plain
+    // present barrier.
+    bool AllocateCaptureBuffer();
+    void RecordCapture(VkImage swapchain_image);
+    void FinishCapture();
 
     IncResult InitSwapchain();
     void DestroySwapchain();

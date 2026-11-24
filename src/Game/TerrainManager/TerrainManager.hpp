@@ -322,6 +322,11 @@ namespace TerrainManager {
     inline bool DrawCullingEnabled = true;
     inline bool CullingPrioritizesGeneration = true;
 
+    // Draws only ring 0's chunk at IsolatedChunk (props included, since PropPass follows the draw
+    // list). Residency and generation are unaffected - Game/Screenshots' chunk shots use it.
+    inline bool IsolateChunk = false;
+    inline ivec2 IsolatedChunk = { 0, 0 };
+
     // Per-generation timing history, appended at finalize time only while RecordGenerations is set
     // (the benchmark turns it on and reserves capacity up front). Ring 0 = Ring0, i = OuterRings[i - 1].
     struct GenerationRecord {
@@ -352,6 +357,20 @@ namespace TerrainManager {
     // below SeaLevel) at one XZ point, evaluated straight from the same generator the heightmaps
     // use - no streamed data needed. Only valid after Init() (the noise is configured there).
     f32 SampleSurfaceHeight(f32 world_x, f32 world_z);
+
+    // The generator's layers at one point, all from the same evaluation (Game/Screenshots' layer
+    // export). Heights are normalized like the heightmaps; SeaLevel is not applied.
+    //   Final = clamp(Continents + Hills + soft_ceiling(RangeMask^1.5 * field)), where Mountains is
+    //   soft_ceiling(field) - the mountain relief *before* the mask, evaluated everywhere.
+    struct ElevationLayers {
+        f32 Continents = 0.0f;  // SeaLevel + scaled continental noise - ocean vs land, plateau height
+        f32 RangeMask = 0.0f;   // [0,1] where mountain massifs are allowed
+        f32 Mountains = 0.0f;   // unmasked mountain field
+        f32 Hills = 0.0f;       // rolling hills contribution
+        f32 Final = 0.0f;       // what WriteHeightmap stores
+    };
+    // min_wavelength: noise finer than this is faded out, as for a ring's texel spacing * 2.
+    ElevationLayers SampleElevationLayers(f32 world_x, f32 world_z, f32 min_wavelength);
 
     // Every ring has every in-range chunk resident and nothing in flight, as of the last
     // RefreshChunks() - read from each ring's DebugStats, so it's also (vacuously) true before the

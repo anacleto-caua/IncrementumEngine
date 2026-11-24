@@ -3,6 +3,8 @@
 #include <array>
 #include <vector>
 
+#include <stb/stb_image_write.h>
+
 #include "VkVault.hpp"
 #include "Camera.hpp"
 #include "Passes/Pass.hpp"
@@ -168,6 +170,10 @@ void Renderer::Frame() {
     // That slot's GPU work is retired now, so its timestamps are final - reading them never blocks.
     ReadTimestamps(FrameContext.FrameInFlightIndex);
 
+    if (CaptureRecorded) {
+        FinishCapture();
+    }
+
     target_frame.FrameBlock.Reset();
     FrameContext.DrawCommand = target_frame.FrameBlock.GetNext();
 
@@ -317,7 +323,9 @@ void Renderer::Frame() {
 
     // Actual frame begins
 
-    DebugPanel::DrawToolbar();
+    if (DebugPanel::ToolbarVisible) {
+        DebugPanel::DrawToolbar();
+    }
     for (u32 i = 0; i < ScenePasses.size(); i++) {
         ScenePasses[i]->Render();
         WriteTimestamp(2 + i);
@@ -390,32 +398,42 @@ void Renderer::Frame() {
 
     vkCmdEndRendering(FrameContext.DrawCommand);
 
-    VkImageMemoryBarrier presenting_barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-        .pNext = nullptr,
-        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstAccessMask = 0,
-        .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = SwapchainImages[FrameContext.ImageViewIndex].Image,
-        .subresourceRange {
-            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        }
-    };
-    VkPipelineStageFlags src_stage_2 = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkPipelineStageFlags dst_stage_2 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    vkCmdPipelineBarrier(
-        FrameContext.DrawCommand,
-        src_stage_2, dst_stage_2,
-        0, 0, nullptr, 0, nullptr, 1,
-        &presenting_barrier
-    );
+    bool capturing = CapturePending && !CaptureRecorded;
+    // A resize since RequestCapture() changed the extent - the buffer has to match it.
+    if (capturing && (CaptureWidth != SwapchainExtent.width || CaptureHeight != SwapchainExtent.height)) {
+        Buffers.Del(CaptureBuffer);
+        capturing = AllocateCaptureBuffer();
+    }
+    if (capturing) {
+        RecordCapture(SwapchainImages[FrameContext.ImageViewIndex].Image);
+    } else {
+        VkImageMemoryBarrier presenting_barrier = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask = 0,
+            .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = SwapchainImages[FrameContext.ImageViewIndex].Image,
+            .subresourceRange {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .baseMipLevel = 0,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1,
+            }
+        };
+        VkPipelineStageFlags src_stage_2 = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkPipelineStageFlags dst_stage_2 = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        vkCmdPipelineBarrier(
+            FrameContext.DrawCommand,
+            src_stage_2, dst_stage_2,
+            0, 0, nullptr, 0, nullptr, 1,
+            &presenting_barrier
+        );
+    }
 
     WriteTimestamp(TimestampsPerFrame - 1);
     LeanVk::EndCommand(FrameContext.DrawCommand);
@@ -461,9 +479,159 @@ void Renderer::Frame() {
 
     // Save the timeline value so the CPU can wait on it next time!
     target_frame.LastSignaledValue = signal_value;
+    if (capturing) {
+        CaptureRecorded = true;
+        CaptureSignalValue = signal_value;
+    }
+    TimestampsPending[FrameContext.FrameInFlightIndex] = TimestampPool != VK_NULL_HANDLE;
 
     FrameContext.FrameInFlightIndex =
         (FrameContext.FrameInFlightIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+bool Renderer::RequestCapture(std::string path) {
+    if (CapturePending) {
+        analog::warn("capture of '{}' refused: another capture is still pending", path);
+        return false;
+    }
+    VkFormat format = VkVault::SurfaceFormat.format;
+    bool format_supported =
+        format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_B8G8R8A8_UNORM ||
+        format == VK_FORMAT_R8G8B8A8_SRGB || format == VK_FORMAT_R8G8B8A8_UNORM;
+    if (!SwapchainCopySupported || !format_supported) {
+        analog::error("capture of '{}' refused: swapchain can't be copied from (format {})", path, static_cast<i32>(format));
+        return false;
+    }
+
+    CapturePath = std::move(path);
+    if (!AllocateCaptureBuffer()) { return false; }
+    CapturePending = true;
+    return true;
+}
+
+bool Renderer::AllocateCaptureBuffer() {
+    CaptureWidth = SwapchainExtent.width;
+    CaptureHeight = SwapchainExtent.height;
+    Buffer::CreateInfo create_info = {
+        .Size = static_cast<size_t>(CaptureWidth) * CaptureHeight * 4,
+        .Type = Buffer::Type::READBACK
+    };
+    if (Buffers.Add(create_info, CaptureBuffer) != IncResult::SUCCESS) {
+        analog::error("capture of '{}' failed: readback buffer creation failed", CapturePath);
+        CapturePending = false;
+        return false;
+    }
+    return true;
+}
+
+void Renderer::RecordCapture(VkImage swapchain_image) {
+    VkCommandBuffer cmd = FrameContext.DrawCommand;
+    VkImageSubresourceRange color_range = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+
+    VkImageMemoryBarrier to_transfer = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = swapchain_image,
+        .subresourceRange = color_range
+    };
+    vkCmdPipelineBarrier(
+        cmd,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &to_transfer
+    );
+
+    VkBufferImageCopy region = {
+        .bufferOffset = 0,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        },
+        .imageOffset = { 0, 0, 0 },
+        .imageExtent = { CaptureWidth, CaptureHeight, 1 }
+    };
+    vkCmdCopyImageToBuffer(
+        cmd, swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        Buffers.Get(CaptureBuffer)->Handle, 1, &region
+    );
+
+    VkImageMemoryBarrier to_present = to_transfer;
+    to_present.srcAccessMask = 0;
+    to_present.dstAccessMask = 0;
+    to_present.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    to_present.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    // The host reads the buffer after waiting on FrameSemaphore, but the copy's writes still have
+    // to be made available to the host domain explicitly.
+    VkBufferMemoryBarrier to_host = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+        .pNext = nullptr,
+        .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = Buffers.Get(CaptureBuffer)->Handle,
+        .offset = 0,
+        .size = VK_WHOLE_SIZE
+    };
+    vkCmdPipelineBarrier(
+        cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT | VK_PIPELINE_STAGE_HOST_BIT,
+        0, 0, nullptr, 1, &to_host, 1, &to_present
+    );
+}
+
+void Renderer::FinishCapture() {
+    FrameSemaphore.Query();
+    if (FrameSemaphore.LastInqueriedValue < CaptureSignalValue) { return; }
+
+    Buffer* buffer = Buffers.Get(CaptureBuffer);
+    vmaInvalidateAllocation(VkVault::VmaAllocator, buffer->Allocation, 0, VK_WHOLE_SIZE);
+    const u8* source = static_cast<const u8*>(Buffers.Map(CaptureBuffer));
+
+    // Swapchain bytes are already display-encoded (the _SRGB format encoded them on write), so
+    // they go to the PNG as-is, apart from channel order and a forced-opaque alpha.
+    VkFormat format = VkVault::SurfaceFormat.format;
+    bool bgra = format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_B8G8R8A8_UNORM;
+    size_t pixel_count = static_cast<size_t>(CaptureWidth) * CaptureHeight;
+    std::vector<u8> pixels(pixel_count * 4);
+    for (size_t i = 0; i < pixel_count; i++) {
+        pixels[i * 4 + 0] = source[i * 4 + (bgra ? 2 : 0)];
+        pixels[i * 4 + 1] = source[i * 4 + 1];
+        pixels[i * 4 + 2] = source[i * 4 + (bgra ? 0 : 2)];
+        pixels[i * 4 + 3] = 255;
+    }
+    Buffers.Unmap(CaptureBuffer);
+    Buffers.Del(CaptureBuffer);
+
+    i32 written = stbi_write_png(
+        CapturePath.c_str(),
+        static_cast<i32>(CaptureWidth), static_cast<i32>(CaptureHeight), 4,
+        pixels.data(), static_cast<i32>(CaptureWidth * 4)
+    );
+    if (written) {
+        analog::info("captured {}x{} to '{}'", CaptureWidth, CaptureHeight, CapturePath);
+    } else {
+        analog::error("capture failed: couldn't write '{}'", CapturePath);
+    }
+
+    CaptureRecorded = false;
+    CapturePending = false;
 }
 
 IncResult Renderer::InitTimestamps() {
@@ -652,6 +820,12 @@ IncResult Renderer::InitSwapchain() {
     SwapchainCreateInfo.imageColorSpace = VkVault::SurfaceFormat.colorSpace;
     SwapchainCreateInfo.imageArrayLayers = 1;
     SwapchainCreateInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    // TRANSFER_SRC only for RequestCapture(). Practically universal, but not guaranteed - without
+    // it captures are refused instead of the swapchain failing to create.
+    SwapchainCopySupported = (capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+    if (SwapchainCopySupported) {
+        SwapchainCreateInfo.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
     SwapchainCreateInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     SwapchainCreateInfo.presentMode = VkVault::PresentMode;
     SwapchainCreateInfo.clipped = VK_TRUE;
