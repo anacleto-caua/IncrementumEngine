@@ -86,6 +86,10 @@ namespace Platform {
         return ToClose;
     }
 
+    void RequestClose() {
+        ToClose = true;
+    }
+
     bool SDLCALL EventWatcher([[maybe_unused]]void* userdata, SDL_Event* event) {
         using namespace Window;
 

@@ -365,7 +365,8 @@ void TerrainPass::OutTerrainData() {
 
     if (!DebugPanel::BeginSection(DebugPanel::Section::Terrain)) { return; }
 
-    ImGui::Checkbox("Frustum Culling", &CullingEnabled);
+    ImGui::Checkbox("Frustum Culling (draw)", &DrawCullingEnabled);
+    ImGui::Checkbox("Frustum Culling (generation priority)", &CullingPrioritizesGeneration);
     ImGui::Checkbox("Show Chunk Debug Colors", &ShowChunkDebugColors);
     ImGui::Text("Total Drawn: %u / %u", CurrentlyActiveChunks, TotalMaxDrawnChunks);
 

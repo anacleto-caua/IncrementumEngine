@@ -18,6 +18,12 @@ struct EngineConfig {
     u32 Height = 720;
     u32 TargetFps = 165;
     u32 FOV = 110;
+
+    // Benchmark mode: skip the frame-pacing sleep entirely, so the measured frame time is the
+    // real work instead of the TargetFps cap.
+    bool Uncapped = false;
+    // TaskScheduler worker count, 0 = its own default.
+    u32 Workers = 0;
 };
 
 class Engine {

@@ -437,6 +437,12 @@ namespace VkVault {
         allocator_create_info.physicalDevice = PhysicalDevice;
         allocator_create_info.device = Device;
         allocator_create_info.instance = Instance;
+        // Matches the instance's API level so VMA uses the core memory-properties-2 path.
+        allocator_create_info.vulkanApiVersion = VK_API_VERSION_1_3;
+        // VK_EXT_memory_budget is already a required device extension; this makes
+        // vmaGetHeapBudgets() report the driver's real per-heap usage/budget instead of an estimate
+        // from VMA's own allocations.
+        allocator_create_info.flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
 
         VK_CHECK(
             vmaCreateAllocator(&allocator_create_info, &VmaAllocator),
@@ -489,6 +495,15 @@ namespace VkVault {
         vkGetPhysicalDeviceSurfacePresentModesKHR(PhysicalDevice, Surface, &present_mode_count, nullptr);
         present_modes.resize(present_mode_count);
         vkGetPhysicalDeviceSurfacePresentModesKHR(PhysicalDevice, Surface, &present_mode_count, present_modes.data());
+
+        if (PreferImmediatePresent) {
+            for (VkPresentModeKHR current_present_mode : present_modes) {
+                if (current_present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+                    PresentMode = current_present_mode;
+                    return;
+                }
+            }
+        }
 
         for (VkPresentModeKHR comparing_present_mode : PRESENT_MODE_TIERLIST ) {
             for (VkPresentModeKHR current_present_mode : present_modes) {

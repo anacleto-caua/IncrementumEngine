@@ -92,6 +92,9 @@ namespace VkVault {
     inline VkSurfaceKHR Surface;
     inline VkSurfaceFormatKHR SurfaceFormat;
     inline VkPresentModeKHR PresentMode;
+    // Set before Create() to try IMMEDIATE first (benchmark mode, so presentation never blocks
+    // on vblank). MAILBOX is the normal first choice.
+    inline bool PreferImmediatePresent = false;
 
     inline constexpr u32 COLOR_ATTACHMENT_FORMAT_COUNT = 1;
     inline std::array<VkFormat, COLOR_ATTACHMENT_FORMAT_COUNT> ColorAttachmentFormats { }; // Will be filled by the SurfaceFormat.format

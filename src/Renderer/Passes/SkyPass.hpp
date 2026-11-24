@@ -17,6 +17,10 @@ private:
     i32 PrimarySteps = 16;
     i32 SecondarySteps = 8;
 
+public:
+    // Public so the benchmark can pin the sun to a fixed position (lighting held constant
+    // across runs) - see Benchmark::Init().
+
     // Slider-friendly form of GRenderer.SunDirection - kept as the source of truth for the ImGui
     // controls (instead of round-tripping through Cartesian every frame) so dragging a slider
     // near the poles doesn't fight azimuth/elevation ambiguity there.
@@ -34,5 +38,6 @@ private:
     f32 MaxElevationDegrees = 80.0f;
     f32 ElapsedSeconds = 0.0f;
 
+private:
     void OutSkyData();
 };

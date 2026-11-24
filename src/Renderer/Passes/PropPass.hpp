@@ -17,6 +17,15 @@
 // type, reading placement data TerrainManager already generated alongside each chunk's heightmap.
 class PropPass : public Pass {
 public:
+    // Instanced is the normal path. PerInstance issues one vkCmdDrawIndexed per instance (same
+    // SSBO, firstInstance = i, so prop.vert's gl_InstanceIndex lookup is unchanged) - the
+    // non-instanced baseline the benchmark compares against. Off skips props entirely.
+    enum class DrawMode : u8 { Instanced, PerInstance, Off };
+    DrawMode Mode = DrawMode::Instanced;
+
+    u32 DrawCallsLastFrame = 0;
+    u32 InstancesLastFrame = 0;
+
     IncResult Init() override;
     void Destroy() override;
     void Render() override;

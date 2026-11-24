@@ -1,6 +1,7 @@
 #include  "TaskScheduler.hpp"
 
 #include <deque>
+#include <algorithm>
 #include <mutex>
 #include <vector>
 #include <thread>
@@ -74,12 +75,14 @@ namespace TaskScheduler {
         }
     }
 
-    void Create() {
+    void Create(u32 num_threads) {
         // Half of logical processors, not hardware_concurrency() - 1: the latter is real CPU
         // oversubscription (leaves ~1 thread for the OS/main thread/everything else on the
         // machine) and, past what the hardware can actually run in parallel, tends to lose
         // throughput to context-switch/cache-thrashing overhead rather than gain it.
         NumThreads = static_cast<u8>(std::thread::hardware_concurrency() / 2);
+        // Explicit override, used by the benchmark's worker-scaling scenario.
+        if (num_threads != 0) NumThreads = static_cast<u8>(std::min<u32>(num_threads, 255));
         if (NumThreads == 0) NumThreads = 1; // lol
 
         WorkerContexts.resize(NumThreads);
@@ -95,6 +98,10 @@ namespace TaskScheduler {
             Workers.emplace_back(&TaskScheduler::WorkerThreadLoop, i);
         }
         analog::info("Task System initialized with {} worker threads.\n",  NumThreads);
+    }
+
+    u32 WorkerCount() {
+        return NumThreads;
     }
 
     void Destroy() {

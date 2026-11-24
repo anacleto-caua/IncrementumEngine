@@ -281,6 +281,7 @@ void PropPass::FrameSensibleTransfers() {
     using namespace TerrainManager;
 
     for (u32 model = 0; model < ModelCount; model++) { StagingInstances[model].clear(); }
+    if (Mode == DrawMode::Off) { return; }
 
     for (u32 i = 0; i < CurrentlyActiveChunks; i++) {
         const ChunkInstanceData& chunk = ChunkDrawList[i];
@@ -330,6 +331,10 @@ void PropPass::FrameSensibleTransfers() {
 void PropPass::Render() {
     OutPropData();
 
+    DrawCallsLastFrame = 0;
+    InstancesLastFrame = 0;
+    if (Mode == DrawMode::Off) { return; }
+
     VkCommandBuffer& cmd = GRenderer.FrameContext.DrawCommand;
     u32 frame_index = GRenderer.FrameContext.FrameInFlightIndex;
 
@@ -358,7 +363,16 @@ void PropPass::Render() {
             nullptr
         );
 
-        vkCmdDrawIndexed(cmd, Models[model].IndexCount, count, 0, 0, 0);
+        if (Mode == DrawMode::PerInstance) {
+            for (u32 i = 0; i < count; i++) {
+                vkCmdDrawIndexed(cmd, Models[model].IndexCount, 1, 0, 0, i);
+            }
+            DrawCallsLastFrame += count;
+        } else {
+            vkCmdDrawIndexed(cmd, Models[model].IndexCount, count, 0, 0, 0);
+            DrawCallsLastFrame++;
+        }
+        InstancesLastFrame += count;
     }
 }
 
@@ -369,6 +383,13 @@ void PropPass::OutPropData() {
     static_assert(ModelCount == 2, "update model_names above if the PropModel enum changes");
 
     if (DebugPanel::BeginSection(DebugPanel::Section::Props)) {
+        static const char* mode_names[] = { "Instanced", "Per-instance draws", "Off" };
+        int mode = static_cast<int>(Mode);
+        if (ImGui::Combo("Draw mode", &mode, mode_names, IM_ARRAYSIZE(mode_names))) {
+            Mode = static_cast<DrawMode>(mode);
+        }
+        ImGui::Text("Draw calls: %u", DrawCallsLastFrame);
+
         u32 total = 0;
         for (u32 model = 0; model < ModelCount; model++) {
             u32 count = static_cast<u32>(StagingInstances[model].size());

@@ -88,6 +88,24 @@ void ImGuiPass::Render() {
             ImGui::TreePop();
         }
 
+        if (ImGui::TreeNodeEx("GPU timings", ImGuiTreeNodeFlags_DefaultOpen)) {
+            const Renderer::GpuTimingData& timings = GRenderer.GpuTimings;
+            if (!timings.Available) {
+                ImGui::Text("Unavailable (no timestamp support)");
+            } else {
+                ImGui::Text("Frame:   %.3f ms", static_cast<f64>(timings.FrameMs));
+                ImGui::Text("Setup:   %.3f ms", static_cast<f64>(timings.SetupMs));
+                for (u32 i = 0; i < timings.ScenePassMs.size(); i++) {
+                    ImGui::Text("%-8s %.3f ms", Renderer::ScenePassNames[i], static_cast<f64>(timings.ScenePassMs[i]));
+                }
+                ImGui::Text("Resolve: %.3f ms", static_cast<f64>(timings.ResolveMs));
+                for (u32 i = 0; i < timings.OverlayPassMs.size(); i++) {
+                    ImGui::Text("%-8s %.3f ms", Renderer::OverlayPassNames[i], static_cast<f64>(timings.OverlayPassMs[i]));
+                }
+            }
+            ImGui::TreePop();
+        }
+
         DebugPanel::EndSection();
     }
 

@@ -8,6 +8,10 @@
 #include "Engine/Core/Window.hpp"
 #include "Game/TerrainManager/TerrainManager.hpp"
 #include "Game/TerrainDebugTools.hpp"
+#include "Game/Benchmark/Benchmark.hpp"
+#include "Renderer/VkVault.hpp"
+
+#include <chrono>
 
 namespace Game {
     enum class Action {
@@ -33,7 +37,17 @@ namespace Game {
         .Projection = mat4(1.0f)
     };
 
-    IncResult Create() {
+    IncResult Create(const Benchmark::BenchConfig& bench_config) {
+        // Benchmark runs: fixed resolution, no frame cap, IMMEDIATE present when available, and an
+        // explicit worker count - all of which must be decided before Engine.Init() creates them.
+        if (Benchmark::Active) {
+            GEngine.Config.Width = bench_config.Width;
+            GEngine.Config.Height = bench_config.Height;
+            GEngine.Config.Uncapped = true;
+            GEngine.Config.Workers = bench_config.Workers;
+            VkVault::PreferImmediatePresent = true;
+        }
+
         MainCamera =
             CreateCamera(
                 static_cast<f32>(GEngine.Config.Width) / static_cast<f32>(GEngine.Config.Height),
@@ -48,7 +62,9 @@ namespace Game {
         MainCamera.FarPlane = static_cast<f32>(TerrainManager::TotalCoverageRadius + TerrainManager::OuterRingChunkScales.back());
         UpdateMatrices(MainCamera);
 
+        auto engine_init_start = std::chrono::steady_clock::now();
         INC_CHECK(Engine.Init(MainCamera), "couldn't create engine");
+        f32 engine_init_ms = std::chrono::duration<f32, std::milli>(std::chrono::steady_clock::now() - engine_init_start).count();
         Engine.RefreshConfig();
 
         TerrainManager::Init();
@@ -60,6 +76,10 @@ namespace Game {
 
         FlyByCamera::Bind(MainCamera);
         TerrainDebugTools::Init(MainCamera);
+
+        if (Benchmark::Active) {
+            Benchmark::Init(bench_config, MainCamera, engine_init_ms);
+        }
 
         // Good taste stuff
         Context.BindKey(Action::ToggleFullscreen, Input::Key::F11);
@@ -83,7 +103,12 @@ namespace Game {
             // Must run before RefreshChunks(): it rotates MainCamera and recomputes its Frustum for
             // this frame. Running RefreshChunks() first culls against last frame's frustum, which
             // shows up as a black leading edge during a fast turn.
-            FlyByCamera::Update(Engine.CurrentFrame.DeltaTime);
+            // The benchmark's scripted camera replaces the fly-by one, same ordering constraint.
+            if (Benchmark::Active) {
+                Benchmark::BeginFrame(Engine.CurrentFrame.DeltaTime);
+            } else {
+                FlyByCamera::Update(Engine.CurrentFrame.DeltaTime);
+            }
 
             // TODO: Idk if I should feed the camera here, maybe I should just get the renderer camera from inside this system, hum
             TerrainManager::RefreshChunks(MainCamera.Position, MainCamera.Frustum);
@@ -91,7 +116,10 @@ namespace Game {
             Context.Frame();
 
             PerfOverlay::Frame(Engine.CurrentFrame.DeltaTime);
-            TerrainDebugTools::Update(Engine.CurrentFrame.DeltaTime);
+            // Its periodic log-file dump would be file I/O inside the measured window.
+            if (!Benchmark::Active) {
+                TerrainDebugTools::Update(Engine.CurrentFrame.DeltaTime);
+            }
 
             // Simplest possible exercise of TextPass: a static bottom-left watermark. Real
             // HUD/label usage can call GTextPass.DrawText() from anywhere. Reads the window's own
@@ -108,6 +136,8 @@ namespace Game {
                 vec3(0.85f, 0.0f, 0.85f),
                 2.5f
             );
+
+            Benchmark::EndFrame();
         }
     }
 

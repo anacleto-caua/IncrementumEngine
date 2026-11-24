@@ -2,6 +2,7 @@
 
 #include <array>
 #include <chrono>
+#include <vector>
 #include <unordered_map>
 
 #include "Core/Math.hpp"
@@ -207,6 +208,8 @@ namespace TerrainManager {
         u32 DrawnLastFrame = 0;       // after frustum culling
         u32 CulledLastFrame = 0;      // cache-resident but rejected by the frustum test
         u32 VisibleMissingLastFrame = 0;  // in frustum but not yet generated - the real "dark chunk" count
+        u32 MissingLastFrame = 0;     // in range but not yet generated, visible or not - 0 on every
+                                      // ring (with nothing in flight) means the world is complete
     };
 
     // One in-flight async heightmap generation - one slot of a ring's GenerationPool.
@@ -222,6 +225,7 @@ namespace TerrainManager {
         GeneratorParams Params;            // snapshot of Generator at kick-off - what the worker reads
         u32 Epoch = 0;                     // GeneratorEpoch at kick-off, stamped onto the cache slot
         std::chrono::steady_clock::time_point StartTime;
+        f32 ComputeMs = 0;                 // worker-side generation time only (no queue wait), written before Done
         std::atomic<bool> Done{false};     // release by worker, acquire by main thread
         bool InFlight = false;             // main-thread-only, no atomics needed
     };
@@ -310,9 +314,26 @@ namespace TerrainManager {
         return OuterRings[ring_index].Props[local_slot];
     }
 
-    // Debug/validation toggle - lets frustum culling be disabled at runtime to sanity-check its
-    // effect (e.g. via ImGui) without a rebuild.
-    inline bool CullingEnabled = true;
+    // Debug/validation toggles - frustum culling at runtime without a rebuild. Split in two so a
+    // measurement can change one variable at a time: DrawCullingEnabled gates the draw list (and
+    // what counts as a visible dark chunk), CullingPrioritizesGeneration gates whether visibility
+    // ranks generation candidates. With it off every candidate counts as visible, so generation
+    // order falls back to distance only.
+    inline bool DrawCullingEnabled = true;
+    inline bool CullingPrioritizesGeneration = true;
+
+    // Per-generation timing history, appended at finalize time only while RecordGenerations is set
+    // (the benchmark turns it on and reserves capacity up front). Ring 0 = Ring0, i = OuterRings[i - 1].
+    struct GenerationRecord {
+        u32 Ring;
+        f32 ComputeMs;   // worker-side WriteHeightmap + GeneratePropPlacements
+        f32 LatencyMs;   // kick-off to finalize on the main thread (queue wait + compute + poll delay)
+    };
+    inline bool RecordGenerations = false;
+    inline std::vector<GenerationRecord> GenerationLog;
+
+    // Wall time of Init()'s synchronous ring 0 batch.
+    inline f32 InitBatchMs = 0;
 
     // Monotonic per-RefreshChunks-call counter, shared across every ring, stamped onto a cache
     // slot whenever it's part of the current frame's drawn set - what makes each ring's LRU
@@ -331,6 +352,11 @@ namespace TerrainManager {
     // below SeaLevel) at one XZ point, evaluated straight from the same generator the heightmaps
     // use - no streamed data needed. Only valid after Init() (the noise is configured there).
     f32 SampleSurfaceHeight(f32 world_x, f32 world_z);
+
+    // Every ring has every in-range chunk resident and nothing in flight, as of the last
+    // RefreshChunks() - read from each ring's DebugStats, so it's also (vacuously) true before the
+    // first RefreshChunks() call.
+    bool IsWorldComplete();
 
     // --- Diagnostic-only API for TerrainDebugTools - not used by the core streaming loop itself,
     // deliberately narrow and read-only. ---

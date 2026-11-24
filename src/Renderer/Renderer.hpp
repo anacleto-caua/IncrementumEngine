@@ -58,6 +58,23 @@ public:
     };
     SwapchainState Swapchain;
 
+    // GPU time per pass from timestamp queries, read back from the most recently *retired* frame
+    // (so MAX_FRAMES_IN_FLIGHT frames behind the CPU, never waited on). Available is false when
+    // the graphics queue has no timestamp support. Indices of ScenePassMs/OverlayPassMs follow
+    // ScenePassNames/OverlayPassNames.
+    struct GpuTimingData {
+        bool Available = false;
+        u64 FrameSerial = 0;    // bumps every time a new frame's results land
+        f32 FrameMs = 0;        // first to last timestamp of the frame's command buffer
+        f32 SetupMs = 0;        // per-frame transfers + barriers before the scene scope
+        f32 ResolveMs = 0;      // scene scope end (MSAA resolve) + overlay barriers
+        std::vector<f32> ScenePassMs;
+        std::vector<f32> OverlayPassMs;
+    };
+    GpuTimingData GpuTimings;
+    static constexpr std::array<const char*, 3> ScenePassNames = { "terrain", "props", "sky" };
+    static constexpr std::array<const char*, 3> OverlayPassNames = { "post", "text", "imgui" };
+
     IncResult Init();
     void Destroy();
 
@@ -107,6 +124,20 @@ private:
     };
     TimelineSemaphore FrameSemaphore;
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> Frames;
+
+    // One block of TimestampsPerFrame queries per frame in flight, in one pool. Layout within a
+    // block: frame start, scene begin, one after each scene pass, overlay begin, one after each
+    // overlay pass, frame end. Pending = this slot's block was submitted and not yet read back.
+    VkQueryPool TimestampPool = VK_NULL_HANDLE;
+    u32 TimestampsPerFrame = 0;
+    f32 TimestampPeriodNs = 0;
+    u64 TimestampMask = 0;
+    std::array<bool, MAX_FRAMES_IN_FLIGHT> TimestampsPending = {};
+    std::vector<u64> TimestampScratch;
+
+    IncResult InitTimestamps();
+    void WriteTimestamp(u32 index_in_frame);
+    void ReadTimestamps(u32 frame_in_flight_index);
 
     // Camera UBO - the internal half of GlobalDescriptorsState above.
     struct SceneGlobals {

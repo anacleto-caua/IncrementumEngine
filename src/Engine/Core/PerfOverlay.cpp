@@ -5,13 +5,7 @@
 
 #include <imgui.h>
 
-#if defined(_WIN32)
-#include <windows.h>
-#include <psapi.h>
-#else
-#include <cstdio>
-#include <unistd.h>
-#endif
+#include "Engine/Core/ProcessMetrics.hpp"
 
 namespace PerfOverlay {
     // Enough history for a readable graph and a stable 1% low at typical frame rates - a few
@@ -26,9 +20,6 @@ namespace PerfOverlay {
     // syscalls, and the numbers are far too noisy frame-to-frame to read at 60Hz anyway.
     constexpr f32 MetricsPollInterval = 0.5f;
     f32 TimeSinceMetricsPoll = MetricsPollInterval;
-
-    f32 MemoryUsageMb = 0;
-    f32 CpuUsagePercent = 0;
 
     struct SortedHistory {
         std::array<f32, HistorySize> Values;
@@ -60,99 +51,6 @@ namespace PerfOverlay {
         return mean_ms > 0 ? 1000.0f / mean_ms : 0;
     }
 
-#if defined(_WIN32)
-    u64 ToU64(const FILETIME& file_time) {
-        return (static_cast<u64>(file_time.dwHighDateTime) << 32) | file_time.dwLowDateTime;
-    }
-
-    void PollProcessMetrics() {
-        PROCESS_MEMORY_COUNTERS memory_counters;
-        if (GetProcessMemoryInfo(GetCurrentProcess(), &memory_counters, sizeof(memory_counters))) {
-            MemoryUsageMb = static_cast<f32>(memory_counters.WorkingSetSize) / (1024.0f * 1024.0f);
-        }
-
-        // CPU usage is a delta between polls, so the first poll only establishes a baseline.
-        static u64 last_process_time = 0;
-        static u64 last_wall_time = 0;
-
-        FILETIME creation_time, exit_time, kernel_time, user_time;
-        if (!GetProcessTimes(GetCurrentProcess(), &creation_time, &exit_time, &kernel_time, &user_time)) {
-            return;
-        }
-
-        FILETIME now_file_time;
-        GetSystemTimeAsFileTime(&now_file_time);
-
-        u64 process_time = ToU64(kernel_time) + ToU64(user_time);
-        u64 wall_time = ToU64(now_file_time);
-
-        if (last_wall_time != 0 && wall_time > last_wall_time) {
-            u64 process_delta = process_time - last_process_time;
-            u64 wall_delta = wall_time - last_wall_time;
-
-            SYSTEM_INFO system_info;
-            GetSystemInfo(&system_info);
-
-            f32 usage = (static_cast<f32>(process_delta) / static_cast<f32>(wall_delta)) * 100.0f;
-            CpuUsagePercent = usage / static_cast<f32>(system_info.dwNumberOfProcessors);
-        }
-
-        last_process_time = process_time;
-        last_wall_time = wall_time;
-    }
-#else
-    void PollProcessMetrics() {
-        FILE* status = std::fopen("/proc/self/statm", "r");
-        if (status) {
-            u64 total_pages = 0;
-            u64 resident_pages = 0;
-            if (std::fscanf(status, "%llu %llu", (unsigned long long*)&total_pages, (unsigned long long*)&resident_pages) == 2) {
-                f32 page_size = static_cast<f32>(sysconf(_SC_PAGESIZE));
-                MemoryUsageMb = (static_cast<f32>(resident_pages) * page_size) / (1024.0f * 1024.0f);
-            }
-            std::fclose(status);
-        }
-
-        // CPU usage is a delta between polls, so the first poll only establishes a baseline.
-        static u64 last_process_ticks = 0;
-        static u64 last_wall_ticks = 0;
-
-        FILE* stat = std::fopen("/proc/self/stat", "r");
-        if (!stat) { return; }
-
-        // Fields 14 (utime) and 15 (stime) of /proc/self/stat, skipping the leading pid and the
-        // comm field (which can itself contain spaces, hence the %*[^)] skip).
-        u64 utime = 0;
-        u64 stime = 0;
-        int scanned = std::fscanf(
-            stat,
-            "%*d (%*[^)]) %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %llu %llu",
-            (unsigned long long*)&utime,
-            (unsigned long long*)&stime
-        );
-        std::fclose(stat);
-
-        if (scanned != 2) { return; }
-
-        u64 process_ticks = utime + stime;
-        u64 wall_ticks = static_cast<u64>(clock());
-
-        if (last_wall_ticks != 0 && wall_ticks > last_wall_ticks) {
-            f32 ticks_per_second = static_cast<f32>(sysconf(_SC_CLK_TCK));
-            f32 process_seconds = static_cast<f32>(process_ticks - last_process_ticks) / ticks_per_second;
-            f32 wall_seconds = static_cast<f32>(wall_ticks - last_wall_ticks) / static_cast<f32>(CLOCKS_PER_SEC);
-
-            if (wall_seconds > 0) {
-                f32 core_count = static_cast<f32>(sysconf(_SC_NPROCESSORS_ONLN));
-                CpuUsagePercent = (process_seconds / wall_seconds) * 100.0f / core_count;
-            }
-        }
-
-        last_process_ticks = process_ticks;
-        last_wall_ticks = wall_ticks;
-    }
-#endif
-
     void Frame(f32 delta_time) {
         f32 frame_time_ms = delta_time * 1000.0f;
 
@@ -163,7 +61,7 @@ namespace PerfOverlay {
         TimeSinceMetricsPoll += delta_time;
         if (TimeSinceMetricsPoll >= MetricsPollInterval) {
             TimeSinceMetricsPoll = 0;
-            PollProcessMetrics();
+            ProcessMetrics::Poll();
         }
 
         if (!Visible) { return; }
@@ -197,8 +95,8 @@ namespace PerfOverlay {
             }
 
             ImGui::Separator();
-            ImGui::Text("CPU: %.1f%%", static_cast<f64>(CpuUsagePercent));
-            ImGui::Text("Mem: %.1f MB", static_cast<f64>(MemoryUsageMb));
+            ImGui::Text("CPU: %.1f%%", static_cast<f64>(ProcessMetrics::CpuPercent));
+            ImGui::Text("Mem: %.1f MB", static_cast<f64>(ProcessMetrics::WorkingSetMb));
 
             ImGui::Separator();
 

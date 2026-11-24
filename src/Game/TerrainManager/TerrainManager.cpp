@@ -128,6 +128,7 @@ namespace TerrainManager {
         }
 
         // Kickstart the valid data - ring 0 only, exactly as before this plan.
+        auto init_batch_start = std::chrono::steady_clock::now();
         vec3 player_pos = {0, 0, 0};
         ivec2 player_coord;
         player_coord.x = static_cast<i32>(std::floor(player_pos.x/ChunkScale));
@@ -177,6 +178,7 @@ namespace TerrainManager {
         CurrentlyActiveChunks = coords_counter;
 
         TaskScheduler::Wait(counter);
+        InitBatchMs = std::chrono::duration<f32, std::milli>(std::chrono::steady_clock::now() - init_batch_start).count();
 
         for (u32 i = 0; i < coords_counter; i++) {
             GTerrainPass.Heightmap.QueueSlice(i, &Ring0.HeightmapData[i], sizeof(Heightmap));
@@ -200,6 +202,7 @@ namespace TerrainManager {
 
     void GenerateHeightmapTask(void* payload, TaskScheduler::WorkerContext&) {
         PendingGeneration* generation = static_cast<PendingGeneration*>(payload);
+        auto compute_start = std::chrono::steady_clock::now();
         WriteHeightmap(generation->StagingData, generation->Position, generation->WorldStep, generation->Params);
         GeneratePropPlacements(
             generation->StagingProps,
@@ -207,6 +210,7 @@ namespace TerrainManager {
             generation->Position,
             generation->WorldStep * static_cast<f64>(VerticesPerEdge - 1)
         );
+        generation->ComputeMs = std::chrono::duration<f32, std::milli>(std::chrono::steady_clock::now() - compute_start).count();
         generation->Done.store(true, std::memory_order_release);
     }
 
@@ -251,7 +255,7 @@ namespace TerrainManager {
     // call per frame; a per-ring call point hit a real GPU-timing assertion failure once the pool
     // let several rings each queue several chunks in close succession.
     template<typename RingT>
-    bool RefreshRing(RingT& ring, vec3 player_position, const Frustum& camera_frustum, u64 current_tick, u32& draw_cursor) {
+    bool RefreshRing(RingT& ring, u32 ring_index, vec3 player_position, const Frustum& camera_frustum, u64 current_tick, u32& draw_cursor) {
         // Phase 1: rebuild this ring's slice of the shared draw list from its cache as it stood
         // at the start of this call - deliberately BEFORE finalizing any generation that just
         // completed (see phase 2 below), so a chunk never gets added to the drawn list in the
@@ -293,6 +297,7 @@ namespace TerrainManager {
         u32 culled_count = 0;
         u32 drawn_count = 0;
         u32 visible_missing_count = 0;
+        u32 missing_count = 0;
 
         auto consider_for_generation = [&](ivec2 candidate, bool visible, bool stale, i32 dx, i32 dy) {
             for (const PendingGeneration& gen : ring.GenerationPool) {
@@ -375,7 +380,7 @@ namespace TerrainManager {
                     bool intersects = Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale));
 
                     if (
-                        (!CullingEnabled || intersects) &&
+                        (!DrawCullingEnabled || intersects) &&
                         (draw_cursor < TotalMaxDrawnChunks)
                         ) {
                         ChunkDrawList[draw_cursor] = {
@@ -391,16 +396,17 @@ namespace TerrainManager {
                     }
 
                     if (ring.Cache[cache_index].Epoch != GeneratorEpoch) {
-                        consider_for_generation(candidate, !CullingEnabled || intersects, true, dx, dy);
+                        consider_for_generation(candidate, !CullingPrioritizesGeneration || intersects, true, dx, dy);
                     }
                 } else {
                     // Visible-but-missing counts regardless of already-in-flight status below -
                     // an in-flight chunk is still visibly dark on screen until it actually finishes,
                     // so it belongs in this "how many dark chunks are in view right now" stat too.
-                    bool visible = !CullingEnabled || Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale));
-                    if (visible) { visible_missing_count++; }
+                    bool intersects = Intersects(camera_frustum, ChunkBounds(candidate, ring.ChunkScale));
+                    if (!DrawCullingEnabled || intersects) { visible_missing_count++; }
+                    missing_count++;
 
-                    consider_for_generation(candidate, visible, false, dx, dy);
+                    consider_for_generation(candidate, !CullingPrioritizesGeneration || intersects, false, dx, dy);
                 }
             }
         }
@@ -411,6 +417,7 @@ namespace TerrainManager {
         ring.DebugStats.DrawnLastFrame = drawn_count;
         ring.DebugStats.CulledLastFrame = culled_count;
         ring.DebugStats.VisibleMissingLastFrame = visible_missing_count;
+        ring.DebugStats.MissingLastFrame = missing_count;
 
         // Queue every completed generation's slice - the caller submits once for the whole
         // frame's batch across every ring (see the comment on this function).
@@ -424,6 +431,9 @@ namespace TerrainManager {
             ring.DebugStats.ChunksGenerated++;
             ring.DebugStats.LastGenerationMs =
                 std::chrono::duration<f32, std::milli>(std::chrono::steady_clock::now() - gen.StartTime).count();
+            if (RecordGenerations) {
+                GenerationLog.push_back({ .Ring = ring_index, .ComputeMs = gen.ComputeMs, .LatencyMs = ring.DebugStats.LastGenerationMs });
+            }
 
             // A stale-chunk regeneration lands in a fresh slot while the old one was still being
             // drawn (this very frame included - phase 1 already ran). The old slot is orphaned
@@ -529,9 +539,9 @@ namespace TerrainManager {
 
         u32 draw_cursor = 0;
 
-        bool any_finalized = RefreshRing(Ring0, player_position, camera_frustum, CurrentTick, draw_cursor);
+        bool any_finalized = RefreshRing(Ring0, 0, player_position, camera_frustum, CurrentTick, draw_cursor);
         for (u32 i = 0; i < OuterRingCount; i++) {
-            any_finalized |= RefreshRing(OuterRings[i], player_position, camera_frustum, CurrentTick, draw_cursor);
+            any_finalized |= RefreshRing(OuterRings[i], i + 1, player_position, camera_frustum, CurrentTick, draw_cursor);
         }
 
         if (any_finalized) { GTransferPipe.SubmitReleaseAndWrite(); }
@@ -727,6 +737,17 @@ namespace TerrainManager {
         }
 
         return std::clamp(base + hills + mountains, 0.0f, 1.0f);
+    }
+
+    bool IsWorldComplete() {
+        auto ring_complete = [](const Stats& stats) {
+            return stats.GenerationsInFlight == 0 && stats.MissingLastFrame == 0;
+        };
+        if (!ring_complete(Ring0.DebugStats)) { return false; }
+        for (const OuterRingState& ring : OuterRings) {
+            if (!ring_complete(ring.DebugStats)) { return false; }
+        }
+        return true;
     }
 
     f32 SampleSurfaceHeight(f32 world_x, f32 world_z) {

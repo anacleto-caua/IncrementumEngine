@@ -16,4 +16,7 @@ namespace Platform {
     void Shutdown();
 
     bool ShouldClose();
+
+    // Makes ShouldClose() return true from the next check on, same as the user closing the window.
+    void RequestClose();
 }

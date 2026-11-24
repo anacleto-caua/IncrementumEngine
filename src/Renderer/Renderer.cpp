@@ -116,6 +116,7 @@ IncResult Renderer::Init() {
 
     // Other essential rendering things
     INC_CHECK(InitGlobalDescriptors(), "global descriptors creation failed");
+    INC_CHECK(InitTimestamps(), "timestamp query pool creation failed");
 
     // Render passes
     for (Pass* pass : Passes) {
@@ -138,6 +139,8 @@ void Renderer::Destroy() {
     }
 
     //ComputeTestDemo::Destroy();
+
+    if (TimestampPool) { vkDestroyQueryPool(VkVault::Device, TimestampPool, nullptr); }
 
     for (auto it = Passes.rbegin(); it != Passes.rend(); ++it) { (*it)->Destroy(); }
     DestroyGlobalDescriptors();
@@ -162,6 +165,9 @@ void Renderer::Frame() {
     // resetting its command pool - resetting first would reset buffers that might still be pending.
     FrameSemaphore.Wait(target_frame.LastSignaledValue);
 
+    // That slot's GPU work is retired now, so its timestamps are final - reading them never blocks.
+    ReadTimestamps(FrameContext.FrameInFlightIndex);
+
     target_frame.FrameBlock.Reset();
     FrameContext.DrawCommand = target_frame.FrameBlock.GetNext();
 
@@ -182,6 +188,14 @@ void Renderer::Frame() {
     // reset the whole pool (and the pool was never created with RESET_COMMAND_BUFFER_BIT,
     // so resetting this one buffer individually would be invalid anyway).
     LeanVk::BeginCommand(FrameContext.DrawCommand);
+
+    if (TimestampPool) {
+        vkCmdResetQueryPool(
+            FrameContext.DrawCommand, TimestampPool,
+            FrameContext.FrameInFlightIndex * TimestampsPerFrame, TimestampsPerFrame
+        );
+    }
+    WriteTimestamp(0);
 
     // Frame sensible transfers, will be completed before the begin of the drawing phase
     {
@@ -284,6 +298,7 @@ void Renderer::Frame() {
         );
     }
 
+    WriteTimestamp(1);
     vkCmdBeginRendering(FrameContext.DrawCommand, &SceneRenderingInfo);
     vkCmdSetViewport(FrameContext.DrawCommand, 0, 1, &Viewport);
     vkCmdSetScissor(FrameContext.DrawCommand, 0, 1, &Scissor);
@@ -303,7 +318,10 @@ void Renderer::Frame() {
     // Actual frame begins
 
     DebugPanel::DrawToolbar();
-    for (Pass* pass : ScenePasses) { pass->Render(); }
+    for (u32 i = 0; i < ScenePasses.size(); i++) {
+        ScenePasses[i]->Render();
+        WriteTimestamp(2 + i);
+    }
 
     vkCmdEndRendering(FrameContext.DrawCommand);
 
@@ -355,12 +373,18 @@ void Renderer::Frame() {
         );
     }
 
+    const u32 overlay_base = 2 + static_cast<u32>(ScenePasses.size());
+    WriteTimestamp(overlay_base);
+
     OverlayColorAttachment.imageView = SwapchainImages[FrameContext.ImageViewIndex].ImageView;
     vkCmdBeginRendering(FrameContext.DrawCommand, &OverlayRenderingInfo);
     vkCmdSetViewport(FrameContext.DrawCommand, 0, 1, &Viewport);
     vkCmdSetScissor(FrameContext.DrawCommand, 0, 1, &Scissor);
 
-    for (Pass* pass : OverlayPasses) { pass->Render(); }
+    for (u32 i = 0; i < OverlayPasses.size(); i++) {
+        OverlayPasses[i]->Render();
+        WriteTimestamp(overlay_base + 1 + i);
+    }
 
     // Actual frame ends
 
@@ -393,6 +417,7 @@ void Renderer::Frame() {
         &presenting_barrier
     );
 
+    WriteTimestamp(TimestampsPerFrame - 1);
     LeanVk::EndCommand(FrameContext.DrawCommand);
 
     // Reclaim any command buffer pools whose prior work has actually finished on the GPU
@@ -439,6 +464,89 @@ void Renderer::Frame() {
 
     FrameContext.FrameInFlightIndex =
         (FrameContext.FrameInFlightIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+
+IncResult Renderer::InitTimestamps() {
+    TimestampsPerFrame = 4 + static_cast<u32>(ScenePasses.size() + OverlayPasses.size());
+    GpuTimings.ScenePassMs.assign(ScenePasses.size(), 0.0f);
+    GpuTimings.OverlayPassMs.assign(OverlayPasses.size(), 0.0f);
+    TimestampScratch.resize(TimestampsPerFrame);
+
+    VkPhysicalDeviceProperties properties;
+    vkGetPhysicalDeviceProperties(VkVault::PhysicalDevice, &properties);
+
+    u32 family_count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(VkVault::PhysicalDevice, &family_count, nullptr);
+    std::vector<VkQueueFamilyProperties> families(family_count);
+    vkGetPhysicalDeviceQueueFamilyProperties(VkVault::PhysicalDevice, &family_count, families.data());
+    u32 valid_bits = families[VkVault::Queues[QueueRole::Graphics].FamilyIndex].timestampValidBits;
+
+    // No timestamp support isn't an error - timings just stay unavailable.
+    if (valid_bits == 0 || properties.limits.timestampPeriod <= 0.0f) {
+        analog::warn("graphics queue has no timestamp support, GPU pass timings disabled");
+        return IncResult::SUCCESS;
+    }
+
+    TimestampPeriodNs = properties.limits.timestampPeriod;
+    TimestampMask = valid_bits >= 64 ? UINT64_MAX : ((1ull << valid_bits) - 1);
+
+    VkQueryPoolCreateInfo pool_info = {
+        .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+        .pNext = nullptr,
+        .flags = 0,
+        .queryType = VK_QUERY_TYPE_TIMESTAMP,
+        .queryCount = TimestampsPerFrame * MAX_FRAMES_IN_FLIGHT,
+        .pipelineStatistics = 0
+    };
+    VK_CHECK(vkCreateQueryPool(VkVault::Device, &pool_info, nullptr, &TimestampPool), "couldn't create timestamp query pool");
+
+    GpuTimings.Available = true;
+    return IncResult::SUCCESS;
+}
+
+void Renderer::WriteTimestamp(u32 index_in_frame) {
+    if (!TimestampPool) { return; }
+    // ALL_COMMANDS: the timestamp lands once everything recorded before it has finished.
+    vkCmdWriteTimestamp2(
+        FrameContext.DrawCommand,
+        VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+        TimestampPool,
+        FrameContext.FrameInFlightIndex * TimestampsPerFrame + index_in_frame
+    );
+}
+
+void Renderer::ReadTimestamps(u32 frame_in_flight_index) {
+    if (!TimestampsPending[frame_in_flight_index]) { return; }
+    TimestampsPending[frame_in_flight_index] = false;
+
+    // No WAIT_BIT: the caller already waited on this slot's frame semaphore, so the results are
+    // final. VK_NOT_READY would mean something unexpected - that frame's sample is just skipped.
+    VkResult result = vkGetQueryPoolResults(
+        VkVault::Device, TimestampPool,
+        frame_in_flight_index * TimestampsPerFrame, TimestampsPerFrame,
+        TimestampScratch.size() * sizeof(u64), TimestampScratch.data(), sizeof(u64),
+        VK_QUERY_RESULT_64_BIT
+    );
+    if (result != VK_SUCCESS) { return; }
+
+    auto delta_ms = [&](u32 from, u32 to) {
+        u64 ticks = (TimestampScratch[to] - TimestampScratch[from]) & TimestampMask;
+        return static_cast<f32>(static_cast<f64>(ticks) * static_cast<f64>(TimestampPeriodNs) / 1.0e6);
+    };
+
+    u32 scene_count = static_cast<u32>(ScenePasses.size());
+    u32 overlay_base = 2 + scene_count;
+
+    GpuTimings.FrameMs = delta_ms(0, TimestampsPerFrame - 1);
+    GpuTimings.SetupMs = delta_ms(0, 1);
+    for (u32 i = 0; i < scene_count; i++) {
+        GpuTimings.ScenePassMs[i] = delta_ms(1 + i, 2 + i);
+    }
+    GpuTimings.ResolveMs = delta_ms(overlay_base - 1, overlay_base);
+    for (u32 i = 0; i < OverlayPasses.size(); i++) {
+        GpuTimings.OverlayPassMs[i] = delta_ms(overlay_base + i, overlay_base + 1 + i);
+    }
+    GpuTimings.FrameSerial++;
 }
 
 void Renderer::Resize(i32 width, i32 height) {

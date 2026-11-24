@@ -22,7 +22,7 @@ IncResult Engine::Init(Camera& camera) {
 
     FileIO::Initialize();
 
-    TaskScheduler::Create();
+    TaskScheduler::Create(Config.Workers);
 
     // Renderer
     INC_CHECK(
@@ -48,7 +48,9 @@ void Engine::Frame() {
     // it, FlyByCamera::Update() and the ImGui overlay after it). Sleeping at the end of this
     // function instead would only pace Platform::Update() + Renderer.Frame(), leaving that game
     // work as unpaced time added on top of the target and making the loop consistently overshoot.
-    Timer.Sleep();
+    if (!Config.Uncapped) {
+        Timer.Sleep();
+    }
 
     CurrentFrame.DeltaTime = Timer.Tick();
 

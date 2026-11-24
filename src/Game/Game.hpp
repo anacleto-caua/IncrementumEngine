@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Engine.hpp"
+#include "Game/Benchmark/Benchmark.hpp"
 
 namespace Game {
     // Owned, not an independent global - completes the same ownership chain as Engine owning
@@ -10,7 +11,7 @@ namespace Game {
     // type staying carefully idempotent.
     inline Engine Engine;
 
-    IncResult Create();
+    IncResult Create(const Benchmark::BenchConfig& bench_config);
     void Destroy();
 
     void Run();
